@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+*.elf
+*.bin
+*.img
+*.o
+*.s
+
+# Persistence files
+persist.bin
+flash0.img
+
+# Temporary files
+typescript.txt
+typescript
+commands.txt
+serial.log
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
