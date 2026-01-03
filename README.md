@@ -111,7 +111,7 @@ Exception vectors and GIC driver code exist but are not activated. The system cu
 ```
 aeos/
 ├── src/
-│   ├── boot/          # Bootstrap assembly (EL2→EL1 transition)
+│   ├── boot/          # Bootstrap assembly (EL2 => EL1 transition)
 │   ├── kernel/        # Core kernel (main, kprintf, shell)
 │   ├── drivers/       # Hardware drivers (UART, DTB, graphics)
 │   ├── mm/            # Memory management (PMM, heap)
@@ -126,6 +126,12 @@ aeos/
 ├── Makefile           # Build system
 └── linker.ld          # Linker script
 ```
+
+## Documentation
+
+Detailed implementation documentation is available in the `docs/` directory. Each section covers a specific kernel subsystem with code walkthroughs and API references.
+
+See `docs/README.md` for the complete documentation index.
 
 ## Development Status
 
