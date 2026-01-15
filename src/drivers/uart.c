@@ -115,6 +115,16 @@ char uart_getc(void)
 }
 
 /**
+ * Check if data is available to read from the UART
+ * Non-blocking check of the receive FIFO status
+ */
+bool uart_data_available(void)
+{
+    /* Return true if receive FIFO is not empty */
+    return (MMIO_READ(UART_REG(UART_FR)) & UART_FR_RXFE) == 0;
+}
+
+/**
  * Write a buffer of data to the UART
  * Returns the number of bytes written (always equals len for polling mode)
  */
