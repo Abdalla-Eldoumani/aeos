@@ -1,6 +1,6 @@
 # Interactive Shell - Implementation Details
 
-## Shell Initialization and Main Loop
+## Shell Main Loop
 
 ### shell_run()
 
@@ -14,7 +14,7 @@ void shell_run(void)
     print_banner();
 
     while (1) {
-        kprintf(PROMPT);                /* "AEOS> " */
+        kprintf(ANSI_GREEN "AEOS" ANSI_RESET "> ");
         shell_readline(line, SHELL_MAX_LINE);
         shell_parse(line, &argc, argv);
         if (argc > 0) {
@@ -24,16 +24,14 @@ void shell_run(void)
 }
 ```
 
-**Infinite Loop**: Never returns. Shell is the main user interface.
+The shell runs in an infinite loop, reading commands and executing them.
 
-**Stack Usage**: `line` buffer (256 bytes) + `argv` array (128 bytes) = ~400 bytes per iteration.
-
-## Line Input with Backspace
+## Line Input
 
 ### shell_readline()
 
 ```c
-int shell_readline(char *buf, int len)
+int shell_readline(char *buf, int maxlen)
 {
     int pos = 0;
     char c;
@@ -42,36 +40,68 @@ int shell_readline(char *buf, int len)
         c = uart_getc();  /* Blocking read */
 
         if (c == '\r' || c == '\n') {
-            /* End of line */
             uart_putc('\n');
             buf[pos] = '\0';
+            if (pos > 0) {
+                history_add(buf);
+            }
             return pos;
         } else if (c == '\b' || c == 0x7F) {
-            /* Backspace or Delete */
+            /* Backspace */
             if (pos > 0) {
                 pos--;
-                /* Erase character: back, space, back */
                 uart_putc('\b');
                 uart_putc(' ');
                 uart_putc('\b');
             }
         } else if (c >= 32 && c < 127) {
-            /* Printable ASCII */
-            if (pos < len - 1) {
+            /* Printable character */
+            if (pos < maxlen - 1) {
                 buf[pos++] = c;
-                uart_putc(c);  /* Echo character */
+                uart_putc(c);
             }
         }
-        /* Ignore other control characters */
     }
 }
 ```
 
-**Blocking**: Waits for each character. CPU spins in UART polling loop.
+Characters are echoed as typed. Both backspace (0x08) and DEL (0x7F) are handled.
 
-**Echo**: Characters are echoed as typed for visual feedback.
+## Command History
 
-**Backspace Handling**: Both `\b` (0x08) and DEL (0x7F) treated as backspace.
+```c
+#define HISTORY_SIZE 32
+#define HISTORY_LINE_LEN 256
+
+static char history[HISTORY_SIZE][HISTORY_LINE_LEN];
+static int history_count = 0;
+static int history_start = 0;
+
+static void history_add(const char *cmd)
+{
+    /* Don't add empty commands */
+    if (cmd[0] == '\0') return;
+
+    /* Don't add duplicates of last command */
+    if (history_count > 0) {
+        int last_idx = (history_start + history_count - 1) % HISTORY_SIZE;
+        if (strcmp(history[last_idx], cmd) == 0) return;
+    }
+
+    /* Add to circular buffer */
+    int idx = (history_start + history_count) % HISTORY_SIZE;
+    strncpy(history[idx], cmd, HISTORY_LINE_LEN - 1);
+    history[idx][HISTORY_LINE_LEN - 1] = '\0';
+
+    if (history_count < HISTORY_SIZE) {
+        history_count++;
+    } else {
+        history_start = (history_start + 1) % HISTORY_SIZE;
+    }
+}
+```
+
+History is stored in a circular buffer. The `history` command displays all stored commands.
 
 ## Command Parsing
 
@@ -86,27 +116,19 @@ int shell_parse(char *line, int *argc, char **argv)
     *argc = 0;
 
     /* Skip leading whitespace */
-    while (*p == ' ' || *p == '\t') {
-        p++;
-    }
+    while (*p == ' ' || *p == '\t') p++;
 
     /* Parse arguments */
     while (*p != '\0' && i < SHELL_MAX_ARGS) {
-        /* Start of argument */
         argv[i++] = p;
 
         /* Find end of argument */
-        while (*p != '\0' && *p != ' ' && *p != '\t') {
-            p++;
-        }
+        while (*p != '\0' && *p != ' ' && *p != '\t') p++;
 
         /* Null-terminate argument */
         if (*p != '\0') {
             *p++ = '\0';
-            /* Skip whitespace */
-            while (*p == ' ' || *p == '\t') {
-                p++;
-            }
+            while (*p == ' ' || *p == '\t') p++;
         }
     }
 
@@ -115,19 +137,7 @@ int shell_parse(char *line, int *argc, char **argv)
 }
 ```
 
-**In-Place Modification**: Modifies `line` buffer by inserting null terminators.
-
-**argv Pointers**: Point into `line` buffer. No separate allocations.
-
-**Example**:
-```
-Input:  "ls  -la  /home"
-After:  "ls\0-la\0/home\0"
-argv[0] => "ls"
-argv[1] => "-la"
-argv[2] => "/home"
-argc = 3
-```
+The parser modifies the input buffer in place, inserting null terminators between arguments.
 
 ## Command Execution
 
@@ -136,9 +146,7 @@ argc = 3
 ```c
 int shell_execute(int argc, char **argv)
 {
-    if (argc == 0) {
-        return 0;
-    }
+    if (argc == 0) return 0;
 
     /* Look for built-in command */
     for (int i = 0; builtin_commands[i].name != NULL; i++) {
@@ -148,15 +156,13 @@ int shell_execute(int argc, char **argv)
     }
 
     /* Command not found */
-    kprintf("%s: command not found\n", argv[0]);
+    kprintf(ANSI_RED "%s: command not found" ANSI_RESET "\n", argv[0]);
     kprintf("Type 'help' for available commands\n");
     return -1;
 }
 ```
 
-**Linear Search**: O(n) lookup through command table. Fine for small number of commands.
-
-**No External Programs**: Only built-in commands supported. No exec().
+Commands are looked up in a table of function pointers.
 
 ## Path Resolution
 
@@ -167,326 +173,235 @@ static const char *resolve_path(const char *path)
 {
     static char resolved[512];
 
-    /* Empty or NULL => current directory */
-    if (path == NULL || path[0] == '\0') {
-        return cwd;
-    }
-
-    /* Absolute path */
-    if (path[0] == '/') {
-        return path;
-    }
+    if (path == NULL || path[0] == '\0') return cwd;
+    if (path[0] == '/') return path;
 
     /* Relative path - combine with cwd */
     if (strcmp(cwd, "/") == 0) {
-        /* Root directory - don't add extra slash */
-        resolved[0] = '/';
-        resolved[1] = '\0';
-        strncat(resolved, path, sizeof(resolved) - 2);
+        snprintf(resolved, sizeof(resolved), "/%s", path);
     } else {
-        /* Non-root directory */
-        strncpy(resolved, cwd, sizeof(resolved) - 1);
-        resolved[sizeof(resolved) - 1] = '\0';
-
-        size_t len = strlen(resolved);
-        if (len < sizeof(resolved) - 2) {
-            resolved[len] = '/';
-            resolved[len + 1] = '\0';
-            strncat(resolved, path, sizeof(resolved) - len - 2);
-        }
+        snprintf(resolved, sizeof(resolved), "%s/%s", cwd, path);
     }
 
     return resolved;
 }
 ```
 
-**Static Buffer**: Returns pointer to static storage. Not thread-safe.
+Converts relative paths to absolute paths using the current working directory.
 
-**Buffer Overflow Protection**: Uses `strncpy` and `strncat` with size limits.
+## New Commands
 
-## Individual Command Implementations
-
-### cmd_ls()
+### cmd_write()
 
 ```c
-static int cmd_ls(int argc, char **argv)
+static int cmd_write(int argc, char **argv)
 {
-    const char *path = (argc > 1) ? resolve_path(argv[1]) : cwd;
-
-    /* Open directory */
-    int fd = vfs_open(path, O_RDONLY, 0);
-    if (fd < 0) {
-        kprintf("ls: cannot access '%s'\n", path);
-        return -1;
-    }
-
-    kprintf("\nListing: %s\n", path);
-    kprintf("------------------------------------------------------\n");
-
-    /* Read directory entries */
-    vfs_dirent_t entry;
-    while (vfs_readdir(fd, &entry) == 0) {
-        if (entry.type == VFS_FILE_DIRECTORY) {
-            kprintf("  [DIR]  %s/\n", entry.name);
-        } else {
-            kprintf("  [FILE] %s (%u bytes)\n",
-                    entry.name, (uint32_t)entry.size);
-        }
-    }
-
-    kprintf("------------------------------------------------------\n\n");
-
-    vfs_close(fd);
-    return 0;
-}
-```
-
-**Entry Format**: Type indicator + name (+ size for files).
-
-**Directory Slash**: Appends `/` to directory names for clarity.
-
-### cmd_cd()
-
-```c
-static int cmd_cd(int argc, char **argv)
-{
-    const char *path = (argc > 1) ? argv[1] : "/";
-
-    /* Handle ".." (parent directory) */
-    if (strcmp(path, "..") == 0) {
-        size_t len = strlen(cwd);
-        if (len > 1) {
-            /* Find last '/' */
-            char *last_slash = NULL;
-            for (size_t i = len - 1; i > 0; i--) {
-                if (cwd[i] == '/') {
-                    last_slash = &cwd[i];
-                    break;
-                }
-            }
-
-            if (last_slash == cwd) {
-                /* Parent is root */
-                strcpy(cwd, "/");
-            } else if (last_slash != NULL) {
-                /* Truncate at last slash */
-                *last_slash = '\0';
-            } else {
-                /* No slash found */
-                strcpy(cwd, "/");
-            }
-        }
-        return 0;
-    }
-
-    /* Handle "." (current directory) */
-    if (strcmp(path, ".") == 0) {
-        return 0;
-    }
-
-    /* Build absolute path */
-    char new_cwd[256];
-    if (path[0] == '/') {
-        strncpy(new_cwd, path, sizeof(new_cwd) - 1);
-    } else {
-        /* Relative path */
-        const char *resolved = resolve_path(path);
-        strncpy(new_cwd, resolved, sizeof(new_cwd) - 1);
-    }
-    new_cwd[sizeof(new_cwd) - 1] = '\0';
-
-    /* Verify directory exists */
-    int fd = vfs_open(new_cwd, O_RDONLY, 0);
-    if (fd < 0) {
-        kprintf("cd: %s: No such file or directory\n", path);
-        return -1;
-    }
-    vfs_close(fd);
-
-    /* Update cwd */
-    strncpy(cwd, new_cwd, sizeof(cwd) - 1);
-    cwd[sizeof(cwd) - 1] = '\0';
-
-    /* Remove trailing slash (except for root) */
-    size_t len = strlen(cwd);
-    if (len > 1 && cwd[len - 1] == '/') {
-        cwd[len - 1] = '\0';
-    }
-
-    return 0;
-}
-```
-
-**Parent Directory Algorithm**:
-1. Find last `/` in current path
-2. Truncate path at that position
-3. Special case: if last `/` is at index 0, path becomes "/"
-
-### cmd_cat()
-
-```c
-static int cmd_cat(int argc, char **argv)
-{
-    if (argc < 2) {
-        kprintf("Usage: cat <filename>\n");
+    if (argc < 3) {
+        kprintf("Usage: write <filename> <text...>\n");
         return -1;
     }
 
     const char *path = resolve_path(argv[1]);
-
-    /* Open file */
-    int fd = vfs_open(path, O_RDONLY, 0);
+    int fd = vfs_open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) {
-        kprintf("cat: %s: No such file or directory\n", argv[1]);
+        kprintf(ANSI_RED "write: cannot open '%s'" ANSI_RESET "\n", argv[1]);
         return -1;
     }
 
-    /* Read and print file contents */
-    char buffer[256];
-    ssize_t bytes_read;
-
-    kprintf("\n");
-    while (1) {
-        bytes_read = vfs_read(fd, buffer, sizeof(buffer) - 1);
-        if (bytes_read <= 0) {
-            break;
-        }
-
-        buffer[bytes_read] = '\0';  /* Null-terminate */
-        kprintf("%s", buffer);
+    /* Write all arguments as text */
+    for (int i = 2; i < argc; i++) {
+        vfs_write(fd, argv[i], strlen(argv[i]));
+        if (i < argc - 1) vfs_write(fd, " ", 1);
     }
-    kprintf("\n");
+    vfs_write(fd, "\n", 1);
 
     vfs_close(fd);
     return 0;
 }
 ```
 
-**Chunk Reading**: Reads file in 256-byte chunks for efficiency.
-
-**Null Termination**: Adds null terminator for kprintf().
-
-### cmd_cp()
+### cmd_grep()
 
 ```c
-static int cmd_cp(int argc, char **argv)
+static int cmd_grep(int argc, char **argv)
 {
     if (argc < 3) {
-        kprintf("Usage: cp <source> <destination>\n");
+        kprintf("Usage: grep <pattern> <filename>\n");
         return -1;
     }
 
-    const char *src_path = resolve_path(argv[1]);
-    const char *dst_path = resolve_path(argv[2]);
+    const char *pattern = argv[1];
 
-    /* Open source for reading */
-    int src_fd = vfs_open(src_path, O_RDONLY, 0);
-    if (src_fd < 0) {
-        kprintf("cp: cannot open '%s'\n", argv[1]);
-        return -1;
-    }
-
-    /* Create destination for writing */
-    int dst_fd = vfs_open(dst_path, O_CREAT | O_WRONLY, 0644);
-    if (dst_fd < 0) {
-        kprintf("cp: cannot create '%s'\n", argv[2]);
-        vfs_close(src_fd);
-        return -1;
-    }
-
-    /* Copy data */
-    char buffer[512];
-    ssize_t bytes_read, bytes_written;
-
-    while (1) {
-        bytes_read = vfs_read(src_fd, buffer, sizeof(buffer));
-        if (bytes_read <= 0) {
-            break;
-        }
-
-        bytes_written = vfs_write(dst_fd, buffer, bytes_read);
-        if (bytes_written != bytes_read) {
-            kprintf("cp: write error\n");
-            vfs_close(src_fd);
-            vfs_close(dst_fd);
-            return -1;
+    /* Strip leading/trailing quotes from pattern */
+    int plen = strlen(pattern);
+    if (plen >= 2) {
+        char first = pattern[0];
+        char last = pattern[plen - 1];
+        if ((first == '"' && last == '"') ||
+            (first == '\'' && last == '\'')) {
+            static char unquoted[256];
+            strncpy(unquoted, pattern + 1, plen - 2);
+            unquoted[plen - 2] = '\0';
+            pattern = unquoted;
         }
     }
 
-    kprintf("Copied: %s -> %s\n", argv[1], argv[2]);
-
-    vfs_close(src_fd);
-    vfs_close(dst_fd);
-    return 0;
+    /* Open file and search line by line */
+    /* ... */
 }
 ```
 
-**Buffer Size**: 512 bytes balances stack usage and copy efficiency.
+The grep command strips quotes from patterns so `grep "test" file.txt` works correctly.
 
-**Error Checking**: Verifies write succeeded before continuing.
-
-### cmd_rm()
+### cmd_hexdump()
 
 ```c
-static int cmd_rm(int argc, char **argv)
+static int cmd_hexdump(int argc, char **argv)
 {
-    int arg_idx = 1;
-    int recursive = 0;
-    int force = 0;
+    /* Read file in chunks */
+    /* Display: offset, hex bytes, ASCII representation */
+    /* Example output:
+       00000000  48 65 6c 6c 6f 20 57 6f  72 6c 64 0a              |Hello World.|
+    */
+}
+```
 
-    /* Parse flags */
-    while (arg_idx < argc && argv[arg_idx][0] == '-') {
-        char *flag = argv[arg_idx] + 1;  /* Skip '-' */
+### cmd_time()
 
-        while (*flag != '\0') {
-            if (*flag == 'r') {
-                recursive = 1;
-            } else if (*flag == 'f') {
-                force = 1;
-            } else {
-                kprintf("rm: invalid option -- '%c'\n", *flag);
-                return -1;
-            }
-            flag++;
-        }
-
-        arg_idx++;
-    }
-
-    if (arg_idx >= argc) {
-        kprintf("Usage: rm [-rf] <file|directory>\n");
+```c
+static int cmd_time(int argc, char **argv)
+{
+    if (argc < 2) {
+        kprintf("Usage: time <command> [args...]\n");
         return -1;
     }
 
-    const char *target = resolve_path(argv[arg_idx]);
+    uint64_t start = timer_get_ticks();
 
-    /* Try unlink (file) first */
-    int ret = vfs_unlink(target);
-    if (ret < 0) {
-        /* If unlink failed, try rmdir if recursive */
-        if (recursive) {
-            ret = vfs_rmdir(target);
-            if (ret < 0 && !force) {
-                kprintf("rm: cannot remove '%s'\n", target);
-                return -1;
-            }
-        } else if (!force) {
-            kprintf("rm: cannot remove '%s': Is a directory (use -r)\n", target);
-            return -1;
-        }
-    }
+    /* Execute the command */
+    shell_execute(argc - 1, &argv[1]);
 
-    if (ret == 0) {
-        kprintf("Removed: %s\n", target);
-    }
+    uint64_t end = timer_get_ticks();
+    uint64_t elapsed_ms = ((end - start) * 1000) / TIMER_FREQ_HZ;
 
+    kprintf("\nTime: %u ms\n", (uint32_t)elapsed_ms);
     return 0;
 }
 ```
 
-**Flag Parsing**: Supports combined flags like `-rf`.
+## Colorized Output
 
-**Try File First**: Attempts `unlink()`, falls back to `rmdir()`.
+```c
+#define ANSI_RESET     "\033[0m"
+#define ANSI_RED       "\033[31m"
+#define ANSI_GREEN     "\033[32m"
+#define ANSI_YELLOW    "\033[33m"
+#define ANSI_BLUE      "\033[34m"
+#define ANSI_CYAN      "\033[36m"
+```
+
+Colors are applied using ANSI escape codes:
+- Green: Prompt, success messages
+- Red: Error messages
+- Blue: Directory names in `ls`
+- Cyan: Headers, line numbers in `grep`
+
+## Text Editor Implementation
+
+### Editor State
+
+```c
+typedef struct {
+    char **lines;           /* Array of line pointers */
+    int num_lines;          /* Number of lines */
+    int cursor_row;         /* Current row (0-based) */
+    int cursor_col;         /* Current column (0-based) */
+    int scroll_offset;      /* First visible line */
+    editor_mode_t mode;     /* NORMAL, INSERT, or EX */
+    char filename[256];     /* Current file */
+    bool modified;          /* Has unsaved changes */
+    char ex_buffer[64];     /* EX mode command buffer */
+    int ex_pos;             /* Position in EX buffer */
+} editor_state_t;
+```
+
+### Main Editor Loop
+
+```c
+void editor_open(const char *filename)
+{
+    editor_state_t editor;
+    editor_init(&editor, filename);
+    editor_load_file(&editor);
+
+    while (1) {
+        editor_render(&editor);
+        int key = editor_read_key();
+
+        switch (editor.mode) {
+            case MODE_NORMAL:
+                if (!editor_handle_normal(&editor, key)) return;
+                break;
+            case MODE_INSERT:
+                editor_handle_insert(&editor, key);
+                break;
+            case MODE_EX:
+                if (!editor_handle_ex(&editor, key)) return;
+                break;
+        }
+    }
+}
+```
+
+### Key Handling in Normal Mode
+
+```c
+static bool editor_handle_normal(editor_state_t *e, int key)
+{
+    switch (key) {
+        case 'h': case KEY_LEFT:  editor_move_left(e);  break;
+        case 'j': case KEY_DOWN:  editor_move_down(e);  break;
+        case 'k': case KEY_UP:    editor_move_up(e);    break;
+        case 'l': case KEY_RIGHT: editor_move_right(e); break;
+        case 'i': e->mode = MODE_INSERT; break;
+        case 'x': editor_delete_char(e); break;
+        case ':': e->mode = MODE_EX; e->ex_pos = 0; break;
+        /* ... */
+    }
+    return true;
+}
+```
+
+### Screen Rendering
+
+```c
+static void editor_render(editor_state_t *e)
+{
+    /* Clear screen */
+    kprintf("\033[2J\033[H");
+
+    /* Draw visible lines with line numbers */
+    for (int i = 0; i < EDITOR_ROWS; i++) {
+        int line_num = e->scroll_offset + i;
+        if (line_num < e->num_lines) {
+            kprintf("%4d | %s\n", line_num + 1, e->lines[line_num]);
+        } else {
+            kprintf("   ~ |\n");
+        }
+    }
+
+    /* Draw status bar */
+    kprintf("-- %s -- %s %s\n",
+            mode_names[e->mode],
+            e->filename,
+            e->modified ? "[+]" : "");
+
+    /* Position cursor */
+    int screen_row = e->cursor_row - e->scroll_offset + 1;
+    int screen_col = e->cursor_col + 7;  /* Account for line number width */
+    kprintf("\033[%d;%dH", screen_row, screen_col);
+}
+```
 
 ## Debugging
 
@@ -495,57 +410,21 @@ static int cmd_rm(int argc, char **argv)
 ```c
 /* Add to shell_execute() */
 kprintf("[DEBUG] Executing: %s (argc=%d)\n", argv[0], argc);
-```
-
-### Dump argv
-
-```c
-/* Add to shell_execute() */
 for (int i = 0; i < argc; i++) {
     kprintf("  argv[%d] = '%s'\n", i, argv[i]);
 }
 ```
 
-### Check CWD
+### Check History State
 
 ```c
-/* Add to cmd_cd() */
-kprintf("[DEBUG] cwd before: %s\n", cwd);
-/* ... change directory ... */
-kprintf("[DEBUG] cwd after: %s\n", cwd);
+/* View internal history state */
+kprintf("History: count=%d start=%d\n", history_count, history_start);
 ```
 
-## Performance Considerations
+## Performance Notes
 
-### Blocking I/O
-`shell_readline()` blocks on `uart_getc()`. No async I/O or multitasking during input.
-
-### String Operations
-Path resolution and parsing use string operations. O(n) where n is path length.
-
-### Command Lookup
-Linear search through command table. O(n) where n is number of commands. Could use hash table but it won't matter much for small n.
-
-## Common Mistakes
-
-### Modifying argv After parse
-```c
-/* Wrong */
-shell_parse(line, &argc, argv);
-strcat(argv[0], "_modified");  /* Modifies line buffer */
-```
-
-### Assuming CWD is Per-Process
-```c
-/* CWD is global, not per-process */
-/* If one process changes it, all processes see the change */
-```
-
-### Buffer Overruns in Path Building
-```c
-/* Dangerous */
-sprintf(path, "%s/%s", cwd, filename);  /* No size check */
-
-/* Safe */
-snprintf(path, sizeof(path), "%s/%s", cwd, filename);
-```
+- Command lookup is O(n) linear search through command table
+- Path resolution uses static buffer (not thread-safe)
+- Editor stores entire file in memory (limited by heap size)
+- History uses fixed-size circular buffer (no dynamic allocation)
