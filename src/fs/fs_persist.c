@@ -11,6 +11,10 @@
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
 #include <aeos/pflash.h>
+#include <aeos/semihosting.h>
+
+/* Default filename for persistent storage on host */
+#define FS_IMAGE_FILENAME "aeos_fs.img"
 
 /* Persistent storage buffer (allocated at fixed address) */
 static char fs_storage[FS_IMAGE_MAX_SIZE] __attribute__((aligned(4096)));
@@ -355,17 +359,25 @@ size_t fs_get_storage_size(void)
 }
 
 /**
- * Save filesystem to disk
- * Saves the fs_storage buffer to disk sectors
+ * Save filesystem to disk via semihosting
+ * Writes filesystem image to host file system
  */
 int fs_save_to_disk(vfs_filesystem_t *fs)
 {
     void *buffer;
     size_t buffer_size;
     ssize_t bytes_saved;
-    int ret;
+    int host_fd;
+    size_t not_written;
 
-    klog_info("Saving filesystem to pflash...");
+    klog_info("Saving filesystem via semihosting...");
+
+    /* Check if semihosting is available */
+    if (!semihost_available()) {
+        klog_warn("Semihosting not available - cannot save to host");
+        klog_info("Start QEMU with: -semihosting-config enable=on,target=native");
+        return -1;
+    }
 
     /* Get storage buffer */
     buffer = fs_get_storage_buffer();
@@ -378,58 +390,97 @@ int fs_save_to_disk(vfs_filesystem_t *fs)
         return -1;
     }
 
-    klog_debug("Writing %d bytes to pflash", (int)bytes_saved);
+    klog_debug("Writing %d bytes to host file '%s'", (int)bytes_saved, FS_IMAGE_FILENAME);
 
-    /* Write to pflash (simple memcpy!) */
-    ret = pflash_write(0, buffer, bytes_saved);
-    if (ret < 0) {
-        klog_error("Failed to write filesystem to pflash");
+    /* Open host file for writing (create/truncate) */
+    host_fd = semihost_open(FS_IMAGE_FILENAME, SEMIHOST_OPEN_WB);
+    if (host_fd < 0) {
+        klog_error("Failed to open host file for writing");
         return -1;
     }
 
-    klog_info("Filesystem saved to pflash successfully (%d bytes)", (int)bytes_saved);
+    /* Write data to host file */
+    not_written = semihost_write(host_fd, buffer, (size_t)bytes_saved);
+    if (not_written != 0) {
+        klog_error("Failed to write to host file (%u bytes not written)", (uint32_t)not_written);
+        semihost_close(host_fd);
+        return -1;
+    }
+
+    /* Close file */
+    semihost_close(host_fd);
+
+    klog_info("Filesystem saved to '%s' (%d bytes)", FS_IMAGE_FILENAME, (int)bytes_saved);
     return 0;
 }
 
 /**
- * Load filesystem from disk
- * Loads from disk sectors into fs_storage buffer, then deserializes
+ * Load filesystem from disk via semihosting
+ * Reads filesystem image from host file system
  */
 int fs_load_from_disk(vfs_filesystem_t *fs)
 {
     void *buffer;
     size_t buffer_size;
     int ret;
-    fs_image_header_t header;
+    int host_fd;
+    ssize_t file_len;
+    size_t not_read;
+    fs_image_header_t *header;
 
-    klog_info("Loading filesystem from pflash...");
+    klog_info("Loading filesystem via semihosting...");
+
+    /* Check if semihosting is available */
+    if (!semihost_available()) {
+        klog_info("Semihosting not available - starting with fresh filesystem");
+        return -1;
+    }
 
     /* Get storage buffer */
     buffer = fs_get_storage_buffer();
     buffer_size = fs_get_storage_size();
 
-    /* Read header from pflash */
-    ret = pflash_read(0, &header, sizeof(header));
-    if (ret < 0) {
-        klog_warn("Failed to read from pflash");
+    /* Try to open host file for reading */
+    host_fd = semihost_open(FS_IMAGE_FILENAME, SEMIHOST_OPEN_RB);
+    if (host_fd < 0) {
+        klog_info("No saved filesystem found on host ('%s')", FS_IMAGE_FILENAME);
         return -1;
     }
 
-    /* Check if there's a valid filesystem */
-    if (header.magic != FS_MAGIC) {
-        klog_info("No valid filesystem found in pflash (magic=0x%x)", header.magic);
+    /* Get file length */
+    file_len = semihost_flen(host_fd);
+    if (file_len <= 0) {
+        klog_warn("Host file is empty or error reading length");
+        semihost_close(host_fd);
         return -1;
     }
 
-    klog_debug("Found filesystem: %u bytes", header.data_size);
-
-    /* Read all data from pflash */
-    size_t total_size = sizeof(header) + header.data_size;
-    ret = pflash_read(0, buffer, total_size);
-    if (ret < 0) {
-        klog_error("Failed to read filesystem from pflash");
+    if ((size_t)file_len > buffer_size) {
+        klog_error("Host file too large (%d bytes, max %u)", (int)file_len, (uint32_t)buffer_size);
+        semihost_close(host_fd);
         return -1;
     }
+
+    klog_debug("Reading %d bytes from host file", (int)file_len);
+
+    /* Read file into buffer */
+    not_read = semihost_read(host_fd, buffer, (size_t)file_len);
+    if (not_read != 0) {
+        klog_error("Failed to read host file (%u bytes not read)", (uint32_t)not_read);
+        semihost_close(host_fd);
+        return -1;
+    }
+
+    semihost_close(host_fd);
+
+    /* Validate header */
+    header = (fs_image_header_t *)buffer;
+    if (header->magic != FS_MAGIC) {
+        klog_warn("Invalid filesystem image (bad magic: 0x%x)", header->magic);
+        return -1;
+    }
+
+    klog_debug("Found filesystem: version %u, %u bytes data", header->version, header->data_size);
 
     /* Load from buffer into filesystem */
     ret = fs_load(fs, buffer, buffer_size);
@@ -438,7 +489,7 @@ int fs_load_from_disk(vfs_filesystem_t *fs)
         return -1;
     }
 
-    klog_info("Filesystem loaded from pflash successfully");
+    klog_info("Filesystem loaded from '%s' successfully", FS_IMAGE_FILENAME);
     return 0;
 }
 
