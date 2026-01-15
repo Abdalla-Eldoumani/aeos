@@ -45,6 +45,13 @@ process_t *schedule(void);
 void yield(void);
 
 /**
+ * Timer tick handler for preemptive scheduling
+ * Called from timer IRQ handler to decrement time slices
+ * and trigger context switches when a process exhausts its quantum
+ */
+void scheduler_tick(void);
+
+/**
  * Start the scheduler
  * Begins executing the first process in the ready queue
  * This function does not return
