@@ -283,6 +283,35 @@ void yield(void)
 }
 
 /**
+ * Timer tick handler for preemptive scheduling
+ * Called from timer IRQ to manage time slices
+ */
+void scheduler_tick(void)
+{
+    /* Don't do anything if scheduler not ready */
+    if (!scheduler.initialized || scheduler.current == NULL) {
+        return;
+    }
+
+    /* Decrement time slice of current process */
+    if (scheduler.current->time_slice > 0) {
+        scheduler.current->time_slice--;
+    }
+
+    /* Track total CPU time */
+    scheduler.current->total_time++;
+
+    /* If time slice expired and there are other ready processes, preempt */
+    if (scheduler.current->time_slice == 0 && scheduler.ready_head != NULL) {
+        /* Reset time slice for next run */
+        scheduler.current->time_slice = 10;  /* 10 ticks = 100ms quantum */
+
+        /* Trigger context switch */
+        yield();
+    }
+}
+
+/**
  * Start the scheduler (first context switch)
  */
 void scheduler_start(void)
