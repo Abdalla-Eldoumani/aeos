@@ -42,12 +42,14 @@ ASM_SOURCES = src/boot/boot.asm \
 C_SOURCES   = src/kernel/main.c \
               src/kernel/kprintf.c \
               src/kernel/shell.c \
+              src/kernel/editor.c \
               src/drivers/uart.c \
               src/drivers/framebuffer.c \
               src/drivers/dtb.c \
               src/drivers/ramfb.c \
               src/drivers/virtio_gpu.c \
               src/drivers/pflash.c \
+              src/drivers/semihosting.c \
               src/mm/mm.c \
               src/mm/pmm.c \
               src/mm/heap.c \
@@ -133,10 +135,17 @@ clean:
 	rm -f $(KERNEL_ELF) $(KERNEL_BIN) $(KERNEL_IMG)
 	@echo "Clean complete"
 
-# Run in QEMU (text mode - default)
+# Run in QEMU (text mode with semihosting for persistence)
 run: all
-	@echo "Starting QEMU (text mode)..."
-	@echo "NOTE: Filesystem persistence not available (QEMU pflash incompatible with -kernel)"
+	@echo "Starting QEMU (text mode with semihosting)..."
+	@echo "Filesystem will be saved to 'aeos_fs.img' on host when you run 'save' command"
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+		-nographic -kernel $(KERNEL_ELF) \
+		-semihosting-config enable=on,target=native
+
+# Run without semihosting (no persistence)
+run-nopersist: all
+	@echo "Starting QEMU (text mode, no persistence)..."
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
 		-nographic -kernel $(KERNEL_ELF)
 
@@ -239,10 +248,10 @@ help:
 	@echo "  dump     - Disassemble kernel to kernel.asm"
 	@echo ""
 	@echo "Run Targets (Text Mode):"
-	@echo "  run      - Text mode with ASCII art preview"
-	@echo "  run-clean - Fresh filesystem (no saved state)"
-	@echo "  test     - Run tests (same as 'run')"
-	@echo "  debug    - Run with GDB server (text mode)"
+	@echo "  run         - Text mode with semihosting (saves to aeos_fs.img)"
+	@echo "  run-nopersist - Text mode without persistence"
+	@echo "  run-clean   - Fresh filesystem (no saved state)"
+	@echo "  debug       - Run with GDB server (text mode)"
 	@echo ""
 	@echo "Run Targets (Graphical Modes):"
 	@echo "  run-ramfb    - Simple framebuffer in SDL window"
@@ -251,11 +260,15 @@ help:
 	@echo "  run-all-gpu  - Both ramfb and virtio-gpu"
 	@echo "  run-gui      - Alias for run-ramfb"
 	@echo ""
+	@echo "Filesystem Persistence:"
+	@echo "  The 'save' command saves the filesystem to 'aeos_fs.img' on host"
+	@echo "  Next boot will automatically load 'aeos_fs.img' if it exists"
+	@echo ""
 	@echo "Configuration:"
 	@echo "  CROSS_COMPILE - Toolchain prefix (default: aarch64-linux-gnu-)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make run          # ASCII art in terminal"
+	@echo "  make run          # Text mode with persistence"
 	@echo "  make run-ramfb    # Graphical window (easiest)"
 	@echo "  make run-vnc      # VNC server on port 5900"
 
