@@ -9,6 +9,7 @@
 #include <aeos/gic.h>
 #include <aeos/kprintf.h>
 #include <aeos/types.h>
+#include <aeos/scheduler.h>
 
 /* Timer state */
 static struct {
@@ -30,40 +31,33 @@ static inline uint32_t read_cntfrq(void)
     return val;
 }
 
-/* Read current counter value */
-static inline uint64_t read_cntpct(void)
+/* Read current virtual counter value */
+static inline uint64_t read_cntvct(void)
 {
     uint64_t val;
-    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(val));
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
     return val;
 }
 
-/* Write timer compare value */
-static inline void write_cntp_cval(uint64_t val)
+/* Write virtual timer interval value */
+static inline void write_cntv_tval(int32_t val)
 {
-    __asm__ volatile("msr cntp_cval_el0, %0" : : "r"(val));
+    __asm__ volatile("msr cntv_tval_el0, %0" : : "r"(val));
     __asm__ volatile("isb");
 }
 
-/* Write timer interval value */
-static inline void write_cntp_tval(uint32_t val)
-{
-    __asm__ volatile("msr cntp_tval_el0, %0" : : "r"(val));
-    __asm__ volatile("isb");
-}
-
-/* Read timer control register */
-static inline uint32_t read_cntp_ctl(void)
+/* Read virtual timer control register */
+static inline uint32_t read_cntv_ctl(void)
 {
     uint32_t val;
-    __asm__ volatile("mrs %0, cntp_ctl_el0" : "=r"(val));
+    __asm__ volatile("mrs %0, cntv_ctl_el0" : "=r"(val));
     return val;
 }
 
-/* Write timer control register */
-static inline void write_cntp_ctl(uint32_t val)
+/* Write virtual timer control register */
+static inline void write_cntv_ctl(uint32_t val)
 {
-    __asm__ volatile("msr cntp_ctl_el0, %0" : : "r"(val));
+    __asm__ volatile("msr cntv_ctl_el0, %0" : : "r"(val));
     __asm__ volatile("isb");
 }
 
@@ -73,19 +67,22 @@ static inline void write_cntp_ctl(uint32_t val)
 
 /**
  * Timer interrupt handler
- * Called at TIMER_FREQ_HZ rate
+ * Called at TIMER_FREQ_HZ rate (100 Hz = every 10ms)
  */
 static void timer_irq_handler(void)
 {
     /* Increment tick count */
     timer.ticks++;
 
-    /* Set next timer interrupt */
-    write_cntp_tval(timer.tick_interval);
+    /* Set next timer interrupt using virtual timer */
+    write_cntv_tval(timer.tick_interval);
 
-    /* Optional: print tick count every second for debugging */
-    if ((timer.ticks % TIMER_FREQ_HZ) == 0) {
-        klog_debug("Timer tick: %u seconds", (uint32_t)(timer.ticks / TIMER_FREQ_HZ));
+    /* Call scheduler tick for preemptive scheduling */
+    scheduler_tick();
+
+    /* Optional: print tick count every 10 seconds for debugging (avoid spam) */
+    if ((timer.ticks % (TIMER_FREQ_HZ * 10)) == 0) {
+        klog_debug("Uptime: %u seconds", (uint32_t)(timer.ticks / TIMER_FREQ_HZ));
     }
 }
 
@@ -95,10 +92,11 @@ static void timer_irq_handler(void)
 
 /**
  * Initialize the system timer
+ * Uses virtual timer (CNTV) which is the correct timer for non-secure EL1
  */
 void timer_init(void)
 {
-    klog_info("Initializing ARM Generic Timer...");
+    klog_info("Initializing ARM Generic Timer (virtual)...");
 
     /* Get timer frequency */
     timer.frequency = read_cntfrq();
@@ -113,18 +111,19 @@ void timer_init(void)
     /* Initialize tick count */
     timer.ticks = 0;
 
-    /* Disable timer while configuring */
-    write_cntp_ctl(0);
+    /* Disable virtual timer while configuring */
+    write_cntv_ctl(0);
 
     /* Set initial timer value */
-    write_cntp_tval(timer.tick_interval);
+    write_cntv_tval(timer.tick_interval);
 
     /* Register timer interrupt handler */
-    irq_register_handler(30, timer_irq_handler);  /* IRQ 30 = physical timer */
+    /* IRQ 27 = virtual timer PPI on QEMU virt platform */
+    irq_register_handler(27, timer_irq_handler);
 
     /* Enable timer interrupt in GIC */
-    gic_set_priority(30, GIC_PRIORITY_HIGH);
-    gic_enable_irq(30);
+    gic_set_priority(27, GIC_PRIORITY_HIGH);
+    gic_enable_irq(27);
 
     /* DO NOT start timer yet - will be started after interrupts_enable() */
     /* This prevents spurious interrupts during initialization */
@@ -147,9 +146,9 @@ void timer_start(void)
         return;
     }
 
-    /* Enable timer (enable bit, unmask interrupt) */
+    /* Enable virtual timer (enable bit, unmask interrupt) */
     ctl = (1 << 0);  /* ENABLE bit */
-    write_cntp_ctl(ctl);
+    write_cntv_ctl(ctl);
 
     klog_info("Timer started");
 }
@@ -201,11 +200,11 @@ void timer_delay_ms(uint32_t ms)
     }
 
     ticks_per_ms = timer.frequency / 1000;
-    start = read_cntpct();
+    start = read_cntvct();
     target = start + (ticks_per_ms * ms);
 
     do {
-        now = read_cntpct();
+        now = read_cntvct();
     } while (now < target);
 }
 
