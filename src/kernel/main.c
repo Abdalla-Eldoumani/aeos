@@ -25,6 +25,7 @@
 #include <aeos/ramfb.h>
 #include <aeos/virtio_gpu.h>
 #include <aeos/pflash.h>
+#include <aeos/semihosting.h>
 #include <aeos/shell.h>
 
 /* External symbols from linker script */
@@ -313,14 +314,11 @@ static void test_vfs(void)
 {
     vfs_filesystem_t *ramfs;
     int load_ret;
-    int blk_ret;
 
     klog_info("Testing Virtual File System:");
 
-    /* Initialize pflash persistence */
-    /* DISABLED: QEMU pflash incompatible with -kernel boot mode */
-    /* pflash_init(); */
-    blk_ret = -1;  /* No persistence available */
+    /* Initialize semihosting for filesystem persistence */
+    semihost_init();
 
     /* Create ramfs */
     ramfs = ramfs_create();
@@ -329,24 +327,19 @@ static void test_vfs(void)
         return;
     }
 
-    /* Try to load saved filesystem from disk (unless FS_NO_LOAD is defined) */
+    /* Try to load saved filesystem from host via semihosting */
 #ifdef FS_NO_LOAD
     kprintf("  [INFO] Fresh filesystem mode (FS_NO_LOAD defined)\n");
     load_ret = -1;
 #else
-    if (blk_ret == 0) {
-        kprintf("  Attempting to load filesystem from disk...\n");
-        load_ret = fs_load_from_disk(ramfs);
+    kprintf("  Attempting to load filesystem from host...\n");
+    load_ret = fs_load_from_disk(ramfs);
 
-        if (load_ret == 0) {
-            kprintf("  [OK] Loaded filesystem from disk\n");
-        } else {
-            kprintf("  [INFO] No saved filesystem on disk, creating fresh filesystem\n");
-            /* ramfs_create already created an empty root, so we're good */
-        }
+    if (load_ret == 0) {
+        kprintf("  [OK] Loaded filesystem from host (aeos_fs.img)\n");
     } else {
-        kprintf("  [INFO] No block device, creating fresh filesystem\n");
-        load_ret = -1;
+        kprintf("  [INFO] No saved filesystem on host, creating fresh filesystem\n");
+        /* ramfs_create already created an empty root, so we're good */
     }
 #endif
 
@@ -419,7 +412,32 @@ void kernel_main(void *dtb_addr)
     __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
     kprintf("[DEBUG] VBAR_EL1 = %p (should match vector table address above)\n", (void*)vbar);
 
-    kprintf("[DEBUG] Skipping GIC/timer initialization (Phase 3 deferred)\n");
+    /* Phase 3: Interrupts (DISABLED - causes FIQ issues on QEMU virt) */
+    kprintf("\n");
+    klog_info("Interrupt subsystem: DISABLED (cooperative scheduling only)");
+    klog_info("Timer interrupts disabled - using cooperative multitasking");
+
+    /* NOTE: GIC/timer initialization causes FIQ exceptions on QEMU virt platform.
+     * The shell and all other features work correctly with cooperative scheduling.
+     * To re-enable preemptive scheduling, uncomment the code below after fixing
+     * the FIQ routing issue in QEMU.
+     */
+#if 0
+    /* Step 1: Initialize GIC (but don't enable IRQs yet) */
+    gic_init();
+    klog_info("GIC initialized");
+
+    /* Step 2: Initialize timer (doesn't start until timer_start()) */
+    timer_init();
+
+    /* Step 3: Unmask IRQs */
+    klog_info("Enabling IRQs...");
+    interrupts_enable();
+
+    /* Step 4: Start timer (first IRQ will fire in ~10ms) */
+    timer_start();
+    klog_info("Timer started - preemptive scheduling now active");
+#endif
 
     /* Test printf functionality (Phase 1) */
     kprintf("\n");
