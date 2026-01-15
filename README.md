@@ -4,31 +4,27 @@ A 64-bit ARM kernel for learning operating system fundamentals, built from scrat
 
 ## Overview
 
-AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machine. It demonstrates core OS concepts including memory management, process scheduling, system calls, and filesystem implementation.
+AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machine. It demonstrates core OS concepts including memory management, process scheduling, system calls, filesystem implementation, and interactive shell design.
 
 ## Features
 
-- **Bootstrap**: EL2 => EL1 privilege level transition
-- **Memory Management**: Buddy allocator (physical) and first-fit heap allocator
+- **Bootstrap**: EL2 to EL1 privilege level transition with stack and BSS setup
+- **Memory Management**: Buddy allocator for physical memory, first-fit heap allocator
 - **Process Management**: Cooperative round-robin scheduler with context switching
 - **System Calls**: Direct function call interface (exit, write, read, getpid, yield)
-- **Filesystem**: VFS abstraction layer with in-memory ramfs implementation
-- **Interrupt Handling**: Exception vectors and handlers (GIC/timer support present but not initialized)
-- **Interactive Shell**: Command-line interface with 10 built-in commands
-- **Graphics**: Framebuffer support with ASCII art preview (hardware display not configured)
+- **Filesystem**: VFS abstraction layer with ramfs implementation and host persistence
+- **Text Editor**: Vim-like modal editor with insert/normal/ex modes
+- **Interactive Shell**: 24 built-in commands with colorized output
+- **Persistence**: Filesystem saves to host via ARM semihosting
 
 ## System Requirements
 
 ### Development Environment
-- **WSL** (Windows Subsystem for Linux) or Linux system with ARM64 toolchain
+- **WSL** (Windows Subsystem for Linux) or Linux with ARM64 toolchain
 - ARM64 cross-compiler: `aarch64-linux-gnu-gcc`
 - GNU `make`
 - `m4` macro processor
 - QEMU: `qemu-system-aarch64`
-
-### Tested Configuration
-- Developed and tested on WSL
-- Should work on any system with ARM64 development tools
 
 ## Building
 
@@ -41,35 +37,83 @@ make dump     # Disassemble kernel
 ## Running
 
 ```bash
-make run             # Text mode with ASCII art preview
-make run-ramfb       # SDL window (requires ramfb configuration)
+make run             # Text mode (recommended)
+make run-ramfb       # SDL window (requires display)
 make run-vnc         # VNC server on port 5900
-make run-virtio      # VirtIO GPU mode
-make debug           # GDB server mode (connect on port 1234)
+make debug           # GDB server on port 1234
 ```
 
-### Debug Mode
+Debug mode:
 ```bash
 DEBUG=1 make run     # Enable debug logging
 ```
 
+Exit QEMU: Press `Ctrl+A` then `X`
+
 ## Shell Commands
 
-Available commands in the interactive shell:
-- `help` - Show available commands
-- `clear` - Clear screen
-- `echo <text>` - Print text
-- `ps` - List processes
-- `meminfo` - Show memory statistics
-- `ls [path]` - List directory contents
-- `cat <file>` - Display file contents
-- `touch <file>` - Create empty file
-- `uname` - Show system information
-- `exit` - Halt system
+| Command | Description |
+|---------|-------------|
+| help | Show available commands |
+| clear | Clear screen |
+| echo | Print text to console |
+| ls | List directory contents |
+| cat | Display file contents |
+| touch | Create empty file |
+| mkdir | Create directory |
+| rm | Remove file or directory |
+| cp | Copy file |
+| mv | Move/rename file |
+| cd | Change directory |
+| pwd | Print working directory |
+| write | Write text to file |
+| hexdump | Hex dump of file |
+| grep | Search for pattern in file |
+| edit / vi | Vim-like text editor |
+| ps | List processes |
+| meminfo | Memory statistics |
+| uptime | System uptime |
+| irqinfo | Interrupt statistics |
+| history | Command history |
+| time | Time command execution |
+| uname | System information |
+| save | Save filesystem to host |
+| exit | Halt system |
 
-Note: File operations (`touch`, `cat`, `mkdir`) are implemented but filesystem is in-memory only. Changes are lost when QEMU exits.
+## Text Editor
 
-## Architecture Details
+The `edit` and `vi` commands open a vim-like text editor:
+
+**Normal Mode**:
+- `h/j/k/l` or arrows: Move cursor
+- `i`: Enter insert mode
+- `x`: Delete character
+- `dd`: Delete line
+- `0/$`: Start/end of line
+- `gg/G`: First/last line
+
+**Insert Mode**:
+- Type to insert text
+- `Esc`: Return to normal mode
+
+**Ex Mode** (press `:`):
+- `:w` - Save file
+- `:q` - Quit
+- `:wq` - Save and quit
+- `:q!` - Quit without saving
+
+## Filesystem Persistence
+
+Files are stored in RAM during runtime. Use the `save` command to persist the filesystem to the host machine. The filesystem is saved to `aeos_fs.img` and automatically loaded on next boot.
+
+```
+AEOS> touch myfile.txt
+AEOS> write myfile.txt Hello World
+AEOS> save
+Filesystem saved successfully!
+```
+
+## Architecture
 
 ### Platform
 - **CPU**: ARM Cortex-A57 (ARMv8-A)
@@ -93,58 +137,36 @@ Note: File operations (`touch`, `cat`, `mkdir`) are implemented but filesystem i
 0x0a000000  VirtIO devices
 ```
 
-## Known Limitations
-
-### Not Implemented/Configured
-- **GIC and Timer**: Code present but initialization disabled
-- **Preemptive Multitasking**: Currently cooperative scheduling only
-- **User Space (EL0)**: All code runs at EL1 (kernel mode)
-- **MMU/Paging**: Virtual memory not configured
-- **Filesystem Persistence**: In-memory only, no disk backing
-- **Hardware Graphics**: Framebuffer renders to memory only
-
-### Interrupt Handling
-Exception vectors and GIC driver code exist but are not activated. The system currently operates without hardware interrupts or timer-based scheduling.
-
 ## Project Structure
 
 ```
 aeos/
 ├── src/
-│   ├── boot/          # Bootstrap assembly (EL2 => EL1 transition)
-│   ├── kernel/        # Core kernel (main, kprintf, shell)
-│   ├── drivers/       # Hardware drivers (UART, DTB, graphics)
+│   ├── boot/          # Bootstrap assembly
+│   ├── kernel/        # Core kernel (main, kprintf, shell, editor)
+│   ├── drivers/       # Hardware drivers (UART, semihosting)
 │   ├── mm/            # Memory management (PMM, heap)
 │   ├── interrupts/    # Exception handling (vectors, GIC, timer)
-│   ├── proc/          # Process management (scheduler, context switch)
+│   ├── proc/          # Process management (scheduler, context)
 │   ├── syscall/       # System call dispatcher
-│   ├── fs/            # Filesystem (VFS, ramfs)
-│   └── lib/           # Utility functions (string operations)
+│   ├── fs/            # Filesystem (VFS, ramfs, persistence)
+│   └── lib/           # Utility functions
 ├── include/           # Header files
-│   ├── aeos/          # Kernel headers
-│   └── asm/           # ARM system register definitions
+├── docs/              # Implementation documentation
 ├── Makefile           # Build system
 └── linker.ld          # Linker script
 ```
 
+## Known Limitations
+
+- **Scheduling**: Cooperative only (timer interrupts not enabled)
+- **Privilege Level**: All code runs at EL1 (no user space)
+- **Virtual Memory**: MMU not configured
+- **Shell Input**: Arrow keys not functional (escape sequences disabled)
+
 ## Documentation
 
-Detailed implementation documentation is available in the `docs/` directory. Each section covers a specific kernel subsystem with code walkthroughs and API references.
-
-See `docs/README.md` for the complete documentation index.
-
-## Development Status
-
-AEOS is a work-in-progress educational project. The project was developed in seven planned phases:
-1. Boot & Basic Output
-2. Memory Management
-3. Interrupts & Exceptions (code present, not activated)
-4. Process Management
-5. System Calls
-6. Virtual Filesystem
-7. Interactive Shell
-
-The kernel successfully boots, initializes all subsystems, and provides an interactive shell. Future work may include enabling interrupts, implementing user space, and adding MMU support.
+Detailed implementation documentation is available in `docs/`. Each section covers a specific kernel subsystem with code walkthroughs and API references.
 
 ## License
 
