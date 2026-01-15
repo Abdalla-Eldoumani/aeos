@@ -68,6 +68,12 @@ void uart_puts(const char *s);
 char uart_getc(void);
 
 /**
+ * Check if data is available to read from the UART (non-blocking)
+ * @return true if data is available, false otherwise
+ */
+bool uart_data_available(void);
+
+/**
  * Write a buffer of data to the UART
  * @param buf Buffer containing data to write
  * @param len Number of bytes to write
