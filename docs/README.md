@@ -4,7 +4,7 @@ Technical documentation for AEOS kernel implementation.
 
 ## Overview
 
-This documentation covers the implementation details of each kernel subsystem. AEOS was built in seven sequential sections, each adding core operating system functionality. While originally developed in phases, the documentation is organized by functional area to provide clear reference material.
+This documentation covers the implementation details of each kernel subsystem. Each section includes an overview and detailed code walkthroughs.
 
 ## Sections
 
@@ -28,7 +28,7 @@ Interrupt handling and exception management.
 - **Location**: `src/interrupts/`
 - **What it does**: Handles exceptions and hardware interrupts using the ARM GICv2 and generic timer
 - **Key concepts**: Exception vectors, GIC configuration, timer interrupts, exception handling
-- **Status**: Code present but not activated in current configuration
+- **Status**: Code present but disabled due to FIQ routing issues on QEMU virt
 
 ### 4. [Process Management](./04-process-management/)
 Process creation and scheduling.
@@ -49,16 +49,15 @@ System call interface and implementation.
 File system abstraction and ramfs implementation.
 
 - **Location**: `src/fs/`
-- **What it does**: Implements VFS layer with path resolution and ramfs in-memory filesystem
-- **Key concepts**: VFS abstraction, inodes, file descriptors, directory operations, ramfs
-- **Limitation**: In-memory only, no disk persistence
+- **What it does**: Implements VFS layer with path resolution, ramfs in-memory filesystem, and host persistence via semihosting
+- **Key concepts**: VFS abstraction, inodes, file descriptors, directory operations, semihosting persistence
 
 ### 7. [Interactive Shell](./07-interactive-shell/)
-Command-line interface for user interaction.
+Command-line interface and text editor.
 
-- **Location**: `src/kernel/shell.c`
-- **What it does**: Provides interactive shell with command parsing and 17 built-in commands
-- **Key concepts**: Command parsing, line editing, file operations, system commands
+- **Location**: `src/kernel/shell.c`, `src/kernel/editor.c`
+- **What it does**: Provides interactive shell with 24 built-in commands, colorized output, and a vim-like text editor
+- **Key concepts**: Command parsing, line editing, file operations, modal text editing
 
 ## Documentation Structure
 
@@ -66,35 +65,18 @@ Each section directory contains:
 - `README.md` - Overview and implementation summary
 - `implementation.md` - Detailed code walkthrough
 
-## Implementation Notes
-
-### Design Decisions
+## Design Decisions
 
 1. **Cooperative Scheduling**: Round-robin scheduling requires processes to explicitly yield
 2. **Direct System Calls**: System calls use function calls instead of SVC exceptions
-3. **In-Memory Filesystem**: Ramfs stores everything in RAM with no disk backing
-4. **Disabled Interrupts**: GIC and timer code exists but is not initialized
+3. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
+4. **Disabled Interrupts**: Timer interrupts cause FIQ issues on QEMU virt, so cooperative scheduling is used
 5. **Kernel Mode Only**: All code runs at EL1, no user space (EL0)
 
-### Known Limitations
+## Build Environment
 
-- No MMU or virtual memory
-- No preemptive multitasking
-- No filesystem persistence
-- No hardware display output
-- Interrupts not enabled
-
-### Build Environment
-
-- **Platform**: WSL (Windows Subsystem for Linux) or Linux with ARM cross-compilation tools
+- **Platform**: WSL or Linux with ARM cross-compilation tools
 - **Compiler**: `aarch64-linux-gnu-gcc`
 - **Assembler**: `aarch64-linux-gnu-as`
 - **Preprocessor**: `m4` (for assembly macros)
 - **Emulator**: QEMU `qemu-system-aarch64`
-
-## Using This Documentation
-
-1. Start with each section's README to understand the high-level architecture
-2. Read `implementation.md` for detailed code walkthroughs
-
-Each section is self-contained and can be read independently, though they build on each other conceptually.
