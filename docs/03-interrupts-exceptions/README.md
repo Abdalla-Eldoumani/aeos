@@ -2,16 +2,24 @@
 
 ## Overview
 
-This section implements the exception handling infrastructure for AEOS, including the exception vector table, GICv2 interrupt controller driver, and ARM Generic Timer. The code is complete but disabled due to FIQ routing issues on QEMU virt.
+This section implements the exception handling infrastructure for AEOS, including the exception vector table, GICv2 interrupt controller driver, and ARM Generic Timer.
 
-## Status: Disabled
+## Status: Fully Functional
 
-The GIC and timer initialization code exists but is not called from `kernel_main()`. Enabling these causes FIQ exceptions instead of IRQ on QEMU virt platform. The system runs with:
-- Interrupts masked (DAIF bits set)
-- No timer ticks
-- Cooperative multitasking only
+Timer interrupts work via FIQ handling. The system runs with:
+- Both FIQ and IRQ unmasked (DAIF bits cleared)
+- Timer ticks at 100 Hz
+- Preemptive multitasking enabled
 
-Both physical timer (CNTP, IRQ 30) and virtual timer (CNTV, IRQ 27) were tested with the same result.
+## FIQ Solution
+
+On QEMU virt, timer interrupts arrive as FIQ (Fast Interrupt) instead of IRQ, regardless of GIC configuration. The solution:
+
+1. **Dedicated FIQ Handler**: `handle_fiq()` checks timer status directly
+2. **Direct Timer Status Check**: Reads CNTV_CTL's ISTATUS bit to confirm timer fired
+3. **FIQ Unmasking**: `interrupts_enable()` clears both FIQ and IRQ mask bits
+
+This approach bypasses the GIC for timer interrupts, which is correct since FIQs don't go through the normal GIC acknowledge flow.
 
 ## Components
 
@@ -155,40 +163,44 @@ uint64_t timer_get_uptime_sec(void);
 
 /* Busy-wait delay (works without interrupts) */
 void timer_delay_ms(uint32_t ms);
+
+/* Handle timer interrupt from FIQ (returns true if handled) */
+bool timer_handle_fiq(void);
 ```
 
-## Why Interrupts Are Disabled
+## How FIQ Handling Works
 
-When GIC and timer are initialized and interrupts enabled:
+When the timer fires:
 
-1. Timer fires as expected
-2. But interrupt arrives as FIQ instead of IRQ
-3. FIQ vector executes, but return causes issues
+1. Timer interrupt arrives as FIQ (QEMU virt behavior)
+2. FIQ vector calls `handle_fiq()`
+3. `handle_fiq()` calls `timer_handle_fiq()`
+4. `timer_handle_fiq()` checks CNTV_CTL's ISTATUS bit
+5. If set, increments tick counter and rearms timer
+6. Calls `scheduler_tick()` for preemption
 
-This happens with both physical timer (CNTP) and virtual timer (CNTV). The GIC is configured for Group 1 (IRQ) interrupts, but QEMU virt routes timer interrupts to FIQ regardless.
-
-The system works fine with cooperative scheduling, so interrupts remain disabled.
+The GIC is still initialized for other interrupts, but timer handling bypasses it entirely.
 
 ## Shell Commands
 
-Two commands show interrupt-related information even without active interrupts:
+Two commands show interrupt-related information:
 
-**uptime**: Shows system uptime (uses hardware counter, not ticks)
+**uptime**: Shows system uptime and tick count
 ```
 AEOS> uptime
 System Uptime:
-  Time:  0:0:0 (hh:mm:ss)
-  Ticks: 0 (at 100 Hz)
+  Time:  0:01:23 (hh:mm:ss)
+  Ticks: 8300 (at 100 Hz)
 ```
 
-**irqinfo**: Shows exception vector counters
+**irqinfo**: Shows exception vector counters (FIQ counter increases with timer ticks)
 ```
 AEOS> irqinfo
 Interrupt Statistics:
 
 Exception Vector Counters:
   EL1 SP0: sync=0 irq=0 fiq=0 serr=0
-  EL1 SPx: sync=0 irq=0 fiq=0 serr=0
+  EL1 SPx: sync=0 irq=0 fiq=8300 serr=0
   ...
 ```
 
