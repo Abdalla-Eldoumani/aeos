@@ -62,4 +62,12 @@ void timer_delay_ms(uint32_t ms);
  */
 uint32_t timer_get_frequency(void);
 
+/**
+ * Handle timer interrupt from FIQ
+ * Called directly from FIQ handler when timer interrupt is pending
+ *
+ * @return true if timer interrupt was handled, false otherwise
+ */
+bool timer_handle_fiq(void);
+
 #endif /* AEOS_TIMER_H */
