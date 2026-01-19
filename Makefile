@@ -159,6 +159,7 @@ run-ramfb: all
 		-device virtio-keyboard-device \
 		-device virtio-mouse-device \
 		-serial stdio \
+		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
 
 # Alternative: Try with simpler ramfb device (works with fw_cfg if available)
@@ -167,6 +168,7 @@ run-simple: all
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
 		-device ramfb \
 		-serial stdio \
+		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
 
 # Take screenshot of framebuffer (works in any mode)
@@ -191,6 +193,7 @@ run-vnc: all
 		-device ramfb \
 		-vnc :0 \
 		-serial stdio \
+		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
 
 # Run with virtio-gpu (advanced GPU driver)
@@ -199,8 +202,9 @@ run-virtio: all
 	@echo "Graphics will appear in a separate window"
 	@echo "Press Ctrl+Alt+G to release mouse/keyboard"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
-		-device virtio-gpu-pci \
+		-device virtio-gpu-device \
 		-serial stdio \
+		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
 
 # Run with both ramfb AND virtio-gpu
@@ -209,8 +213,9 @@ run-all-gpu: all
 	@echo "Graphics will appear in a separate window"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
 		-device ramfb \
-		-device virtio-gpu-pci \
+		-device virtio-gpu-device \
 		-serial stdio \
+		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
 
 # Legacy GUI alias
