@@ -139,24 +139,24 @@ el1_spx_sync:
 ```assembly
     .global interrupts_enable
 interrupts_enable:
-    msr daifclr, #2     /* Clear IRQ mask bit (I=0) */
+    msr daifclr, #3     /* Clear FIQ and IRQ mask bits (F=0, I=0) */
     isb
     ret
 
     .global interrupts_disable
 interrupts_disable:
-    msr daifset, #2     /* Set IRQ mask bit (I=1) */
+    msr daifset, #3     /* Set FIQ and IRQ mask bits (F=1, I=1) */
     isb
     ret
 ```
 
 **DAIF register**:
-- D: Debug exceptions
-- A: SError (async abort)
-- I: IRQ
-- F: FIQ
+- D: Debug exceptions (bit 3)
+- A: SError (async abort) (bit 2)
+- I: IRQ (bit 1)
+- F: FIQ (bit 0)
 
-Bit 2 controls IRQ masking.
+We use `#3` to enable both FIQ and IRQ since timer interrupts arrive as FIQ on QEMU virt.
 
 ## exceptions.c - Exception Handling
 
@@ -227,6 +227,69 @@ void handle_irq(uint32_t source, uint32_t type, cpu_context_t *context)
 1. Read GICC_IAR to get IRQ number and acknowledge
 2. Call handler function
 3. Write to GICC_EOIR to signal completion
+
+### FIQ Handler
+
+```c
+void handle_fiq(uint32_t source, uint32_t type, cpu_context_t *context)
+{
+    (void)source; (void)type; (void)context;
+    exception_stats.fiq_count++;
+
+    /* First try timer - most common FIQ source */
+    if (timer_handle_fiq()) {
+        return;
+    }
+
+    /* Fallback: try GIC acknowledge for other FIQ sources */
+    uint32_t irq = gic_acknowledge_irq();
+    if (irq < GIC_MAX_IRQ) {
+        if (irq_handlers[irq]) {
+            irq_handlers[irq]();
+        }
+        gic_end_of_irq(irq);
+    }
+}
+```
+
+**Why direct timer check?** On QEMU virt, timer interrupts arrive as FIQ regardless of GIC group configuration. The GIC doesn't track FIQs, so `gic_acknowledge_irq()` returns spurious (1022). We check the timer's ISTATUS bit directly instead.
+
+### Timer FIQ Handler
+
+```c
+bool timer_handle_fiq(void)
+{
+    uint32_t ctl;
+
+    if (!timer.initialized) {
+        return false;
+    }
+
+    /* Read timer control register */
+    ctl = read_cntv_ctl();
+
+    /* Check ISTATUS bit (bit 2) - timer interrupt pending */
+    if (!(ctl & (1 << 2))) {
+        return false;  /* Not a timer interrupt */
+    }
+
+    /* Handle the timer tick */
+    timer.ticks++;
+
+    /* Rearm timer for next tick */
+    write_cntv_tval(timer.tick_interval);
+
+    /* Call scheduler for potential preemption */
+    scheduler_tick();
+
+    return true;
+}
+```
+
+**CNTV_CTL bits**:
+- Bit 0 (ENABLE): Timer enabled
+- Bit 1 (IMASK): Interrupt masked
+- Bit 2 (ISTATUS): Interrupt pending (read-only)
 
 ## gic.c - GICv2 Driver
 
