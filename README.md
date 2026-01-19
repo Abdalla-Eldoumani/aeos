@@ -10,11 +10,13 @@ AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machin
 
 - **Bootstrap**: EL2 to EL1 privilege level transition with stack and BSS setup
 - **Memory Management**: Buddy allocator for physical memory, first-fit heap allocator
-- **Process Management**: Cooperative round-robin scheduler with context switching
+- **Process Management**: Preemptive round-robin scheduler with context switching
+- **Interrupts**: ARM GICv2 + Generic Timer via FIQ handling (100 Hz tick)
 - **System Calls**: Direct function call interface (exit, write, read, getpid, yield)
 - **Filesystem**: VFS abstraction layer with ramfs implementation and host persistence
 - **Text Editor**: Vim-like modal editor with insert/normal/ex modes
 - **Interactive Shell**: 24 built-in commands with colorized output
+- **Graphics**: VirtIO GPU driver with framebuffer display
 - **Persistence**: Filesystem saves to host via ARM semihosting
 
 ## System Requirements
@@ -37,8 +39,9 @@ make dump     # Disassemble kernel
 ## Running
 
 ```bash
-make run             # Text mode (recommended)
-make run-ramfb       # SDL window (requires display)
+make run             # Text mode with persistence (recommended)
+make run-virtio      # SDL window with VirtIO GPU
+make run-ramfb       # SDL window with ramfb device
 make run-vnc         # VNC server on port 5900
 make debug           # GDB server on port 1234
 ```
@@ -49,6 +52,8 @@ DEBUG=1 make run     # Enable debug logging
 ```
 
 Exit QEMU: Press `Ctrl+A` then `X`
+
+Graphical mode shows a test pattern to verify the VirtIO GPU driver is working.
 
 ## Shell Commands
 
@@ -159,7 +164,6 @@ aeos/
 
 ## Known Limitations
 
-- **Scheduling**: Cooperative only (timer interrupts not enabled)
 - **Privilege Level**: All code runs at EL1 (no user space)
 - **Virtual Memory**: MMU not configured
 - **Shell Input**: Arrow keys not functional (escape sequences disabled)
