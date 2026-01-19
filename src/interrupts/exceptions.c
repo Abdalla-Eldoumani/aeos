@@ -6,6 +6,7 @@
 
 #include <aeos/interrupts.h>
 #include <aeos/gic.h>
+#include <aeos/timer.h>
 #include <aeos/kprintf.h>
 #include <aeos/types.h>
 
@@ -170,6 +171,37 @@ void handle_irq(uint32_t source, uint32_t type, cpu_context_t *context)
 
     /* Signal end of interrupt */
     gic_end_of_irq(irq);
+}
+
+/**
+ * FIQ handler
+ * Called from assembly FIQ vector
+ * On QEMU virt, timer interrupts arrive as FIQ due to GIC group configuration
+ */
+void handle_fiq(uint32_t source, uint32_t type, cpu_context_t *context)
+{
+    (void)source;
+    (void)type;
+    (void)context;
+
+    /* Update statistics */
+    exception_stats.fiq_count++;
+
+    /* Try to handle timer interrupt directly */
+    if (timer_handle_fiq()) {
+        return;  /* Timer interrupt handled */
+    }
+
+    /* Unknown FIQ source - try GIC acknowledge as fallback */
+    uint32_t irq = gic_acknowledge_irq();
+    if (irq < GIC_MAX_IRQ) {
+        irq_handler_t handler = irq_handlers[irq];
+        if (handler != NULL) {
+            handler();
+        }
+        gic_end_of_irq(irq);
+    }
+    /* If irq >= GIC_MAX_IRQ (spurious), just return */
 }
 
 /**
