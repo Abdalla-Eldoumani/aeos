@@ -70,12 +70,25 @@ drop_from_el3:
  * ============================================================================ */
 drop_to_el1:
     /* Set EL1 execution state to AArch64 */
-    mov x0, (1 << 31)           /* EL1 uses AArch64 */
+    mov x0, (1 << 31)           /* RW=1: EL1 uses AArch64 */
     orr x0, x0, (1 << 1)        /* SWIO hardwired on PE */
     msr hcr_el2, x0
 
+    /* Clear virtual timer offset (REQUIRED for virtual timer at EL1) */
+    mov x0, #0
+    msr cntvoff_el2, x0
+
+    /* Enable EL1 access to physical and virtual timers */
+    /* CNTHCTL_EL2: EL1PCTEN=1, EL1PCEN=1 for physical timer access */
+    mov x0, #3
+    msr cnthctl_el2, x0
+
+    /* Don't trap any coprocessor accesses from EL1 */
+    mov x0, #0
+    msr cptr_el2, x0
+    isb
+
     /* Set SPSR for EL1h (use SP_EL1, mask all interrupts) */
-    /* SP_EL1 will be garbage initially, but we'll fix it immediately */
     mov x0, 0x3c5               /* EL1h, DAIF masked */
     msr spsr_el2, x0
 
@@ -84,7 +97,6 @@ drop_to_el1:
     msr elr_el2, x0
 
     /* Exception return to EL1 */
-    /* WARNING: SP will be garbage until el1_entry fixes it! */
     eret
 
 /* ============================================================================
