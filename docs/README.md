@@ -27,15 +27,15 @@ Interrupt handling and exception management.
 
 - **Location**: `src/interrupts/`
 - **What it does**: Handles exceptions and hardware interrupts using the ARM GICv2 and generic timer
-- **Key concepts**: Exception vectors, GIC configuration, timer interrupts, exception handling
-- **Status**: Code present but disabled due to FIQ routing issues on QEMU virt
+- **Key concepts**: Exception vectors, GIC configuration, timer interrupts, FIQ handling
+- **Status**: Fully functional with FIQ-based timer interrupts at 100 Hz
 
 ### 4. [Process Management](./04-process-management/)
 Process creation and scheduling.
 
 - **Location**: `src/proc/`
-- **What it does**: Creates and manages processes using cooperative round-robin scheduling with context switching
-- **Key concepts**: Process Control Block, context switching, cooperative scheduling, process states
+- **What it does**: Creates and manages processes using preemptive round-robin scheduling with context switching
+- **Key concepts**: Process Control Block, context switching, preemptive scheduling, process states
 
 ### 5. [System Calls](./05-system-calls/)
 System call interface and implementation.
@@ -67,11 +67,12 @@ Each section directory contains:
 
 ## Design Decisions
 
-1. **Cooperative Scheduling**: Round-robin scheduling requires processes to explicitly yield
-2. **Direct System Calls**: System calls use function calls instead of SVC exceptions
-3. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
-4. **Disabled Interrupts**: Timer interrupts cause FIQ issues on QEMU virt, so cooperative scheduling is used
+1. **Preemptive Scheduling**: Round-robin scheduling with 100 Hz timer tick for time slicing
+2. **FIQ-Based Timer**: Timer interrupts route as FIQ on QEMU virt; handled via direct timer status checking
+3. **Direct System Calls**: System calls use function calls instead of SVC exceptions
+4. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
 5. **Kernel Mode Only**: All code runs at EL1, no user space (EL0)
+6. **VirtIO GPU**: Graphics via VirtIO GPU MMIO device with legacy (v1) protocol
 
 ## Build Environment
 
