@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements cooperative multitasking for AEOS with a round-robin scheduler. Processes are kernel threads running at EL1 with no memory protection.
+This section implements preemptive multitasking for AEOS with a round-robin scheduler. Processes are kernel threads running at EL1 with no memory protection. The 100 Hz timer tick enables automatic context switching.
 
 ## Components
 
@@ -17,10 +17,11 @@ This section implements cooperative multitasking for AEOS with a round-robin sch
 
 ### Scheduler (scheduler.c)
 - **Location**: `src/proc/scheduler.c`
-- **Purpose**: Round-robin cooperative scheduling
+- **Purpose**: Round-robin preemptive scheduling
 - **Features**:
   - Ready queue management
   - Idle process
+  - Preemptive context switching via timer tick (100 Hz)
   - Cooperative context switching via yield()
   - Scheduler statistics
 
@@ -40,10 +41,11 @@ This section implements cooperative multitasking for AEOS with a round-robin sch
 - No memory protection between processes
 - All code shares the same address space
 
-### Cooperative Scheduling
-- Processes voluntarily call `yield()` to give up CPU
-- No preemption (timer interrupts not enabled)
-- Long-running processes must yield periodically
+### Preemptive Scheduling
+- Timer tick at 100 Hz triggers `scheduler_tick()`
+- `scheduler_tick()` calls `yield()` to preempt current process
+- Processes can also voluntarily call `yield()` to give up CPU
+- No explicit time slice management needed (tick-based preemption)
 
 ## Process Control Block (PCB)
 
@@ -160,8 +162,11 @@ void scheduler_add_process(process_t *proc);
 /* Remove process from scheduler */
 void scheduler_remove_process(process_t *proc);
 
-/* Yield CPU to next process */
+/* Yield CPU to next process (cooperative) */
 void yield(void);
+
+/* Called from timer interrupt for preemption */
+void scheduler_tick(void);
 
 /* Start scheduler (first context switch, never returns) */
 void scheduler_start(void);
@@ -192,19 +197,22 @@ int main() {
 }
 ```
 
-### Cooperative Yielding
+### Voluntary Yielding (Optional)
 
 ```c
 void worker_process(void) {
     for (int i = 0; i < 1000; i++) {
         /* Do work */
+        /* Note: yield() is optional - timer preempts automatically */
         if (i % 100 == 0) {
-            yield();  /* Yield every 100 iterations */
+            yield();  /* Can yield early if work is I/O bound */
         }
     }
     sys_exit(0);
 }
 ```
+
+With preemptive scheduling, processes are automatically preempted every 10ms (100 Hz timer). Explicit `yield()` calls are only needed if a process wants to give up CPU earlier (e.g., waiting for I/O).
 
 ## Important Notes
 
@@ -307,7 +315,6 @@ O(1) - always takes head of ready queue.
 
 ## Future Enhancements
 
-- Preemptive scheduling (requires timer interrupts)
 - Priority-based scheduling
 - Sleep/wake mechanisms
 - Proper process termination and cleanup
