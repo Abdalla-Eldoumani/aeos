@@ -155,7 +155,7 @@ el1_sp0_irq:
     mov x0, #0
     mov x1, #1          /* exception_type = IRQ */
     mov x2, sp
-    bl handle_exception
+    bl handle_irq
     RESTORE_CONTEXT
     eret
 
@@ -171,45 +171,11 @@ el1_sp0_fiq:
     str x1, [x0, #16]       /* Store back */
     ldp x0, x1, [sp], #16
 
-    /* DEBUG: Print that we entered FIQ handler */
-    stp x0, x1, [sp, #-16]!
-    adr x0, fiq_entry_msg
-    bl kprintf
-    ldp x0, x1, [sp], #16
-
-    /* WORKAROUND: Check if this is actually an SVC (bug: SVC routed as FIQ?) */
-    mrs x0, esr_el1
-    lsr x1, x0, #26
-    cmp x1, #0x15           /* EC = 0x15 means SVC */
-    bne 1f
-
-    /* DEBUG: Print that we detected SVC */
-    stp x0, x1, [sp, #-16]!
-    adr x0, svc_detected_msg
-    bl kprintf
-    ldp x0, x1, [sp], #16
-
-    /* This is an SVC misrouted as FIQ - handle it */
-    ldr x0, [sp, #(16 * 4)]     /* x8 = syscall number */
-    ldr x1, [sp, #(16 * 0)]     /* x0 = arg0 */
-    ldr x2, [sp, #(16 * 0 + 8)] /* x1 = arg1 */
-    ldr x3, [sp, #(16 * 1)]     /* x2 = arg2 */
-    ldr x4, [sp, #(16 * 1 + 8)] /* x3 = arg3 */
-    ldr x5, [sp, #(16 * 2)]     /* x4 = arg4 */
-    ldr x6, [sp, #(16 * 2 + 8)] /* x5 = arg5 */
-
-    bl syscall_handler
-
-    str x0, [sp, #(16 * 0)]
-
-    RESTORE_CONTEXT
-    eret
-
-1:  /* Real FIQ */
+    /* Handle FIQ (timer interrupt on QEMU virt) */
     mov x0, #0
     mov x1, #2          /* exception_type = FIQ */
     mov x2, sp
-    bl handle_exception
+    bl handle_fiq
     RESTORE_CONTEXT
     eret
 
@@ -293,10 +259,20 @@ el1_spx_irq:
     .balign 128
 el1_spx_fiq:
     SAVE_CONTEXT
+
+    /* INCREMENT COUNTER: spx_fiq_count */
+    stp x0, x1, [sp, #-16]!
+    adr x0, exception_counters
+    ldr x1, [x0, #48]       /* Load counter[6] = spx_fiq */
+    add x1, x1, #1          /* Increment */
+    str x1, [x0, #48]       /* Store back */
+    ldp x0, x1, [sp], #16
+
+    /* Handle FIQ (timer interrupt on QEMU virt) */
     mov x0, #1
     mov x1, #2          /* exception_type = FIQ */
     mov x2, sp
-    bl handle_exception
+    bl handle_fiq
     RESTORE_CONTEXT
     eret
 
@@ -406,7 +382,7 @@ el0_aarch32_serror:
     .global interrupts_enable
     .balign 4
 interrupts_enable:
-    msr daifclr, #2     /* Clear IRQ mask bit */
+    msr daifclr, #3     /* Clear FIQ and IRQ mask bits (bits 1 and 2) */
     ISB
     ret
 
@@ -416,7 +392,7 @@ interrupts_enable:
     .global interrupts_disable
     .balign 4
 interrupts_disable:
-    msr daifset, #2     /* Set IRQ mask bit */
+    msr daifset, #3     /* Set FIQ and IRQ mask bits (bits 1 and 2) */
     ISB
     ret
 
