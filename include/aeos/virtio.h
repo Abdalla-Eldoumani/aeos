@@ -14,8 +14,11 @@
 #define VIRTIO_MMIO_VERSION         0x004  /* Version (should be 2) */
 #define VIRTIO_MMIO_DEVICE_ID       0x008  /* Device type */
 #define VIRTIO_MMIO_VENDOR_ID       0x00c  /* Vendor ID */
-#define VIRTIO_MMIO_DEVICE_FEATURES 0x010  /* Device features */
-#define VIRTIO_MMIO_DRIVER_FEATURES 0x020  /* Driver features */
+#define VIRTIO_MMIO_DEVICE_FEATURES 0x010  /* Device features (read) */
+#define VIRTIO_MMIO_DEVICE_FEATURES_SEL 0x014 /* Device features selector */
+#define VIRTIO_MMIO_DRIVER_FEATURES 0x020  /* Driver features (write) */
+#define VIRTIO_MMIO_DRIVER_FEATURES_SEL 0x024 /* Driver features selector */
+#define VIRTIO_MMIO_GUEST_PAGE_SIZE 0x028  /* Guest page size (legacy v1 only) */
 #define VIRTIO_MMIO_QUEUE_SEL       0x030  /* Queue selector */
 #define VIRTIO_MMIO_QUEUE_NUM_MAX   0x034  /* Max queue size */
 #define VIRTIO_MMIO_QUEUE_NUM       0x038  /* Queue size */
