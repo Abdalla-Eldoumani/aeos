@@ -412,17 +412,10 @@ void kernel_main(void *dtb_addr)
     __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
     kprintf("[DEBUG] VBAR_EL1 = %p (should match vector table address above)\n", (void*)vbar);
 
-    /* Phase 3: Interrupts (DISABLED - causes FIQ issues on QEMU virt) */
+    /* Phase 3: Interrupts */
     kprintf("\n");
-    klog_info("Interrupt subsystem: DISABLED (cooperative scheduling only)");
-    klog_info("Timer interrupts disabled - using cooperative multitasking");
-
-    /* NOTE: GIC/timer initialization causes FIQ exceptions on QEMU virt platform.
-     * The shell and all other features work correctly with cooperative scheduling.
-     * To re-enable preemptive scheduling, uncomment the code below after fixing
-     * the FIQ routing issue in QEMU.
-     */
-#if 0
+    klog_info("Initializing interrupt subsystem...");
+#if 1  /* Re-enabled after fixing boot.asm EL2 configuration */
     /* Step 1: Initialize GIC (but don't enable IRQs yet) */
     gic_init();
     klog_info("GIC initialized");
