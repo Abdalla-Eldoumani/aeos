@@ -59,8 +59,13 @@ static int virtqueue_init(virtqueue_t *vq, volatile uint32_t *mmio, uint32_t que
     avail_size = sizeof(uint16_t) * (3 + queue_size);
     used_size = sizeof(uint16_t) * 3 + sizeof(virtq_used_elem_t) * queue_size;
 
+    /* For legacy VirtIO, used ring must be page-aligned after avail ring */
+    /* Calculate offset for used ring (page-aligned) */
+    size_t avail_offset = desc_size;
+    size_t used_offset = (desc_size + avail_size + 4095) & ~4095ULL;  /* Page-align used ring */
+
     /* Allocate memory (must be page-aligned for legacy v1) */
-    size_t total_size = desc_size + avail_size + used_size + 8192;  /* Extra for alignment */
+    size_t total_size = used_offset + used_size + 8192;  /* Extra for alignment */
     uint8_t *raw_mem = (uint8_t *)kmalloc(total_size);
     if (!raw_mem) {
         klog_error("Failed to allocate queue memory");
@@ -73,12 +78,15 @@ static int virtqueue_init(virtqueue_t *vq, volatile uint32_t *mmio, uint32_t que
     queue_mem = (uint8_t *)aligned_addr;
 
     /* Clear queue memory */
-    memset(queue_mem, 0, desc_size + avail_size + used_size);
+    memset(queue_mem, 0, used_offset + used_size);
 
     /* Set up descriptor table */
     vq->desc = (virtq_desc_t *)queue_mem;
-    vq->avail = (virtq_avail_t *)(queue_mem + desc_size);
-    vq->used = (virtq_used_t *)(queue_mem + desc_size + avail_size);
+    vq->avail = (virtq_avail_t *)(queue_mem + avail_offset);
+    vq->used = (virtq_used_t *)(queue_mem + used_offset);  /* Page-aligned for legacy */
+
+    klog_debug("  Queue layout: desc=%p avail=%p used=%p",
+              vq->desc, vq->avail, vq->used);
 
     /* Initialize free list */
     vq->num_free = queue_size;
@@ -100,6 +108,7 @@ static int virtqueue_init(virtqueue_t *vq, volatile uint32_t *mmio, uint32_t que
 
     /* Configure queue in device */
     virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_NUM, queue_size);
+    klog_debug("  Queue %u: size=%u, version=%u", queue_idx, queue_size, version);
 
     if (version == 1) {
         /* Legacy VirtIO v1: Use QUEUE_ALIGN and QUEUE_PFN */
@@ -114,6 +123,8 @@ static int virtqueue_init(virtqueue_t *vq, volatile uint32_t *mmio, uint32_t que
     } else {
         /* Modern VirtIO v2: Use separate descriptor/avail/used addresses */
         klog_debug("  Using modern queue initialization (v2)");
+        klog_debug("  desc=0x%x avail=0x%x used=0x%x",
+                  (uint32_t)desc_addr, (uint32_t)avail_addr, (uint32_t)used_addr);
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_DESC_LOW, (uint32_t)(desc_addr & 0xFFFFFFFF));
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_DESC_HIGH, (uint32_t)(desc_addr >> 32));
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_AVAIL_LOW, (uint32_t)(avail_addr & 0xFFFFFFFF));
@@ -121,8 +132,16 @@ static int virtqueue_init(virtqueue_t *vq, volatile uint32_t *mmio, uint32_t que
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_USED_LOW, (uint32_t)(used_addr & 0xFFFFFFFF));
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_USED_HIGH, (uint32_t)(used_addr >> 32));
 
+        /* Memory barrier before marking queue ready */
+        __asm__ volatile("dmb sy" ::: "memory");
+
         /* Mark queue as ready */
         virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_READY, 1);
+
+        /* Verify queue is ready (use (void) to suppress unused warning in release builds) */
+        uint32_t ready = virtio_mmio_read32(mmio, VIRTIO_MMIO_QUEUE_READY);
+        (void)ready;
+        klog_debug("  Queue ready: %u", ready);
     }
 
     /* Verify queue is ready */
@@ -180,35 +199,35 @@ static int virtio_gpu_submit_cmd(void *cmd, size_t cmd_len, void *resp, size_t r
     old_avail_idx = ctrl_vq.avail->idx;
     ctrl_vq.avail->ring[old_avail_idx % VIRTQ_SIZE] = cmd_desc;
 
-    /* Debug: Show what we're submitting */
-    klog_debug("Submitting GPU command:");
-    klog_debug("  cmd_desc=%u @ 0x%p len=%u", cmd_desc, (void*)ctrl_vq.desc[cmd_desc].addr, cmd_len);
-    klog_debug("  resp_desc=%u @ 0x%p len=%u", resp_desc, (void*)ctrl_vq.desc[resp_desc].addr, resp_len);
-    klog_debug("  avail.idx=%u->%u ring[%u]=%u", old_avail_idx, old_avail_idx + 1, old_avail_idx % VIRTQ_SIZE, cmd_desc);
-    klog_debug("  used.idx=%u (before notify)", ctrl_vq.used->idx);
-
-    /* Memory barrier - ensure descriptor updates are visible before index update */
-    __asm__ volatile("dmb sy" ::: "memory");
+    /* Memory barrier - ensure all memory writes are visible */
+    __asm__ volatile("dmb ish" ::: "memory");
+    __asm__ volatile("dsb ish" ::: "memory");
 
     ctrl_vq.avail->idx = old_avail_idx + 1;
 
+    /* Another barrier after updating avail idx */
+    __asm__ volatile("dmb ish" ::: "memory");
+    __asm__ volatile("dsb ish" ::: "memory");
+
     /* Notify device (write to queue notify register) */
-    klog_debug("  Notifying device (queue 0)...");
     virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
 
     /* Wait for response (with timeout to prevent infinite hang) */
     uint32_t timeout = 1000000;  /* ~1 second timeout */
     while (ctrl_vq.used->idx == ctrl_vq.last_used_idx) {
         if (--timeout == 0) {
-            klog_error("GPU command timeout! used->idx=%u last_used=%u",
-                       ctrl_vq.used->idx, ctrl_vq.last_used_idx);
+            /* Check interrupt status to see if device tried to signal */
+            uint32_t isr = virtio_mmio_read32(mmio, VIRTIO_MMIO_INTERRUPT_STATUS);
+            klog_error("GPU command timeout! used->idx=%u last_used=%u isr=0x%x",
+                       ctrl_vq.used->idx, ctrl_vq.last_used_idx, isr);
             /* Return descriptors to free list */
             ctrl_vq.desc[resp_desc].next = ctrl_vq.free_head;
             ctrl_vq.free_head = cmd_desc;
             ctrl_vq.num_free += 2;
             return -1;
         }
-        __asm__ volatile("nop");
+        /* Memory barrier before reading used ring */
+        __asm__ volatile("dmb ish" ::: "memory");
     }
 
     /* Process completion and free descriptors */
@@ -303,10 +322,10 @@ found_gpu:
     uint32_t status = virtio_mmio_read32(mmio, VIRTIO_MMIO_STATUS);
     virtio_mmio_write32(mmio, VIRTIO_MMIO_STATUS, status | VIRTIO_STATUS_DRIVER);
 
-    /* Read device features */
-    virtio_mmio_write32(mmio, VIRTIO_MMIO_DEVICE_FEATURES, 0);  /* Select low 32 bits */
+    /* Read device features using selector register */
+    virtio_mmio_write32(mmio, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 0);  /* Select low 32 bits */
     uint32_t features_lo = virtio_mmio_read32(mmio, VIRTIO_MMIO_DEVICE_FEATURES);
-    virtio_mmio_write32(mmio, VIRTIO_MMIO_DEVICE_FEATURES, 1);  /* Select high 32 bits */
+    virtio_mmio_write32(mmio, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 1);  /* Select high 32 bits */
     uint32_t features_hi = virtio_mmio_read32(mmio, VIRTIO_MMIO_DEVICE_FEATURES);
 
     gpu_dev.vdev.features = ((uint64_t)features_hi << 32) | features_lo;
@@ -316,13 +335,23 @@ found_gpu:
     uint32_t dev_version = virtio_mmio_read32(mmio, VIRTIO_MMIO_VERSION);
 
     /* For version 1 (legacy), feature negotiation is optional */
-    /* For version 2 (modern), we need proper feature selection */
+    /* For version 2 (modern), we MUST negotiate VIRTIO_F_VERSION_1 */
     if (dev_version == 1) {
-        /* Legacy device - simpler initialization */
+        /* Legacy device - must set guest page size first */
         klog_debug("Using legacy VirtIO (version 1)");
+        virtio_mmio_write32(mmio, VIRTIO_MMIO_GUEST_PAGE_SIZE, 4096);
     } else {
-        /* Modern device - write driver features (accepting basic features) */
+        /* Modern device - write driver features */
+        /* We must accept VIRTIO_F_VERSION_1 (bit 32) */
+        klog_debug("Using modern VirtIO (version 2)");
+
+        /* Write low 32 bits of features (accept all device features) */
+        virtio_mmio_write32(mmio, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 0);
         virtio_mmio_write32(mmio, VIRTIO_MMIO_DRIVER_FEATURES, features_lo);
+
+        /* Write high 32 bits - MUST include VERSION_1 (bit 0 of high word = bit 32) */
+        virtio_mmio_write32(mmio, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 1);
+        virtio_mmio_write32(mmio, VIRTIO_MMIO_DRIVER_FEATURES, features_hi | 1);  /* Bit 32 = VERSION_1 */
     }
 
     /* Set FEATURES_OK */
@@ -350,14 +379,9 @@ found_gpu:
     gpu_dev.num_scanouts = 1;  /* Assume 1 display for now */
     gpu_dev.resource_id = 1;   /* Start resource IDs at 1 */
 
-    /* Debug: Verify device status */
+    /* Verify device status */
     status = virtio_mmio_read32(mmio, VIRTIO_MMIO_STATUS);
     klog_debug("Final device status: 0x%x", status);
-    klog_debug("  ACKNOWLEDGE=%u DRIVER=%u FEATURES_OK=%u DRIVER_OK=%u",
-               !!(status & VIRTIO_STATUS_ACKNOWLEDGE),
-               !!(status & VIRTIO_STATUS_DRIVER),
-               !!(status & VIRTIO_STATUS_FEATURES_OK),
-               !!(status & VIRTIO_STATUS_DRIVER_OK));
 
     klog_info("VirtIO GPU initialized successfully!");
 
