@@ -154,6 +154,38 @@ void timer_start(void)
 }
 
 /**
+ * Handle timer interrupt from FIQ
+ * Called directly from FIQ handler when timer interrupt is pending
+ * Returns true if timer interrupt was handled
+ */
+bool timer_handle_fiq(void)
+{
+    uint32_t ctl;
+
+    if (!timer.initialized) {
+        return false;
+    }
+
+    /* Check if timer interrupt is pending (ISTATUS bit) */
+    ctl = read_cntv_ctl();
+    if (!(ctl & (1 << 2))) {
+        /* No timer interrupt pending */
+        return false;
+    }
+
+    /* Increment tick count */
+    timer.ticks++;
+
+    /* Re-arm timer (this clears the interrupt) */
+    write_cntv_tval(timer.tick_interval);
+
+    /* Call scheduler tick for preemptive scheduling */
+    scheduler_tick();
+
+    return true;
+}
+
+/**
  * Get current system tick count
  */
 uint64_t timer_get_ticks(void)
