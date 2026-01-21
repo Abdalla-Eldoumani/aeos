@@ -119,6 +119,7 @@ typedef struct {
     virtio_device_t vdev;
     uint32_t num_scanouts;
     uint32_t resource_id;
+    uint32_t display_resource_id;   /* Resource ID for display (0 if not setup) */
     bool initialized;
 } virtio_gpu_t;
 
