@@ -43,7 +43,14 @@ C_SOURCES   = src/kernel/main.c \
               src/kernel/kprintf.c \
               src/kernel/shell.c \
               src/kernel/editor.c \
+              src/kernel/bootscreen.c \
+              src/kernel/event.c \
+              src/kernel/window.c \
+              src/kernel/wm.c \
+              src/kernel/desktop.c \
+              src/kernel/gui.c \
               src/drivers/uart.c \
+              src/drivers/virtio_input.c \
               src/drivers/framebuffer.c \
               src/drivers/dtb.c \
               src/drivers/ramfb.c \
@@ -62,7 +69,11 @@ C_SOURCES   = src/kernel/main.c \
               src/fs/vfs.c \
               src/fs/ramfs.c \
               src/fs/fs_persist.c \
-              src/lib/string.c
+              src/lib/string.c \
+              src/apps/terminal.c \
+              src/apps/filemanager.c \
+              src/apps/settings.c \
+              src/apps/about.c
 
 # Object files
 ASM_OBJECTS = $(patsubst src/%.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
@@ -103,6 +114,7 @@ directories:
 	@mkdir -p $(BUILD_DIR)/syscall
 	@mkdir -p $(BUILD_DIR)/fs
 	@mkdir -p $(BUILD_DIR)/lib
+	@mkdir -p $(BUILD_DIR)/apps
 
 # Build kernel ELF
 $(KERNEL_ELF): $(ALL_OBJECTS)
@@ -153,7 +165,7 @@ run-nopersist: all
 run-ramfb: all
 	@echo "Starting QEMU with graphics window..."
 	@echo "Graphics will appear in a separate window"
-	@echo "Press Ctrl+Alt+G to release mouse/keyboard"
+	@echo "Click in window to grab mouse, Ctrl+Alt+G to release"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
 		-device virtio-gpu-device \
 		-device virtio-keyboard-device \
