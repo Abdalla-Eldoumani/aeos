@@ -17,6 +17,7 @@
 #include <aeos/fs_persist.h>
 #include <aeos/timer.h>
 #include <aeos/editor.h>
+#include <aeos/gui.h>
 
 /* External symbols from vectors.asm */
 extern uint64_t exception_counters[16];
@@ -82,6 +83,7 @@ static int cmd_hexdump(int argc, char **argv);
 static int cmd_write(int argc, char **argv);
 static int cmd_grep(int argc, char **argv);
 static int cmd_exit(int argc, char **argv);
+static int cmd_startx(int argc, char **argv);
 
 /* Built-in command table */
 typedef struct {
@@ -117,6 +119,7 @@ static const shell_cmd_t builtin_commands[] = {
     {"write",   cmd_write,   "Write text to file"},
     {"grep",    cmd_grep,    "Search for pattern in file"},
     {"exit",    cmd_exit,    "Exit the shell"},
+    {"startx",  cmd_startx,  "Start graphical desktop environment"},
     {NULL,      NULL,        NULL}
 };
 
@@ -1633,6 +1636,34 @@ static int cmd_exit(int argc, char **argv)
     /* Halt in infinite loop */
     while (1) {
         __asm__ volatile("wfi");
+    }
+
+    return 0;
+}
+
+/**
+ * startx - Start graphical desktop environment
+ */
+static int cmd_startx(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    kprintf("\nStarting graphical desktop environment...\n");
+
+    /* Initialize GUI if not already initialized */
+    if (gui_init() == 0) {
+        /* Run GUI - this will block until user exits */
+        gui_run();
+
+        /* GUI exited, return to shell */
+        kprintf("\nReturned to text shell.\n");
+        kprintf("Type 'startx' to launch GUI again, or 'help' for commands.\n\n");
+    } else {
+        kprintf(ANSI_RED "Error: Failed to initialize GUI." ANSI_RESET "\n");
+        kprintf("Make sure you're running with graphical display support:\n");
+        kprintf("  make run-ramfb   (recommended)\n");
+        kprintf("  make run-virtio\n");
     }
 
     return 0;
