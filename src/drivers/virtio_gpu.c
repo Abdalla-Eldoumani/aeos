@@ -378,6 +378,7 @@ found_gpu:
     gpu_dev.initialized = true;
     gpu_dev.num_scanouts = 1;  /* Assume 1 display for now */
     gpu_dev.resource_id = 1;   /* Start resource IDs at 1 */
+    gpu_dev.display_resource_id = 0;  /* Display not yet set up */
 
     /* Verify device status */
     status = virtio_mmio_read32(mmio, VIRTIO_MMIO_STATUS);
@@ -578,11 +579,31 @@ int virtio_gpu_update_display(void)
         return -1;
     }
 
-    /* Determine pixel format (our framebuffer is XRGB8888) */
-    format = VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM;
+    /* Check if display is already set up */
+    if (gpu_dev.display_resource_id != 0) {
+        /* Display already configured - just transfer and flush */
+        resource_id = gpu_dev.display_resource_id;
 
+        /* Transfer framebuffer data to host */
+        if (virtio_gpu_transfer_to_host(resource_id, 0, 0, fb->width, fb->height) != 0) {
+            /* Transfer failed - don't log error on every frame */
+            return -1;
+        }
+
+        /* Flush to update display */
+        if (virtio_gpu_flush(resource_id, 0, 0, fb->width, fb->height) != 0) {
+            return -1;
+        }
+
+        return 0;
+    }
+
+    /* First-time setup */
     klog_info("Setting up VirtIO GPU display:");
     klog_info("  Framebuffer: %ux%u @ %p", fb->width, fb->height, fb->base);
+
+    /* Determine pixel format (our framebuffer is XRGB8888) */
+    format = VIRTIO_GPU_FORMAT_X8R8G8B8_UNORM;
 
     /* Step 1: Create 2D resource */
     klog_debug("Step 1: Creating 2D resource...");
@@ -624,6 +645,9 @@ int virtio_gpu_update_display(void)
         return -1;
     }
     klog_debug("  Flush complete");
+
+    /* Save resource ID for future updates */
+    gpu_dev.display_resource_id = resource_id;
 
     klog_info("VirtIO GPU display setup complete!");
     klog_info("Graphics should now appear in QEMU window");
