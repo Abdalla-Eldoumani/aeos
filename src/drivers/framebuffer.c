@@ -277,11 +277,11 @@ void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
     }
     glyph = font_8x8[c - 32];
 
-    /* Draw character */
+    /* Draw character - bit 0 is leftmost pixel */
     for (j = 0; j < 8; j++) {
         row = glyph[j];
         for (i = 0; i < 8; i++) {
-            if (row & (1 << (7 - i))) {
+            if (row & (1 << i)) {
                 fb_putpixel(x + i, y + j, fg);
             } else {
                 fb_putpixel(x + i, y + j, bg);
