@@ -27,6 +27,8 @@
 #include <aeos/pflash.h>
 #include <aeos/semihosting.h>
 #include <aeos/shell.h>
+#include <aeos/bootscreen.h>
+#include <aeos/gui.h>
 
 /* External symbols from linker script */
 extern char _kernel_start;
@@ -234,77 +236,36 @@ static void test_heap(void)
 }
 
 /**
- * Graphics demo - shows off framebuffer capabilities
+ * Initialize graphical display
+ * Returns true if graphical mode available
  */
-static void graphics_demo(void)
+static bool init_graphics(void)
 {
-    uint32_t i;
-    fb_info_t *fb;
-
-    klog_info("Running graphics demo...");
+    klog_info("Initializing graphical display...");
 
     /* Initialize framebuffer */
     if (fb_init() < 0) {
         klog_error("Failed to initialize framebuffer");
-        return;
+        return false;
     }
 
-    fb = fb_get_info();
-    kprintf("  Framebuffer: %ux%u @ %p\n", fb->width, fb->height, fb->base);
+    /* Try virtio-gpu */
+    if (virtio_gpu_init() == 0) {
+        klog_info("VirtIO GPU driver initialized");
 
-    /* Draw welcome banner */
-    fb_clear(COLOR_DARK_GRAY);
-    fb_fill_rect(0, 0, fb->width, 60, COLOR_BLUE);
-    fb_puts(250, 20, "AEOS - Abdalla's Educational OS", COLOR_WHITE, COLOR_BLUE);
-    fb_puts(280, 35, "ARMv8-A AArch64 Kernel", COLOR_YELLOW, COLOR_BLUE);
-
-    /* Draw some colored boxes */
-    fb_fill_rect(50, 100, 100, 80, COLOR_RED);
-    fb_fill_rect(170, 100, 100, 80, COLOR_GREEN);
-    fb_fill_rect(290, 100, 100, 80, COLOR_BLUE);
-    fb_fill_rect(410, 100, 100, 80, COLOR_YELLOW);
-    fb_fill_rect(530, 100, 100, 80, COLOR_CYAN);
-
-    /* Draw labels */
-    fb_puts(70, 190, "VFS", COLOR_WHITE, COLOR_BLACK);
-    fb_puts(175, 190, "SYSCALLS", COLOR_WHITE, COLOR_BLACK);
-    fb_puts(295, 190, "PROCESSES", COLOR_WHITE, COLOR_BLACK);
-    fb_puts(420, 190, "SCHEDULER", COLOR_WHITE, COLOR_BLACK);
-    fb_puts(545, 190, "MEMORY", COLOR_WHITE, COLOR_BLACK);
-
-    /* Draw some rectangles */
-    fb_draw_rect(50, 220, 680, 120, COLOR_WHITE);
-    fb_draw_rect(52, 222, 676, 116, COLOR_GREEN);
-
-    /* Info text */
-    fb_puts(60, 240, "Boot & Basic Output                  [OK]", COLOR_GREEN, COLOR_BLACK);
-    fb_puts(60, 255, "Memory Management                    [OK]", COLOR_GREEN, COLOR_BLACK);
-    fb_puts(60, 270, "Process Management                   [OK]", COLOR_GREEN, COLOR_BLACK);
-    fb_puts(60, 285, "System Calls                         [OK]", COLOR_GREEN, COLOR_BLACK);
-    fb_puts(60, 300, "File System (VFS)                    [OK]", COLOR_GREEN, COLOR_BLACK);
-    fb_puts(60, 315, "Interactive Shell                    [OK]", COLOR_CYAN, COLOR_BLACK);
-
-    /* Draw pattern at bottom */
-    for (i = 0; i < 20; i++) {
-        fb_fill_rect(i * 40, fb->height - 40, 35, 35,
-                    (i % 2) ? COLOR_MAGENTA : COLOR_CYAN);
+        /* Set up the display with our framebuffer */
+        if (virtio_gpu_update_display() == 0) {
+            klog_info("Display activated - graphics visible in window");
+            return true;
+        } else {
+            klog_warn("Failed to activate display");
+        }
+    } else {
+        klog_warn("VirtIO GPU not available");
     }
 
-    /* Draw some lines */
-    for (i = 0; i < 10; i++) {
-        fb_draw_line(50, 350 + i * 5, fb->width - 50, 350 + i * 5,
-                    COLOR_WHITE - (i * 0x00111111));
-    }
-
-    /* Status bar */
-    fb_fill_rect(0, fb->height - 25, fb->width, 25, COLOR_BLUE);
-    fb_puts(10, fb->height - 18, "Press Ctrl+C to exit QEMU", COLOR_WHITE, COLOR_BLUE);
-    fb_puts(fb->width - 220, fb->height - 18, "AEOS v0.1 - 2025", COLOR_YELLOW, COLOR_BLUE);
-
-    klog_info("Graphics demo complete!");
-
-    /* ASCII preview disabled - not needed for GUI display */
-    /* fb_ascii_preview(); */
+    klog_info("Graphics rendered to memory only");
+    return false;
 }
 
 /**
@@ -386,6 +347,9 @@ static void display_cpu_info(void *dtb_addr)
  */
 void kernel_main(void *dtb_addr)
 {
+    bool graphical_mode = false;
+    bool use_gui = false;
+
     /* Initialize UART for console output */
     uart_init();
 
@@ -398,111 +362,112 @@ void kernel_main(void *dtb_addr)
     /* Display memory layout */
     display_memory_info();
 
-    /* Initialize memory management (Phase 2) */
+    /* Initialize memory management */
     kprintf("\n");
     mm_init();
 
-    /* Initialize exception vector table (needed for syscalls!) */
+    /* Initialize exception vector table */
     kprintf("\n");
-    klog_info("Installing exception vector table for syscalls...");
-    interrupts_init();  /* Installs vector table but doesn't enable interrupts */
+    klog_info("Installing exception vector table...");
+    interrupts_init();
 
-    /* Verify VBAR_EL1 is set correctly */
-    uint64_t vbar;
-    __asm__ volatile("mrs %0, vbar_el1" : "=r"(vbar));
-    kprintf("[DEBUG] VBAR_EL1 = %p (should match vector table address above)\n", (void*)vbar);
-
-    /* Phase 3: Interrupts */
+    /* Initialize GIC */
     kprintf("\n");
     klog_info("Initializing interrupt subsystem...");
-#if 1  /* Re-enabled after fixing boot.asm EL2 configuration */
-    /* Step 1: Initialize GIC (but don't enable IRQs yet) */
     gic_init();
     klog_info("GIC initialized");
 
-    /* Step 2: Initialize timer (doesn't start until timer_start()) */
+    /* Initialize timer */
     timer_init();
 
-    /* Step 3: Unmask IRQs */
+    /* Enable interrupts and start timer */
     klog_info("Enabling IRQs...");
     interrupts_enable();
-
-    /* Step 4: Start timer (first IRQ will fire in ~10ms) */
     timer_start();
-    klog_info("Timer started - preemptive scheduling now active");
-#endif
+    klog_info("Timer started - preemptive scheduling active");
 
-    /* Test printf functionality (Phase 1) */
+    /* Test basic functionality */
     kprintf("\n");
     test_kprintf();
-
-    /* Test memory management (Phase 2) */
     kprintf("\n");
     test_pmm();
-
     kprintf("\n");
     test_heap();
 
-    /* Initialize Virtual File System (Phase 6) */
+    /* Initialize Virtual File System */
     kprintf("\n");
     klog_info("Initializing Virtual File System...");
     vfs_init();
     test_vfs();
 
-    /* Graphics Demo (BONUS!) */
+    /* Initialize graphics */
     kprintf("\n");
-    graphics_demo();
+    graphical_mode = init_graphics();
 
-    /* Initialize Display Drivers */
-    kprintf("\n");
-    klog_info("Checking for display devices...");
-
-    /* NOTE: ramfb disabled - causes crashes due to fw_cfg MMIO issues
-     * Using VirtIO GPU instead for actual display
-     */
-
-    /* Try virtio-gpu (standard GPU driver) */
-    if (virtio_gpu_init() == 0) {
-        klog_info("  [OK] VirtIO GPU driver initialized");
-
-        /* Set up the display with our framebuffer */
-        if (virtio_gpu_update_display() == 0) {
-            klog_info("  [OK] Display activated - graphics visible in window");
-        } else {
-            klog_warn("  Failed to activate display");
-        }
-    } else {
-        klog_warn("  VirtIO GPU not available");
-        klog_info("  Graphics rendered to memory only");
-    }
-
-    kprintf("\n");
-    klog_info("==================================================");
-    klog_info("  GRAPHICS AVAILABLE:");
-    klog_info("  - ASCII art preview (shown above)");
-    klog_info("  - SDL window:  make run-ramfb");
-    klog_info("  - VNC server:  make run-vnc");
-    klog_info("  - VirtIO GPU:  make run-virtio");
-    klog_info("==================================================");
-
-    /* Initialize Process Management (Phase 4) */
+    /* Initialize Process Management */
     kprintf("\n");
     klog_info("Initializing Process Management...");
     process_init();
     scheduler_init();
     klog_info("Process management initialized");
 
-    /* Initialize System Calls (Phase 5) */
+    /* Initialize System Calls */
     kprintf("\n");
     klog_info("Initializing System Calls...");
     syscall_init();
 
-    /* Initialize Shell (Phase 7) */
+    /* Initialize Shell */
     kprintf("\n");
-    klog_info("Initializing Interactive Shell...");
+    klog_info("Initializing Shell...");
     shell_init();
 
-    /* Start interactive shell */
+    /* If graphics available, show boot screen and launch GUI */
+    if (graphical_mode) {
+        kprintf("\n");
+        klog_info("Graphical mode available!");
+
+        /* Initialize and show boot screen */
+        bootscreen_init();
+
+        /* Update boot progress */
+        bootscreen_update(BOOT_STAGE_MEMORY);
+        bootscreen_update(BOOT_STAGE_INTERRUPTS);
+        bootscreen_update(BOOT_STAGE_TIMER);
+        bootscreen_update(BOOT_STAGE_FILESYSTEM);
+        bootscreen_update(BOOT_STAGE_PROCESSES);
+        bootscreen_update(BOOT_STAGE_INPUT);
+        bootscreen_update(BOOT_STAGE_DESKTOP);
+
+        /* Check if user wants GUI or text mode */
+        use_gui = bootscreen_complete();
+
+        if (use_gui) {
+            klog_info("Starting graphical desktop environment...");
+
+            /* Initialize GUI */
+            if (gui_init() == 0) {
+                /* Run GUI - this runs until user exits */
+                gui_run();
+
+                /* After GUI exits, fall through to text shell */
+                klog_info("Returning to text shell...");
+            } else {
+                klog_error("Failed to initialize GUI, falling back to shell");
+            }
+        } else {
+            klog_info("Text mode selected by user");
+        }
+    }
+
+    /* Text mode: Run shell */
+    kprintf("\n");
+    klog_info("==================================================");
+    klog_info("  AEOS Interactive Shell");
+    klog_info("  Type 'help' for available commands");
+    if (graphical_mode) {
+        klog_info("  Type 'startx' to launch GUI desktop");
+    }
+    klog_info("==================================================");
     kprintf("\n");
 
     /* Start the shell - this never returns */
