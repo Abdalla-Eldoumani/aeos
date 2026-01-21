@@ -85,6 +85,12 @@ int memcmp(const void *s1, const void *s2, size_t n);
  */
 void *memmove(void *dest, const void *src, size_t n);
 
+/**
+ * Formatted output to buffer (simplified printf)
+ * Supports: %s, %d, %u, %x
+ */
+int snprintf(char *buf, size_t size, const char *fmt, ...);
+
 #endif /* AEOS_STRING_H */
 
 /* ============================================================================
