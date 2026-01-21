@@ -375,6 +375,112 @@ void *memmove(void *dest, const void *src, size_t n)
     return dest;
 }
 
+/* Variable argument list support for snprintf */
+typedef __builtin_va_list va_list;
+#define va_start(ap, last) __builtin_va_start(ap, last)
+#define va_arg(ap, type)   __builtin_va_arg(ap, type)
+#define va_end(ap)         __builtin_va_end(ap)
+
+/**
+ * Format integer to buffer
+ */
+static int format_uint(char *buf, size_t size, size_t pos, uint32_t value, int base)
+{
+    char tmp[16];
+    int i = 0;
+    int count = 0;
+    const char *digits = "0123456789abcdef";
+
+    if (value == 0) {
+        if (pos < size - 1) {
+            buf[pos] = '0';
+            count = 1;
+        }
+        return count;
+    }
+
+    while (value > 0 && i < 16) {
+        tmp[i++] = digits[value % base];
+        value /= base;
+    }
+
+    while (i > 0 && pos + count < size - 1) {
+        buf[pos + count] = tmp[--i];
+        count++;
+    }
+
+    return count;
+}
+
+/**
+ * Simplified snprintf
+ */
+int snprintf(char *buf, size_t size, const char *fmt, ...)
+{
+    va_list args;
+    size_t pos = 0;
+    const char *str;
+    int32_t val;
+    uint32_t uval;
+
+    if (buf == NULL || size == 0 || fmt == NULL) {
+        return 0;
+    }
+
+    va_start(args, fmt);
+
+    while (*fmt && pos < size - 1) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+                case 's':
+                    str = va_arg(args, const char *);
+                    if (str == NULL) str = "(null)";
+                    while (*str && pos < size - 1) {
+                        buf[pos++] = *str++;
+                    }
+                    break;
+
+                case 'd':
+                    val = va_arg(args, int32_t);
+                    if (val < 0) {
+                        if (pos < size - 1) buf[pos++] = '-';
+                        val = -val;
+                    }
+                    pos += format_uint(buf, size, pos, (uint32_t)val, 10);
+                    break;
+
+                case 'u':
+                    uval = va_arg(args, uint32_t);
+                    pos += format_uint(buf, size, pos, uval, 10);
+                    break;
+
+                case 'x':
+                    uval = va_arg(args, uint32_t);
+                    pos += format_uint(buf, size, pos, uval, 16);
+                    break;
+
+                case '%':
+                    if (pos < size - 1) buf[pos++] = '%';
+                    break;
+
+                default:
+                    if (pos < size - 1) buf[pos++] = '%';
+                    if (pos < size - 1 && *fmt) buf[pos++] = *fmt;
+                    break;
+            }
+            if (*fmt) fmt++;
+        } else {
+            buf[pos++] = *fmt++;
+        }
+    }
+
+    buf[pos] = '\0';
+    va_end(args);
+
+    return (int)pos;
+}
+
 /* ============================================================================
  * End of string.c
  * ============================================================================ */
