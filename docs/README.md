@@ -59,6 +59,44 @@ Command-line interface and text editor.
 - **What it does**: Provides interactive shell with 24 built-in commands, colorized output, and a vim-like text editor
 - **Key concepts**: Command parsing, line editing, file operations, modal text editing
 
+### 8. [Graphics and GUI](./08-graphics-gui/)
+Graphical desktop environment implementation.
+
+- **Location**: `src/kernel/bootscreen.c`, `src/kernel/gui.c`, `src/kernel/wm.c`, `src/kernel/window.c`, `src/kernel/desktop.c`, `src/kernel/event.c`
+- **What it does**: Provides a complete graphical desktop environment with boot screen, window manager, desktop icons, and taskbar
+- **Key concepts**: Framebuffer graphics, window compositing, event-driven architecture, mouse cursor rendering
+
+#### Key Components:
+- **Boot Screen** (`bootscreen.c`): Animated progress bar with stage messages
+- **Event System** (`event.c`): Circular queue for keyboard/mouse events
+- **Window Manager** (`wm.c`): Z-ordered window list, focus tracking, window dragging
+- **Window** (`window.c`): Window creation, decorations, client area management
+- **Desktop** (`desktop.c`): Background, icons, taskbar, start menu
+- **GUI Init** (`gui.c`): Coordinates initialization of all GUI subsystems
+
+### 9. [VirtIO Drivers](./09-virtio-drivers/)
+VirtIO device drivers for graphics and input.
+
+- **Location**: `src/drivers/virtio_gpu.c`, `src/drivers/virtio_input.c`, `src/drivers/framebuffer.c`
+- **What it does**: Interfaces with QEMU's VirtIO devices for GPU display and mouse/keyboard input
+- **Key concepts**: VirtIO MMIO, virtqueues, legacy (v1) protocol, event polling
+
+#### Key Components:
+- **VirtIO GPU** (`virtio_gpu.c`): Creates display resources, transfers framebuffer to host
+- **VirtIO Input** (`virtio_input.c`): Polls keyboard and mouse devices for events
+- **Framebuffer** (`framebuffer.c`): Graphics primitives (putpixel, fill_rect, draw_line, putchar, puts)
+
+### 10. [GUI Applications](./10-gui-applications/)
+Built-in graphical applications.
+
+- **Location**: `src/apps/`
+- **What it does**: Provides user-facing applications for the desktop environment
+- **Applications**:
+  - **Terminal** (`terminal.c`): GUI terminal emulator with shell integration
+  - **File Manager** (`filemanager.c`): Graphical file browser
+  - **Settings** (`settings.c`): System information and memory statistics
+  - **About** (`about.c`): System information dialog
+
 ## Documentation Structure
 
 Each section directory contains:
@@ -72,7 +110,9 @@ Each section directory contains:
 3. **Direct System Calls**: System calls use function calls instead of SVC exceptions
 4. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
 5. **Kernel Mode Only**: All code runs at EL1, no user space (EL0)
-6. **VirtIO GPU**: Graphics via VirtIO GPU MMIO device with legacy (v1) protocol
+6. **VirtIO Legacy Mode**: GPU and input use VirtIO MMIO with legacy (v1) protocol
+7. **Event-Driven GUI**: Mouse/keyboard events queued and processed in main loop
+8. **Compositing Window Manager**: Windows have backbuffers, composited to main framebuffer
 
 ## Build Environment
 
@@ -81,3 +121,12 @@ Each section directory contains:
 - **Assembler**: `aarch64-linux-gnu-as`
 - **Preprocessor**: `m4` (for assembly macros)
 - **Emulator**: QEMU `qemu-system-aarch64`
+
+## Running Modes
+
+```bash
+make run           # Text mode (UART shell only)
+make run-ramfb     # Graphical desktop (recommended)
+make run-virtio    # Graphical desktop (alternative)
+DEBUG=1 make run-ramfb  # Debug mode with logging
+```
