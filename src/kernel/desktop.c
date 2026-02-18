@@ -10,6 +10,7 @@
 #include <aeos/timer.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
+#include <aeos/gui.h>
 
 /* Color scheme */
 #define DESKTOP_BG_TOP      0xFF1a1a2e
@@ -258,29 +259,34 @@ static void draw_start_menu(void)
     fb_fill_rect(menu_x, menu_y, menu_width, menu_height, TASKBAR_BG);
     fb_draw_rect(menu_x, menu_y, menu_width, menu_height, TASKBAR_BORDER);
 
-    /* Menu items */
+    /* Menu items with color indicators */
     item_y = menu_y + 8;
 
-    fb_puts(menu_x + 12, item_y, "Terminal", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF00CC00);  /* Green */
+    fb_puts(menu_x + 26, item_y, "Terminal", 0xFFFFFFFF, TASKBAR_BG);
     item_y += 24;
 
-    fb_puts(menu_x + 12, item_y, "Files", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFFCCCC00);  /* Yellow */
+    fb_puts(menu_x + 26, item_y, "Files", 0xFFFFFFFF, TASKBAR_BG);
     item_y += 24;
 
-    fb_puts(menu_x + 12, item_y, "Settings", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF6688CC);  /* Blue-gray */
+    fb_puts(menu_x + 26, item_y, "Settings", 0xFFFFFFFF, TASKBAR_BG);
     item_y += 24;
 
-    fb_puts(menu_x + 12, item_y, "About", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF0099FF);  /* Blue */
+    fb_puts(menu_x + 26, item_y, "About", 0xFFFFFFFF, TASKBAR_BG);
     item_y += 24;
 
     /* Separator */
     fb_fill_rect(menu_x + 8, item_y, menu_width - 16, 1, TASKBAR_BORDER);
     item_y += 12;
 
-    fb_puts(menu_x + 12, item_y, "Text Mode", 0xFF888888, TASKBAR_BG);
+    fb_puts(menu_x + 26, item_y, "Text Mode", 0xFF888888, TASKBAR_BG);
     item_y += 24;
 
-    fb_puts(menu_x + 12, item_y, "Shutdown", 0xFFff6666, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFFFF4444);  /* Red */
+    fb_puts(menu_x + 26, item_y, "Shutdown", 0xFFff6666, TASKBAR_BG);
 }
 
 /**
@@ -313,6 +319,74 @@ static int find_icon_at(int32_t x, int32_t y)
 }
 
 /**
+ * Handle start menu item click
+ * Returns true if click was inside the menu and handled
+ */
+static bool handle_start_menu_click(int32_t x, int32_t y)
+{
+    int32_t menu_x = 4;
+    int32_t menu_y = FB_HEIGHT - TASKBAR_HEIGHT - 160;
+    int32_t menu_width = 150;
+    int32_t menu_height = 156;
+    int32_t item_y;
+    int32_t item_idx;
+
+    /* Check if click is inside menu bounds */
+    if (x < menu_x || x >= menu_x + menu_width ||
+        y < menu_y || y >= menu_y + menu_height) {
+        return false;  /* Outside menu */
+    }
+
+    /* Determine which item was clicked.
+     * Layout from draw_start_menu (offsets from menu_y+8):
+     *   Items 0-3: at offsets 0, 24, 48, 72 (24px each)
+     *   Separator: at offset 96 (12px gap)
+     *   Items 4-5: at offsets 108, 132 (24px each)
+     */
+    item_y = y - (menu_y + 8);
+    if (item_y < 0) {
+        return true;  /* Click in menu padding */
+    }
+
+    if (item_y < 96) {
+        item_idx = item_y / 24;          /* 0-3: Terminal, Files, Settings, About */
+    } else if (item_y < 108) {
+        /* Close menu before returning */
+        desktop.start_menu_visible = false;
+        return true;                      /* Separator area — ignore */
+    } else {
+        item_idx = 4 + (item_y - 108) / 24;  /* 4=Text Mode, 5=Shutdown */
+    }
+
+    /* Close menu before launching */
+    desktop.start_menu_visible = false;
+
+    switch (item_idx) {
+        case 0:  /* Terminal */
+            gui_launch_terminal();
+            break;
+        case 1:  /* Files */
+            gui_launch_filemanager();
+            break;
+        case 2:  /* Settings */
+            gui_launch_settings();
+            break;
+        case 3:  /* About */
+            gui_launch_about();
+            break;
+        case 4:  /* Text Mode — not supported from GUI */
+            break;
+        case 5:  /* Shutdown */
+            wm_request_exit();
+            break;
+        default:
+            break;
+    }
+
+    return true;
+}
+
+/**
  * Handle desktop click
  */
 void desktop_handle_click(int32_t x, int32_t y, bool double_click)
@@ -323,11 +397,13 @@ void desktop_handle_click(int32_t x, int32_t y, bool double_click)
     /* Suppress unused parameter warning - we use our own timing-based detection */
     (void)double_click;
 
-    /* Close start menu on any click outside it */
+    /* Handle start menu item clicks first */
     if (desktop.start_menu_visible) {
-        if (x > 154 || y < FB_HEIGHT - TASKBAR_HEIGHT - 160) {
-            desktop.start_menu_visible = false;
+        if (handle_start_menu_click(x, y)) {
+            return;  /* Click was inside menu and handled */
         }
+        /* Click was outside menu — dismiss it */
+        desktop.start_menu_visible = false;
     }
 
     /* Deselect current icon */
