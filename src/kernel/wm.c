@@ -196,6 +196,11 @@ void wm_unregister_window(window_t *win)
         return;
     }
 
+    /* Clear drag state if we're removing the window being dragged */
+    if (wm.drag_window == win) {
+        wm.drag_window = NULL;
+    }
+
     /* Remove from list */
     if (win->prev) {
         win->prev->next = win->next;
@@ -425,10 +430,12 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
 
             /* Pass to window callback */
             if (win->on_mouse) {
-                /* Convert to window-relative coordinates */
-                mouse_event_t local = *mouse;
+                /* Convert to window-relative coordinates (manual copy for AArch64 safety) */
+                mouse_event_t local;
                 local.x = mouse->x - win->client_x;
                 local.y = mouse->y - win->client_y;
+                local.buttons = mouse->buttons;
+                local.scroll = mouse->scroll;
                 win->on_mouse(win, &local);
             }
         } else {
@@ -458,15 +465,22 @@ static void handle_mouse_move(mouse_event_t *mouse)
     wm.mouse_x = mouse->x;
     wm.mouse_y = mouse->y;
 
-    /* Always redraw when mouse moves (cursor needs to update) */
-    wm.needs_redraw = true;
+    /* Cursor is drawn via save/restore, so no full redraw needed for moves.
+       Only set needs_redraw when dragging (window position changes). */
 
     /* Handle dragging */
     if (wm.drag_window) {
+        wm.needs_redraw = true;
         int32_t new_x = mouse->x - wm.drag_start_x;
         int32_t new_y = mouse->y - wm.drag_start_y;
 
         /* Clamp to screen bounds */
+        if (new_x < -(int32_t)(wm.drag_window->width - 40)) {
+            new_x = -(int32_t)(wm.drag_window->width - 40);
+        }
+        if (new_x > (int32_t)FB_WIDTH - 40) {
+            new_x = FB_WIDTH - 40;
+        }
         if (new_y < 0) new_y = 0;
         if (new_y > (int32_t)FB_HEIGHT - WINDOW_TITLE_HEIGHT) {
             new_y = FB_HEIGHT - WINDOW_TITLE_HEIGHT;
@@ -483,6 +497,29 @@ static void handle_key(key_event_t *key, bool pressed)
 {
     if (!pressed) {
         return;  /* Only handle key down */
+    }
+
+    /* Debug: show key in title bar to verify keyboard events reach WM */
+    if (wm.focused) {
+        char debug_title[WINDOW_TITLE_MAX];
+        /* Find base title (strip previous debug suffix) */
+        char base[WINDOW_TITLE_MAX];
+        strncpy(base, wm.focused->title, WINDOW_TITLE_MAX - 1);
+        base[WINDOW_TITLE_MAX - 1] = '\0';
+        char *bracket = strchr(base, '[');
+        if (bracket && bracket > base) {
+            /* Trim trailing space before bracket */
+            bracket--;
+            while (bracket > base && *bracket == ' ') bracket--;
+            bracket[1] = '\0';
+        }
+        if (key->ascii >= 32 && key->ascii < 127) {
+            snprintf(debug_title, sizeof(debug_title), "%s [%c]", base, key->ascii);
+        } else {
+            snprintf(debug_title, sizeof(debug_title), "%s [k%d]", base, key->keycode);
+        }
+        window_set_title(wm.focused, debug_title);
+        wm.needs_redraw = true;
     }
 
     /* Pass to focused window */
