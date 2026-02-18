@@ -26,6 +26,12 @@ typedef struct {
     int32_t selected_index;
     uint32_t scroll_offset;
     uint32_t visible_entries;
+    /* File viewer state */
+    bool viewing_file;
+    char view_filename[64];
+    char view_content[2048];
+    uint32_t view_content_len;
+    uint32_t view_scroll;
 } filemanager_t;
 
 /**
