@@ -26,10 +26,31 @@
 #define ESC_BOLD            "\x1b[1m"
 #define ESC_DIM             "\x1b[2m"
 
+/* Tab display width (matches insert mode behavior) */
+#define TAB_WIDTH           4
+
 /* Move cursor to row, col (1-based) */
 static void term_move_cursor(int row, int col)
 {
     kprintf("\x1b[%d;%dH", row + 1, col + 1);
+}
+
+/**
+ * Compute visual column width from byte column, accounting for tabs.
+ * Each tab expands to TAB_WIDTH spaces.
+ */
+static int byte_col_to_visual(editor_line_t *line, int col)
+{
+    int visual = 0;
+    int limit = col < (int)line->len ? col : (int)line->len;
+    for (int i = 0; i < limit; i++) {
+        if (line->chars[i] == '\t') {
+            visual += TAB_WIDTH;
+        } else {
+            visual++;
+        }
+    }
+    return visual;
 }
 
 /* ============================================================================
@@ -345,14 +366,20 @@ void editor_refresh_screen(editor_t *ed)
                 }
 
                 /* Print the visible portion of the line */
-                for (int i = 0; i < avail; i++) {
+                int chars_drawn = 0;
+                for (int i = 0; i < avail && chars_drawn < draw_len; i++) {
                     char ch = line->chars[start_col + i];
                     if (ch >= 32 && ch < 127) {
                         uart_putc(ch);
+                        chars_drawn++;
                     } else if (ch == '\t') {
-                        uart_putc(' ');  /* Render tabs as spaces */
+                        for (int t = 0; t < TAB_WIDTH && chars_drawn < draw_len; t++) {
+                            uart_putc(' ');
+                            chars_drawn++;
+                        }
                     } else {
                         uart_putc('?');  /* Non-printable */
+                        chars_drawn++;
                     }
                 }
 
@@ -385,17 +412,18 @@ void editor_refresh_screen(editor_t *ed)
                            ed->filename[0] ? ed->filename : "[No Name]",
                            ed->modified ? " [+]" : "");
 
-    /* Right side: position */
+    /* Right side: format position into buffer first, then pad, then print */
     char pos_str[32];
-    int pos_len = 0;
-    pos_len = kprintf(" %d:%d ", ed->cursor_row + 1, ed->cursor_col + 1);
+    int pos_len = snprintf(pos_str, sizeof(pos_str), " %d:%d ",
+                           ed->cursor_row + 1, ed->cursor_col + 1);
 
     /* Pad middle */
     for (col = left_len; col < EDITOR_TERM_COLS - pos_len; col++) {
         uart_putc(' ');
     }
 
-    (void)pos_str;
+    /* Print position on the right */
+    kprintf("%s", pos_str);
 
     kprintf(ESC_RESET_ATTR "\r\n");
 
@@ -407,9 +435,11 @@ void editor_refresh_screen(editor_t *ed)
         kprintf("%s", ed->status_msg);
     }
 
-    /* Position cursor */
+    /* Position cursor (use visual column to account for tabs) */
     int cursor_screen_row = ed->cursor_row - ed->scroll_row;
-    int cursor_screen_col = line_num_width + ed->cursor_col - ed->scroll_col;
+    int cursor_visual_col = byte_col_to_visual(&ed->lines[ed->cursor_row], ed->cursor_col);
+    int scroll_visual_col = byte_col_to_visual(&ed->lines[ed->cursor_row], ed->scroll_col);
+    int cursor_screen_col = line_num_width + cursor_visual_col - scroll_visual_col;
 
     if (cursor_screen_row >= 0 && cursor_screen_row < EDITOR_TERM_ROWS - 2) {
         term_move_cursor(cursor_screen_row, cursor_screen_col);
@@ -563,15 +593,24 @@ static void editor_scroll(editor_t *ed)
         ed->scroll_row = ed->cursor_row - EDITOR_TERM_ROWS + 3;
     }
 
-    /* Horizontal scroll */
+    /* Horizontal scroll (use visual column for proper tab handling) */
     int line_num_width = 4;
     int visible_cols = EDITOR_TERM_COLS - line_num_width;
+    int cursor_visual = byte_col_to_visual(&ed->lines[ed->cursor_row], ed->cursor_col);
+    int scroll_visual = byte_col_to_visual(&ed->lines[ed->cursor_row], ed->scroll_col);
 
-    if (ed->cursor_col < ed->scroll_col) {
+    if (cursor_visual < scroll_visual) {
         ed->scroll_col = ed->cursor_col;
     }
-    if (ed->cursor_col >= ed->scroll_col + visible_cols) {
-        ed->scroll_col = ed->cursor_col - visible_cols + 1;
+    if (cursor_visual >= scroll_visual + visible_cols) {
+        /* Move scroll_col forward to keep cursor visible */
+        ed->scroll_col = ed->cursor_col;
+        /* Back up to fill visible area */
+        while (ed->scroll_col > 0) {
+            int test_visual = byte_col_to_visual(&ed->lines[ed->cursor_row], ed->scroll_col - 1);
+            if (cursor_visual - test_visual >= visible_cols) break;
+            ed->scroll_col--;
+        }
     }
 }
 
