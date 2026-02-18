@@ -252,6 +252,9 @@ static int deserialize_inodes(vfs_filesystem_t *fs, const void *buffer, size_t b
 
             memcpy(ramfs_data->data, (const char *)buffer + entry.data_offset, entry.size);
             ramfs_data->data_size = entry.size;
+
+            /* Advance offset past the file data */
+            *offset = (size_t)entry.data_offset + (size_t)entry.size;
         }
 
         /* Add to parent directory if not root */
