@@ -237,6 +237,12 @@ typedef struct {
     int32_t selected_index;
     uint32_t scroll_offset;
     uint32_t visible_entries;
+    /* File viewer state */
+    bool viewing_file;
+    char view_filename[64];
+    char view_content[2048];
+    uint32_t view_content_len;
+    uint32_t view_scroll;
 } filemanager_t;
 ```
 
@@ -349,7 +355,7 @@ static void filemanager_mouse(window_t *win, mouse_event_t *mouse)
 
         if (idx >= 0 && idx < fm->entry_count) {
             if (fm->selected_index == idx) {
-                /* Same entry clicked again - navigate */
+                /* Same entry clicked again - navigate or view */
                 file_entry_t *entry = &fm->entries[idx];
                 if (entry->is_directory) {
                     /* Build new path */
@@ -367,6 +373,9 @@ static void filemanager_mouse(window_t *win, mouse_event_t *mouse)
                                  fm->current_path, entry->name);
                     }
                     filemanager_navigate(fm, new_path);
+                } else {
+                    /* View file contents */
+                    filemanager_view_file(fm, entry->name);
                 }
             } else {
                 /* Select entry */
