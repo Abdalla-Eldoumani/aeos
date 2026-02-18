@@ -382,7 +382,7 @@ typedef __builtin_va_list va_list;
 #define va_end(ap)         __builtin_va_end(ap)
 
 /**
- * Format integer to buffer
+ * Format integer to buffer with optional width and padding
  */
 static int format_uint(char *buf, size_t size, size_t pos, uint32_t value, int base)
 {
@@ -413,6 +413,44 @@ static int format_uint(char *buf, size_t size, size_t pos, uint32_t value, int b
 }
 
 /**
+ * Format integer to buffer with width and zero-pad support
+ */
+static int format_uint_padded(char *buf, size_t size, size_t pos,
+                              uint32_t value, int base, int width, char pad)
+{
+    char tmp[16];
+    int i = 0;
+    int count = 0;
+    int padding;
+    const char *digits = "0123456789abcdef";
+
+    if (value == 0) {
+        tmp[i++] = '0';
+    } else {
+        while (value > 0 && i < 16) {
+            tmp[i++] = digits[value % base];
+            value /= base;
+        }
+    }
+
+    /* Add padding if needed */
+    padding = width - i;
+    while (padding > 0 && pos + count < size - 1) {
+        buf[pos + count] = pad;
+        count++;
+        padding--;
+    }
+
+    /* Write digits */
+    while (i > 0 && pos + count < size - 1) {
+        buf[pos + count] = tmp[--i];
+        count++;
+    }
+
+    return count;
+}
+
+/**
  * Simplified snprintf
  */
 int snprintf(char *buf, size_t size, const char *fmt, ...)
@@ -432,6 +470,21 @@ int snprintf(char *buf, size_t size, const char *fmt, ...)
     while (*fmt && pos < size - 1) {
         if (*fmt == '%') {
             fmt++;
+            int width = 0;
+            char pad_char = ' ';
+
+            /* Check for zero-pad flag */
+            if (*fmt == '0') {
+                pad_char = '0';
+                fmt++;
+            }
+
+            /* Parse width */
+            while (*fmt >= '0' && *fmt <= '9') {
+                width = width * 10 + (*fmt - '0');
+                fmt++;
+            }
+
             switch (*fmt) {
                 case 's':
                     str = va_arg(args, const char *);
@@ -447,17 +500,29 @@ int snprintf(char *buf, size_t size, const char *fmt, ...)
                         if (pos < size - 1) buf[pos++] = '-';
                         val = -val;
                     }
-                    pos += format_uint(buf, size, pos, (uint32_t)val, 10);
+                    if (width > 0) {
+                        pos += format_uint_padded(buf, size, pos, (uint32_t)val, 10, width, pad_char);
+                    } else {
+                        pos += format_uint(buf, size, pos, (uint32_t)val, 10);
+                    }
                     break;
 
                 case 'u':
                     uval = va_arg(args, uint32_t);
-                    pos += format_uint(buf, size, pos, uval, 10);
+                    if (width > 0) {
+                        pos += format_uint_padded(buf, size, pos, uval, 10, width, pad_char);
+                    } else {
+                        pos += format_uint(buf, size, pos, uval, 10);
+                    }
                     break;
 
                 case 'x':
                     uval = va_arg(args, uint32_t);
-                    pos += format_uint(buf, size, pos, uval, 16);
+                    if (width > 0) {
+                        pos += format_uint_padded(buf, size, pos, uval, 16, width, pad_char);
+                    } else {
+                        pos += format_uint(buf, size, pos, uval, 16);
+                    }
                     break;
 
                 case '%':
