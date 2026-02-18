@@ -70,7 +70,42 @@ static const uint8_t font_8x8[96][8] = {
     {0x63, 0x63, 0x36, 0x1C, 0x1C, 0x36, 0x63, 0x00},  /* X */
     {0x33, 0x33, 0x33, 0x1E, 0x0C, 0x0C, 0x1E, 0x00},  /* Y */
     {0x7F, 0x63, 0x31, 0x18, 0x4C, 0x66, 0x7F, 0x00},  /* Z */
-    /* Add more characters as needed - for now, rest are spaces */
+    {0x1E, 0x06, 0x06, 0x06, 0x06, 0x06, 0x1E, 0x00},  /* [ */
+    {0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x40, 0x00},  /* \ */
+    {0x1E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x1E, 0x00},  /* ] */
+    {0x08, 0x1C, 0x36, 0x63, 0x00, 0x00, 0x00, 0x00},  /* ^ */
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF},  /* _ */
+    {0x0C, 0x0C, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00},  /* ` */
+    {0x00, 0x00, 0x1E, 0x30, 0x3E, 0x33, 0x6E, 0x00},  /* a */
+    {0x07, 0x06, 0x06, 0x3E, 0x66, 0x66, 0x3B, 0x00},  /* b */
+    {0x00, 0x00, 0x1E, 0x33, 0x03, 0x33, 0x1E, 0x00},  /* c */
+    {0x38, 0x30, 0x30, 0x3E, 0x33, 0x33, 0x6E, 0x00},  /* d */
+    {0x00, 0x00, 0x1E, 0x33, 0x3F, 0x03, 0x1E, 0x00},  /* e */
+    {0x1C, 0x36, 0x06, 0x0F, 0x06, 0x06, 0x0F, 0x00},  /* f */
+    {0x00, 0x00, 0x6E, 0x33, 0x33, 0x3E, 0x30, 0x1F},  /* g */
+    {0x07, 0x06, 0x36, 0x6E, 0x66, 0x66, 0x67, 0x00},  /* h */
+    {0x0C, 0x00, 0x0E, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* i */
+    {0x30, 0x00, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1E},  /* j */
+    {0x07, 0x06, 0x66, 0x36, 0x1E, 0x36, 0x67, 0x00},  /* k */
+    {0x0E, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* l */
+    {0x00, 0x00, 0x33, 0x7F, 0x7F, 0x6B, 0x63, 0x00},  /* m */
+    {0x00, 0x00, 0x1F, 0x33, 0x33, 0x33, 0x33, 0x00},  /* n */
+    {0x00, 0x00, 0x1E, 0x33, 0x33, 0x33, 0x1E, 0x00},  /* o */
+    {0x00, 0x00, 0x3B, 0x66, 0x66, 0x3E, 0x06, 0x0F},  /* p */
+    {0x00, 0x00, 0x6E, 0x33, 0x33, 0x3E, 0x30, 0x78},  /* q */
+    {0x00, 0x00, 0x3B, 0x6E, 0x66, 0x06, 0x0F, 0x00},  /* r */
+    {0x00, 0x00, 0x3E, 0x03, 0x1E, 0x30, 0x1F, 0x00},  /* s */
+    {0x08, 0x0C, 0x3E, 0x0C, 0x0C, 0x2C, 0x18, 0x00},  /* t */
+    {0x00, 0x00, 0x33, 0x33, 0x33, 0x33, 0x6E, 0x00},  /* u */
+    {0x00, 0x00, 0x33, 0x33, 0x33, 0x1E, 0x0C, 0x00},  /* v */
+    {0x00, 0x00, 0x63, 0x6B, 0x7F, 0x7F, 0x36, 0x00},  /* w */
+    {0x00, 0x00, 0x63, 0x36, 0x1C, 0x36, 0x63, 0x00},  /* x */
+    {0x00, 0x00, 0x33, 0x33, 0x33, 0x3E, 0x30, 0x1F},  /* y */
+    {0x00, 0x00, 0x3F, 0x19, 0x0C, 0x26, 0x3F, 0x00},  /* z */
+    {0x38, 0x0C, 0x0C, 0x07, 0x0C, 0x0C, 0x38, 0x00},  /* { */
+    {0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x18, 0x00},  /* | */
+    {0x07, 0x0C, 0x0C, 0x38, 0x0C, 0x0C, 0x07, 0x00},  /* } */
+    {0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  /* ~ */
 };
 
 /* Framebuffer state */
@@ -184,90 +219,140 @@ uint32_t fb_getpixel(uint32_t x, uint32_t y)
 }
 
 /**
- * Draw a filled rectangle
+ * Draw a filled rectangle (accepts signed coordinates, clips internally)
  */
-void fb_fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
+void fb_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color)
 {
-    uint32_t i, j;
+    int32_t i, j;
 
     if (!fb_info.initialized) {
         return;
     }
 
+    /* Clip negative x/y: reduce width/height and move start to 0 */
+    if (x < 0) { width += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (width <= 0 || height <= 0) return;
+
+    /* Clip to screen bounds */
+    if (x + width > (int32_t)fb_info.width) width = (int32_t)fb_info.width - x;
+    if (y + height > (int32_t)fb_info.height) height = (int32_t)fb_info.height - y;
+
+    /* Direct pixel writes (skip fb_putpixel overhead for speed) */
     for (j = 0; j < height; j++) {
         for (i = 0; i < width; i++) {
-            if (x + i < fb_info.width && y + j < fb_info.height) {
-                fb_putpixel(x + i, y + j, color);
-            }
+            fb_info.base[(y + j) * fb_info.width + (x + i)] = color;
         }
     }
 }
 
 /**
- * Draw a rectangle outline
+ * Draw a rectangle outline (accepts signed coordinates, clips internally)
  */
-void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
+void fb_draw_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color)
 {
-    uint32_t i;
+    int32_t i;
+    int32_t x2 = x + width - 1;
+    int32_t y2 = y + height - 1;
+    int32_t sw = (int32_t)fb_info.width;
+    int32_t sh = (int32_t)fb_info.height;
 
-    if (!fb_info.initialized) {
+    if (!fb_info.initialized || width <= 0 || height <= 0) {
         return;
     }
 
-    /* Top and bottom edges */
-    for (i = 0; i < width; i++) {
-        fb_putpixel(x + i, y, color);
-        fb_putpixel(x + i, y + height - 1, color);
+    /* Top edge */
+    if (y >= 0 && y < sh) {
+        int32_t sx = x < 0 ? 0 : x;
+        int32_t ex = x2 >= sw ? sw - 1 : x2;
+        for (i = sx; i <= ex; i++)
+            fb_info.base[y * fb_info.width + i] = color;
     }
 
-    /* Left and right edges */
-    for (i = 0; i < height; i++) {
-        fb_putpixel(x, y + i, color);
-        fb_putpixel(x + width - 1, y + i, color);
+    /* Bottom edge */
+    if (y2 >= 0 && y2 < sh) {
+        int32_t sx = x < 0 ? 0 : x;
+        int32_t ex = x2 >= sw ? sw - 1 : x2;
+        for (i = sx; i <= ex; i++)
+            fb_info.base[y2 * fb_info.width + i] = color;
+    }
+
+    /* Left edge */
+    if (x >= 0 && x < sw) {
+        int32_t sy = y < 0 ? 0 : y;
+        int32_t ey = y2 >= sh ? sh - 1 : y2;
+        for (i = sy; i <= ey; i++)
+            fb_info.base[i * fb_info.width + x] = color;
+    }
+
+    /* Right edge */
+    if (x2 >= 0 && x2 < sw) {
+        int32_t sy = y < 0 ? 0 : y;
+        int32_t ey = y2 >= sh ? sh - 1 : y2;
+        for (i = sy; i <= ey; i++)
+            fb_info.base[i * fb_info.width + x2] = color;
     }
 }
 
 /**
  * Draw a line from (x1,y1) to (x2,y2) using Bresenham's algorithm
+ * Uses signed coordinates internally to handle negative values safely.
  */
 void fb_draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color)
 {
-    int dx = x2 > x1 ? x2 - x1 : x1 - x2;
-    int dy = y2 > y1 ? y2 - y1 : y1 - y2;
-    int sx = x1 < x2 ? 1 : -1;
-    int sy = y1 < y2 ? 1 : -1;
-    int err = dx - dy;
-    int e2;
+    /* Use signed arithmetic to avoid uint32_t overflow in Bresenham's */
+    int32_t sx1 = (int32_t)x1, sy1 = (int32_t)y1;
+    int32_t sx2 = (int32_t)x2, sy2 = (int32_t)y2;
+    int32_t dx = sx2 > sx1 ? sx2 - sx1 : sx1 - sx2;
+    int32_t dy = sy2 > sy1 ? sy2 - sy1 : sy1 - sy2;
+    int32_t step_x = sx1 < sx2 ? 1 : -1;
+    int32_t step_y = sy1 < sy2 ? 1 : -1;
+    int32_t err = dx - dy;
+    int32_t e2;
+
+    /* Safety: if either delta is huge, the line is off-screen — skip it */
+    if (dx > (int32_t)fb_info.width || dy > (int32_t)fb_info.height) {
+        return;
+    }
 
     while (1) {
-        fb_putpixel(x1, y1, color);
+        if (sx1 >= 0 && sx1 < (int32_t)fb_info.width &&
+            sy1 >= 0 && sy1 < (int32_t)fb_info.height) {
+            fb_info.base[sy1 * fb_info.width + sx1] = color;
+        }
 
-        if (x1 == x2 && y1 == y2) {
+        if (sx1 == sx2 && sy1 == sy2) {
             break;
         }
 
         e2 = 2 * err;
         if (e2 > -dy) {
             err -= dy;
-            x1 += sx;
+            sx1 += step_x;
         }
         if (e2 < dx) {
             err += dx;
-            y1 += sy;
+            sy1 += step_y;
         }
     }
 }
 
 /**
- * Draw a character using 8x8 font
+ * Draw a character using 8x8 font (accepts signed coordinates)
  */
-void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
+void fb_putchar(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg)
 {
-    uint32_t i, j;
+    int32_t i, j;
     uint8_t row;
     const uint8_t *glyph;
 
     if (!fb_info.initialized) {
+        return;
+    }
+
+    /* Skip if entirely off-screen */
+    if (x + 8 <= 0 || y + 8 <= 0 ||
+        x >= (int32_t)fb_info.width || y >= (int32_t)fb_info.height) {
         return;
     }
 
@@ -279,32 +364,46 @@ void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg)
 
     /* Draw character - bit 0 is leftmost pixel */
     for (j = 0; j < 8; j++) {
+        int32_t py = y + j;
+        if (py < 0 || py >= (int32_t)fb_info.height) continue;
         row = glyph[j];
         for (i = 0; i < 8; i++) {
+            int32_t px = x + i;
+            if (px < 0 || px >= (int32_t)fb_info.width) continue;
             if (row & (1 << i)) {
-                fb_putpixel(x + i, y + j, fg);
+                fb_info.base[py * fb_info.width + px] = fg;
             } else {
-                fb_putpixel(x + i, y + j, bg);
+                fb_info.base[py * fb_info.width + px] = bg;
             }
         }
     }
 }
 
 /**
- * Draw a string using 8x8 font
+ * Draw a string using 8x8 font (accepts signed coordinates)
  */
-void fb_puts(uint32_t x, uint32_t y, const char *str, uint32_t fg, uint32_t bg)
+void fb_puts(int32_t x, int32_t y, const char *str, uint32_t fg, uint32_t bg)
 {
-    uint32_t offset_x = 0;
+    int32_t offset_x = 0;
 
     if (!fb_info.initialized || str == NULL) {
         return;
     }
 
+    /* Skip if entirely off-screen vertically */
+    if (y + 8 <= 0 || y >= (int32_t)fb_info.height) {
+        return;
+    }
+
     while (*str) {
-        fb_putchar(x + offset_x, y, *str, fg, bg);
+        /* Only draw characters that are at least partially on-screen */
+        if (x + offset_x + 8 > 0 && x + offset_x < (int32_t)fb_info.width) {
+            fb_putchar(x + offset_x, y, *str, fg, bg);
+        }
         offset_x += 8;
         str++;
+        /* Stop if we've gone past the right edge */
+        if (x + offset_x >= (int32_t)fb_info.width) break;
     }
 }
 
