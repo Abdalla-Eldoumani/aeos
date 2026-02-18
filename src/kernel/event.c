@@ -71,6 +71,7 @@ void event_init(void)
 
 /**
  * Push an event to the queue
+ * Uses memcpy instead of struct assignment for AArch64 safety with -O2
  */
 bool event_push(const event_t *event)
 {
@@ -78,7 +79,7 @@ bool event_push(const event_t *event)
         return false;  /* Queue full */
     }
 
-    event_queue[queue_tail] = *event;
+    memcpy(&event_queue[queue_tail], event, sizeof(event_t));
     queue_tail = (queue_tail + 1) % EVENT_QUEUE_SIZE;
     queue_count++;
 
@@ -94,7 +95,7 @@ bool event_pop(event_t *event)
         return false;  /* Queue empty */
     }
 
-    *event = event_queue[queue_head];
+    memcpy(event, &event_queue[queue_head], sizeof(event_t));
     queue_head = (queue_head + 1) % EVENT_QUEUE_SIZE;
     queue_count--;
 
@@ -110,7 +111,7 @@ bool event_peek(event_t *event)
         return false;
     }
 
-    *event = event_queue[queue_head];
+    memcpy(event, &event_queue[queue_head], sizeof(event_t));
     return true;
 }
 
