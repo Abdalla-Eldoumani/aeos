@@ -38,6 +38,16 @@ static const uint32_t term_colors[] = {
 /* Active terminal for output redirection */
 static terminal_t *active_terminal = NULL;
 
+/**
+ * kprintf output hook — sends characters to the active terminal
+ */
+static void terminal_kprintf_hook(char c)
+{
+    if (active_terminal) {
+        terminal_putchar(active_terminal, c);
+    }
+}
+
 /* Forward declarations */
 static void terminal_paint(window_t *win);
 static void terminal_key(window_t *win, key_event_t *key);
@@ -377,19 +387,39 @@ void terminal_execute_command(terminal_t *term, const char *cmd)
     strncpy(line, cmd, SHELL_MAX_LINE - 1);
     line[SHELL_MAX_LINE - 1] = '\0';
 
-    /* Handle clear specially */
+    /* Handle clear specially — use terminal clear, not ANSI escape */
     if (strcmp(line, "clear") == 0) {
         terminal_clear(term);
         return;
     }
 
+    /* Block commands that are unsafe in GUI terminal */
+    if (strcmp(line, "edit") == 0 || strncmp(line, "edit ", 5) == 0 ||
+        strcmp(line, "vi") == 0 || strncmp(line, "vi ", 3) == 0) {
+        terminal_puts(term, "Editor not available in GUI terminal.\n");
+        terminal_puts(term, "Use text mode (make run) for the editor.\n");
+        return;
+    }
+    if (strcmp(line, "startx") == 0) {
+        terminal_puts(term, "Already in graphical mode.\n");
+        return;
+    }
+    if (strcmp(line, "exit") == 0) {
+        terminal_puts(term, "Use the window close button to close terminal.\n");
+        return;
+    }
+
     /* Parse command */
     if (shell_parse(line, &argc, argv) == 0 && argc > 0) {
-        /* Set active terminal for output capture */
+        /* Set active terminal and redirect kprintf output */
         active_terminal = term;
+        kprintf_output_hook = terminal_kprintf_hook;
 
         /* Execute */
         shell_execute(argc, argv);
+
+        /* Restore normal UART output */
+        kprintf_output_hook = NULL;
     }
 }
 
