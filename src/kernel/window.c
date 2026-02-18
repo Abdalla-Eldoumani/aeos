@@ -167,40 +167,53 @@ void window_invalidate(window_t *win)
 
 /**
  * Draw window decorations
+ * Safe with partially off-screen windows (negative x/y coordinates)
  */
 void window_draw_decorations(window_t *win, bool focused)
 {
     uint32_t title_bg;
     uint32_t close_bg;
     int32_t close_x, close_y;
+    fb_info_t *fb = fb_get_info();
 
-    if (!win || !(win->flags & WINDOW_FLAG_DECORATED)) {
+    if (!win || !(win->flags & WINDOW_FLAG_DECORATED) || !fb || !fb->initialized) {
+        return;
+    }
+
+    /* Skip entirely off-screen windows */
+    if (win->x + (int32_t)win->width <= 0 || win->x >= (int32_t)fb->width ||
+        win->y + (int32_t)win->height <= 0 || win->y >= (int32_t)fb->height) {
         return;
     }
 
     /* Title bar color based on focus */
     title_bg = focused ? WINDOW_TITLE_BG_FOCUSED : WINDOW_TITLE_BG_UNFOCUSED;
 
-    /* Draw title bar */
+    /* Draw title bar — fb_fill_rect safely handles signed coordinates */
     fb_fill_rect(win->x, win->y, win->width, WINDOW_TITLE_HEIGHT, title_bg);
 
-    /* Draw title text (centered vertically) */
-    fb_puts(win->x + 8, win->y + 6, win->title, WINDOW_TITLE_FG, title_bg);
+    /* Draw title text if visible */
+    if (win->x + 8 >= 0 && win->y + 6 >= 0) {
+        fb_puts(win->x + 8, win->y + 6, win->title, WINDOW_TITLE_FG, title_bg);
+    }
 
-    /* Draw close button */
+    /* Draw close button if visible */
     close_x = win->x + win->width - WINDOW_CLOSE_BTN_SIZE - 2;
     close_y = win->y + 2;
     close_bg = WINDOW_CLOSE_BTN_BG;
 
-    fb_fill_rect(close_x, close_y, WINDOW_CLOSE_BTN_SIZE, WINDOW_CLOSE_BTN_SIZE, close_bg);
+    if (close_x >= 0 && close_y >= 0 &&
+        close_x < (int32_t)fb->width && close_y < (int32_t)fb->height) {
+        fb_fill_rect(close_x, close_y, WINDOW_CLOSE_BTN_SIZE, WINDOW_CLOSE_BTN_SIZE, close_bg);
 
-    /* Draw X on close button */
-    int32_t cx = close_x + WINDOW_CLOSE_BTN_SIZE / 2;
-    int32_t cy = close_y + WINDOW_CLOSE_BTN_SIZE / 2;
-    fb_draw_line(cx - 4, cy - 4, cx + 4, cy + 4, WINDOW_TITLE_FG);
-    fb_draw_line(cx - 4, cy + 4, cx + 4, cy - 4, WINDOW_TITLE_FG);
+        /* Draw X on close button */
+        int32_t cx = close_x + WINDOW_CLOSE_BTN_SIZE / 2;
+        int32_t cy = close_y + WINDOW_CLOSE_BTN_SIZE / 2;
+        fb_draw_line(cx - 4, cy - 4, cx + 4, cy + 4, WINDOW_TITLE_FG);
+        fb_draw_line(cx - 4, cy + 4, cx + 4, cy - 4, WINDOW_TITLE_FG);
+    }
 
-    /* Draw border */
+    /* Draw border — fb_draw_rect safely handles signed coordinates */
     fb_draw_rect(win->x, win->y, win->width, win->height, WINDOW_BORDER_COLOR);
 }
 
@@ -210,9 +223,19 @@ void window_draw_decorations(window_t *win, bool focused)
 void window_draw(window_t *win)
 {
     bool focused;
+    fb_info_t *fb = fb_get_info();
 
     if (!win || !(win->flags & WINDOW_FLAG_VISIBLE)) {
         return;
+    }
+
+    /* Skip entirely off-screen windows */
+    if (fb && fb->initialized) {
+        if (win->x + (int32_t)win->width <= 0 || win->x >= (int32_t)fb->width ||
+            win->y + (int32_t)win->height <= 0 || win->y >= (int32_t)fb->height) {
+            win->flags &= ~WINDOW_FLAG_DIRTY;
+            return;
+        }
     }
 
     focused = (win->flags & WINDOW_FLAG_FOCUSED) != 0;
@@ -220,7 +243,7 @@ void window_draw(window_t *win)
     /* Draw decorations */
     window_draw_decorations(win, focused);
 
-    /* Fill client area with background */
+    /* Fill client area with background — fb_fill_rect handles signed coords */
     fb_fill_rect(win->client_x, win->client_y,
                  win->client_width, win->client_height,
                  WINDOW_CLIENT_BG);
