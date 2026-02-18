@@ -27,8 +27,9 @@ This section implements the built-in graphical applications for AEOS. These appl
   - Path bar navigation
   - Keyboard navigation (up/down/enter)
   - Mouse click to select
-  - Double-click to open directories
+  - Double-click to open directories or view files
   - File size display
+  - **File viewer**: Opens regular files inline, shows content with scroll support (Up/Down arrows), Backspace/Escape to return to file list
 
 ### Settings (settings.c)
 - **Location**: `src/apps/settings.c`
@@ -312,7 +313,7 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 
 ### File Manager
 - No file creation/deletion UI
-- No file content preview
+- File content preview limited to 2KB
 - Click-then-click for navigation (not true double-click)
 - Maximum 64 entries per directory
 
