@@ -14,10 +14,17 @@ typedef __builtin_va_list va_list;
 #define va_arg(ap, type)   __builtin_va_arg(ap, type)
 #define va_end(ap)         __builtin_va_end(ap)
 
+/* Output hook for redirecting kprintf output (e.g., to GUI terminal) */
+kprintf_hook_fn kprintf_output_hook = NULL;
+
 /* Helper function to print a single character */
 static void putchar(char c)
 {
-    uart_putc(c);
+    if (kprintf_output_hook) {
+        kprintf_output_hook(c);
+    } else {
+        uart_putc(c);
+    }
 }
 
 /* Helper function to print a string */
