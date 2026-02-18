@@ -189,6 +189,92 @@ static void draw_file_icon(window_t *win, int32_t x, int32_t y)
 }
 
 /**
+ * Open a file for viewing
+ */
+static void filemanager_view_file(filemanager_t *fm, const char *name)
+{
+    char filepath[256];
+    int fd;
+    ssize_t bytes_read;
+
+    /* Build full path */
+    if (strcmp(fm->current_path, "/") == 0) {
+        snprintf(filepath, sizeof(filepath), "/%s", name);
+    } else {
+        snprintf(filepath, sizeof(filepath), "%s/%s", fm->current_path, name);
+    }
+
+    fd = vfs_open(filepath, O_RDONLY, 0);
+    if (fd < 0) {
+        return;
+    }
+
+    bytes_read = vfs_read(fd, fm->view_content, sizeof(fm->view_content) - 1);
+    vfs_close(fd);
+
+    if (bytes_read < 0) bytes_read = 0;
+    fm->view_content[bytes_read] = '\0';
+    fm->view_content_len = (uint32_t)bytes_read;
+
+    strncpy(fm->view_filename, name, sizeof(fm->view_filename) - 1);
+    fm->view_filename[sizeof(fm->view_filename) - 1] = '\0';
+    fm->viewing_file = true;
+    fm->view_scroll = 0;
+
+    window_invalidate(fm->window);
+}
+
+/**
+ * Draw file viewer content
+ */
+static void filemanager_paint_viewer(window_t *win, filemanager_t *fm)
+{
+    int32_t y;
+    uint32_t line_num = 0;
+    char line_buf[128];
+    uint32_t line_pos = 0;
+    uint32_t i;
+
+    /* Clear background */
+    window_clear(win, FM_BG_COLOR);
+
+    /* Draw header bar */
+    window_fill_rect(win, 0, 0, win->client_width, FM_PATH_HEIGHT, FM_PATH_BG);
+    window_puts(win, FM_PADDING, 8, fm->view_filename, 0xFFFFFFFF, FM_PATH_BG);
+    window_puts(win, win->client_width - 88, 8, "[Bksp]", 0xFF888888, FM_PATH_BG);
+
+    /* Draw separator */
+    window_fill_rect(win, 0, FM_PATH_HEIGHT, win->client_width, 1, FM_BORDER_COLOR);
+
+    /* Draw file content line by line */
+    y = FM_PATH_HEIGHT + 4;
+
+    for (i = 0; i <= fm->view_content_len; i++) {
+        char c = (i < fm->view_content_len) ? fm->view_content[i] : '\n';
+
+        if (c == '\n' || c == '\r' || line_pos >= sizeof(line_buf) - 1) {
+            line_buf[line_pos] = '\0';
+
+            if (line_num >= fm->view_scroll) {
+                if (y + 10 > (int32_t)win->client_height) break;
+                window_puts(win, FM_PADDING, y + 2, line_buf, FM_FILE_COLOR, FM_BG_COLOR);
+                y += 12;
+            }
+
+            line_num++;
+            line_pos = 0;
+
+            /* Skip \r\n pair */
+            if (c == '\r' && i + 1 < fm->view_content_len && fm->view_content[i + 1] == '\n') {
+                i++;
+            }
+        } else {
+            line_buf[line_pos++] = c;
+        }
+    }
+}
+
+/**
  * Draw file manager content
  */
 static void filemanager_paint(window_t *win)
@@ -198,6 +284,12 @@ static void filemanager_paint(window_t *win)
     uint32_t i;
 
     if (!fm) {
+        return;
+    }
+
+    /* File viewer mode */
+    if (fm->viewing_file) {
+        filemanager_paint_viewer(win, fm);
         return;
     }
 
@@ -261,6 +353,26 @@ static void filemanager_key(window_t *win, key_event_t *key)
         return;
     }
 
+    /* File viewer mode: Backspace exits, Up/Down scrolls */
+    if (fm->viewing_file) {
+        switch (key->keycode) {
+            case KEY_BACKSPACE:
+            case KEY_ESCAPE:
+                fm->viewing_file = false;
+                break;
+            case KEY_UP:
+                if (fm->view_scroll > 0) fm->view_scroll--;
+                break;
+            case KEY_DOWN:
+                fm->view_scroll++;
+                break;
+            default:
+                break;
+        }
+        window_invalidate(win);
+        return;
+    }
+
     switch (key->keycode) {
         case KEY_UP:
             if (fm->selected_index > 0) {
@@ -303,6 +415,9 @@ static void filemanager_key(window_t *win, key_event_t *key)
                         }
                     }
                     filemanager_navigate(fm, new_path);
+                } else {
+                    /* View file contents */
+                    filemanager_view_file(fm, entry->name);
                 }
             }
             break;
@@ -341,12 +456,18 @@ static void filemanager_mouse(window_t *win, mouse_event_t *mouse)
         return;
     }
 
+    /* In file viewer mode, clicking does nothing special */
+    if (fm->viewing_file) {
+        window_invalidate(win);
+        return;
+    }
+
     /* Calculate clicked entry */
     if (mouse->y > FM_PATH_HEIGHT + 4) {
         clicked_index = fm->scroll_offset + (mouse->y - FM_PATH_HEIGHT - 4) / FM_ENTRY_HEIGHT;
         if (clicked_index >= 0 && clicked_index < (int32_t)fm->entry_count) {
             if (fm->selected_index == clicked_index) {
-                /* Double click simulation - navigate if same entry */
+                /* Double click simulation - navigate/view if same entry */
                 file_entry_t *entry = &fm->entries[clicked_index];
                 if (entry->is_directory) {
                     char new_path[256];
@@ -367,6 +488,9 @@ static void filemanager_mouse(window_t *win, mouse_event_t *mouse)
                         }
                     }
                     filemanager_navigate(fm, new_path);
+                } else {
+                    /* View file contents */
+                    filemanager_view_file(fm, entry->name);
                 }
             } else {
                 fm->selected_index = clicked_index;
