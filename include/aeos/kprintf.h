@@ -53,4 +53,12 @@ void klog(log_level_t level, const char *fmt, ...);
 #define klog_error(fmt, ...) klog(LOG_ERROR, fmt, ##__VA_ARGS__)
 #define klog_fatal(fmt, ...) klog(LOG_FATAL, fmt, ##__VA_ARGS__)
 
+/**
+ * Output hook for redirecting kprintf output (e.g., to GUI terminal)
+ * When set, each character goes to the hook instead of UART.
+ * Set to NULL to restore normal UART output.
+ */
+typedef void (*kprintf_hook_fn)(char c);
+extern kprintf_hook_fn kprintf_output_hook;
+
 #endif /* AEOS_KPRINTF_H */
