@@ -9,8 +9,9 @@
 
 #include <aeos/types.h>
 
-/* Event queue size */
-#define EVENT_QUEUE_SIZE 64
+/* Event queue size (must be large enough to avoid dropping button events
+   during rapid mouse movement — each mouse move generates 1-2 events) */
+#define EVENT_QUEUE_SIZE 256
 
 /* Event types */
 typedef enum {
