@@ -63,14 +63,14 @@ void fb_putpixel(uint32_t x, uint32_t y, uint32_t color);
 uint32_t fb_getpixel(uint32_t x, uint32_t y);
 
 /**
- * Draw a filled rectangle
+ * Draw a filled rectangle (accepts signed coordinates, clips internally)
  */
-void fb_fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color);
+void fb_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color);
 
 /**
- * Draw a rectangle outline
+ * Draw a rectangle outline (accepts signed coordinates, clips internally)
  */
-void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color);
+void fb_draw_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color);
 
 /**
  * Draw a line from (x1,y1) to (x2,y2)
@@ -78,14 +78,14 @@ void fb_draw_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint3
 void fb_draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color);
 
 /**
- * Draw a character using 8x16 font
+ * Draw a character using 8x8 font (accepts signed coordinates)
  */
-void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t fg, uint32_t bg);
+void fb_putchar(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);
 
 /**
- * Draw a string using 8x16 font
+ * Draw a string using 8x8 font (accepts signed coordinates)
  */
-void fb_puts(uint32_t x, uint32_t y, const char *str, uint32_t fg, uint32_t bg);
+void fb_puts(int32_t x, int32_t y, const char *str, uint32_t fg, uint32_t bg);
 
 /**
  * Scroll screen up by one line (for console mode)
