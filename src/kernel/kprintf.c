@@ -121,6 +121,7 @@ static int print_pointer(void *ptr)
  * Kernel printf - formatted output to console
  * Supports: %d, %u, %x, %X, %llu, %lld, %p, %s, %c, %%
  * Supports width modifiers: %-10s, %10s
+ * Supports precision on %s: %.40s caps the string at 40 chars
  */
 int kprintf(const char *fmt, ...)
 {
@@ -129,6 +130,7 @@ int kprintf(const char *fmt, ...)
     int width = 0;
     int left_align = 0;
     int long_long = 0;
+    int precision;
     const char *str;
     int str_len, padding, i;
 
@@ -155,6 +157,17 @@ int kprintf(const char *fmt, ...)
             while (*fmt >= '0' && *fmt <= '9') {
                 width = width * 10 + (*fmt - '0');
                 fmt++;
+            }
+
+            /* Parse precision (e.g. %.40s caps the string at 40 chars) */
+            precision = -1;
+            if (*fmt == '.') {
+                fmt++;
+                precision = 0;
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    fmt++;
+                }
             }
 
             /* Check for 'l' or 'll' modifier */
@@ -214,11 +227,19 @@ int kprintf(const char *fmt, ...)
                         str_len++;
                     }
 
+                    /* Apply precision: cap output length at .N */
+                    if (precision >= 0 && precision < str_len) {
+                        str_len = precision;
+                    }
+
                     /* Handle width and alignment */
                     if (width > 0 && width > str_len) {
                         padding = width - str_len;
                         if (left_align) {
-                            count += putstring(str);
+                            for (i = 0; i < str_len; i++) {
+                                putchar(str[i]);
+                                count++;
+                            }
                             for (i = 0; i < padding; i++) {
                                 putchar(' ');
                                 count++;
@@ -228,10 +249,16 @@ int kprintf(const char *fmt, ...)
                                 putchar(' ');
                                 count++;
                             }
-                            count += putstring(str);
+                            for (i = 0; i < str_len; i++) {
+                                putchar(str[i]);
+                                count++;
+                            }
                         }
                     } else {
-                        count += putstring(str);
+                        for (i = 0; i < str_len; i++) {
+                            putchar(str[i]);
+                            count++;
+                        }
                     }
                     break;
 
@@ -274,6 +301,7 @@ void klog(log_level_t level, const char *fmt, ...)
     int width = 0;
     int left_align = 0;
     int long_long = 0;
+    int precision;
     const char *str;
     int str_len, padding, i;
 
@@ -322,6 +350,17 @@ void klog(log_level_t level, const char *fmt, ...)
             while (*fmt >= '0' && *fmt <= '9') {
                 width = width * 10 + (*fmt - '0');
                 fmt++;
+            }
+
+            /* Parse precision (e.g. %.40s caps the string at 40 chars) */
+            precision = -1;
+            if (*fmt == '.') {
+                fmt++;
+                precision = 0;
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    fmt++;
+                }
             }
 
             /* Check for 'l' or 'll' modifier */
@@ -376,11 +415,18 @@ void klog(log_level_t level, const char *fmt, ...)
                         str_len++;
                     }
 
+                    /* Apply precision: cap output length at .N */
+                    if (precision >= 0 && precision < str_len) {
+                        str_len = precision;
+                    }
+
                     /* Handle width and alignment */
                     if (width > 0 && width > str_len) {
                         padding = width - str_len;
                         if (left_align) {
-                            putstring(str);
+                            for (i = 0; i < str_len; i++) {
+                                putchar(str[i]);
+                            }
                             for (i = 0; i < padding; i++) {
                                 putchar(' ');
                             }
@@ -388,10 +434,14 @@ void klog(log_level_t level, const char *fmt, ...)
                             for (i = 0; i < padding; i++) {
                                 putchar(' ');
                             }
-                            putstring(str);
+                            for (i = 0; i < str_len; i++) {
+                                putchar(str[i]);
+                            }
                         }
                     } else {
-                        putstring(str);
+                        for (i = 0; i < str_len; i++) {
+                            putchar(str[i]);
+                        }
                     }
                     break;
                 case 'c':
