@@ -48,6 +48,13 @@ typedef struct {
     uint8_t attr;
 } terminal_cell_t;
 
+/* ANSI escape parser state */
+typedef enum {
+    ANSI_NORMAL = 0,
+    ANSI_ESC    = 1,   /* saw ESC, expect '[' */
+    ANSI_CSI    = 2    /* inside CSI, collecting params and final byte */
+} ansi_state_t;
+
 /* Terminal state */
 typedef struct {
     window_t *window;
@@ -67,6 +74,13 @@ typedef struct {
 
     /* Scroll buffer */
     uint32_t scroll_offset;
+
+    /* ANSI escape sequence parser */
+    uint8_t  ansi_state;        /* one of ansi_state_t */
+    bool     ansi_private;      /* CSI '?' modifier seen */
+    bool     ansi_seen_param;   /* at least one digit consumed in current CSI */
+    uint8_t  ansi_param_count;  /* index of parameter currently being filled */
+    uint16_t ansi_params[8];
 } terminal_t;
 
 /**

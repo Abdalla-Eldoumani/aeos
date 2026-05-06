@@ -54,6 +54,9 @@ static void terminal_kprintf_hook(char c)
 static void terminal_paint(window_t *win);
 static void terminal_key(window_t *win, key_event_t *key);
 static void terminal_close(window_t *win);
+static void ansi_feed(terminal_t *term, char c);
+static void ansi_dispatch(terminal_t *term, char final);
+static void ansi_reset_parser(terminal_t *term);
 
 /**
  * Scroll terminal up by one line
@@ -259,11 +262,167 @@ static void terminal_close(window_t *win)
 }
 
 /**
+ * Reset the ANSI parser to ground state. Called on entry, on completion of a
+ * sequence, and on any malformed input we want to discard.
+ */
+static void ansi_reset_parser(terminal_t *term)
+{
+    term->ansi_state       = ANSI_NORMAL;
+    term->ansi_private     = false;
+    term->ansi_seen_param  = false;
+    term->ansi_param_count = 0;
+    term->ansi_params[0]   = 0;
+}
+
+/**
+ * Feed one byte to the ANSI parser. Caller must check that ansi_state is not
+ * ANSI_NORMAL before calling. Final bytes invoke ansi_dispatch and reset the
+ * parser; anything unexpected drops the in-flight sequence silently.
+ */
+static void ansi_feed(terminal_t *term, char c)
+{
+    if (term->ansi_state == ANSI_ESC) {
+        if (c == '[') {
+            term->ansi_state = ANSI_CSI;
+            return;
+        }
+        /* Unknown two-byte escape; drop and resume. */
+        ansi_reset_parser(term);
+        return;
+    }
+
+    /* ANSI_CSI from here on. */
+    if (c == '?' && !term->ansi_seen_param && term->ansi_param_count == 0) {
+        term->ansi_private = true;
+        return;
+    }
+    if (c >= '0' && c <= '9') {
+        if (term->ansi_param_count < 8) {
+            term->ansi_params[term->ansi_param_count] =
+                (uint16_t)(term->ansi_params[term->ansi_param_count] * 10
+                           + (uint16_t)(c - '0'));
+            term->ansi_seen_param = true;
+        }
+        return;
+    }
+    if (c == ';') {
+        if (term->ansi_param_count < 7) {
+            term->ansi_param_count++;
+            term->ansi_params[term->ansi_param_count] = 0;
+        }
+        return;
+    }
+    /* Final byte. Promote the current param to the count when at least one
+     * digit was seen; otherwise count stays at zero so dispatchers can detect
+     * "no params" and apply defaults. */
+    if (term->ansi_seen_param) {
+        term->ansi_param_count++;
+    }
+    ansi_dispatch(term, c);
+    ansi_reset_parser(term);
+}
+
+/**
+ * Run the side effect of a fully parsed CSI sequence. Unknown final bytes are
+ * silently ignored so future sequences (bold, dim, save/restore) don't crash
+ * the terminal — they just don't render.
+ */
+static void ansi_dispatch(terminal_t *term, char final)
+{
+    uint32_t row, col, i;
+    uint16_t p;
+    uint8_t  swap;
+
+    if (term->ansi_private) {
+        if (term->ansi_param_count >= 1 && term->ansi_params[0] == 25) {
+            if (final == 'l') {
+                term->cursor_visible = false;
+            } else if (final == 'h') {
+                term->cursor_visible = true;
+            }
+        }
+        return;
+    }
+
+    switch (final) {
+    case 'H':
+    case 'f':
+        row = (term->ansi_param_count >= 1 && term->ansi_params[0] > 0)
+              ? (uint32_t)(term->ansi_params[0] - 1) : 0;
+        col = (term->ansi_param_count >= 2 && term->ansi_params[1] > 0)
+              ? (uint32_t)(term->ansi_params[1] - 1) : 0;
+        if (row >= TERMINAL_ROWS) row = TERMINAL_ROWS - 1;
+        if (col >= TERMINAL_COLS) col = TERMINAL_COLS - 1;
+        term->cursor_y = row;
+        term->cursor_x = col;
+        break;
+
+    case 'J':
+        if (term->ansi_param_count == 0 || term->ansi_params[0] == 2) {
+            terminal_clear(term);
+        }
+        break;
+
+    case 'K':
+        for (col = term->cursor_x; col < TERMINAL_COLS; col++) {
+            term->cells[term->cursor_y][col].ch = ' ';
+            term->cells[term->cursor_y][col].fg = term->current_fg;
+            term->cells[term->cursor_y][col].bg = term->current_bg;
+        }
+        break;
+
+    case 'm':
+        if (term->ansi_param_count == 0) {
+            term->current_fg = TERM_COLOR_WHITE;
+            term->current_bg = TERM_COLOR_BLACK;
+            break;
+        }
+        for (i = 0; i < term->ansi_param_count; i++) {
+            p = term->ansi_params[i];
+            if (p == 0) {
+                term->current_fg = TERM_COLOR_WHITE;
+                term->current_bg = TERM_COLOR_BLACK;
+            } else if (p == 7) {
+                swap = term->current_fg;
+                term->current_fg = term->current_bg;
+                term->current_bg = swap;
+            } else if (p >= 30 && p <= 37) {
+                term->current_fg = (uint8_t)(p - 30);
+            } else if (p >= 40 && p <= 47) {
+                term->current_bg = (uint8_t)(p - 40);
+            } else if (p >= 90 && p <= 97) {
+                term->current_fg = (uint8_t)(p - 90 + 8);
+            } else if (p >= 100 && p <= 107) {
+                term->current_bg = (uint8_t)(p - 100 + 8);
+            }
+            /* p == 1 (bold), p == 2 (dim), and other unhandled params are
+             * silently ignored. */
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/**
  * Write character to terminal
  */
 void terminal_putchar(terminal_t *term, char c)
 {
     if (!term) {
+        return;
+    }
+
+    /* Route ESC and in-flight escape sequences through the ANSI parser
+     * instead of the cell printer. */
+    if (term->ansi_state != ANSI_NORMAL) {
+        ansi_feed(term, c);
+        window_invalidate(term->window);
+        return;
+    }
+    if (c == 0x1B) {
+        term->ansi_state = ANSI_ESC;
         return;
     }
 
