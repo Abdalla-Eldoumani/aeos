@@ -122,10 +122,17 @@ void *kmalloc(size_t size)
  */
 void *kcalloc(size_t nmemb, size_t size)
 {
-    size_t total_size = nmemb * size;
+    size_t total_size;
     void *ptr;
     uint8_t *byte_ptr;
     size_t i;
+
+    /* Reject multiplications that would overflow. Without this, a small total
+     * size leads to an undersized buffer and the zero loop walks past it. */
+    if (size != 0 && nmemb > ((size_t)-1) / size) {
+        return NULL;
+    }
+    total_size = nmemb * size;
 
     ptr = kmalloc(total_size);
     if (ptr == NULL) {
