@@ -10,15 +10,16 @@
 #include <aeos/uart.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
+#include <aeos/theme.h>
 
 /* Color definitions for boot screen */
-#define BOOT_BG_COLOR       0xFF1A1A2E  /* Dark blue-gray background */
-#define BOOT_LOGO_COLOR     0xFF00D9FF  /* Cyan for logo */
-#define BOOT_LOGO_SHADOW    0xFF006080  /* Darker cyan shadow */
-#define BOOT_TEXT_COLOR     0xFFE0E0E0  /* Light gray text */
-#define BOOT_PROGRESS_BG    0xFF2D2D44  /* Progress bar background */
-#define BOOT_PROGRESS_FG    0xFF00D9FF  /* Progress bar fill (cyan) */
-#define BOOT_BORDER_COLOR   0xFF404060  /* Border color */
+#define BOOT_BG_COLOR       THEME_BG_DEEP
+#define BOOT_LOGO_COLOR     THEME_ACCENT
+#define BOOT_LOGO_SHADOW    THEME_ACCENT_DIM
+#define BOOT_TEXT_COLOR     THEME_TEXT_PRIMARY
+#define BOOT_PROGRESS_BG    THEME_SURFACE_2
+#define BOOT_PROGRESS_FG    THEME_ACCENT
+#define BOOT_BORDER_COLOR   THEME_BORDER_SUBTLE
 
 /* Screen layout constants */
 #define SCREEN_WIDTH        640
@@ -178,9 +179,9 @@ static void draw_status_message(const char *message)
 static void draw_footer(void)
 {
     fb_puts(10, SCREEN_HEIGHT - 20, "AEOS v1.0 - Abdalla's Educational OS",
-            0xFF606080, BOOT_BG_COLOR);
+            THEME_TEXT_MUTED, BOOT_BG_COLOR);
     fb_puts(SCREEN_WIDTH - 180, SCREEN_HEIGHT - 20, "ARMv8-A AArch64",
-            0xFF606080, BOOT_BG_COLOR);
+            THEME_TEXT_MUTED, BOOT_BG_COLOR);
 }
 
 /**
@@ -205,7 +206,7 @@ static void draw_boot_screen(void)
 
     /* Draw hint for text mode */
     fb_puts((SCREEN_WIDTH - 240) / 2, SCREEN_HEIGHT - 50,
-            "Press 'T' for text mode", 0xFF505070, BOOT_BG_COLOR);
+            "Press 'T' for text mode", THEME_TEXT_MUTED, BOOT_BG_COLOR);
 }
 
 /**
