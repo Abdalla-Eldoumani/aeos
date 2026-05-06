@@ -11,6 +11,7 @@
 #include <aeos/heap.h>
 #include <aeos/vfs.h>
 #include <aeos/timer.h>
+#include <aeos/notify.h>
 
 /* ============================================================================
  * ANSI Escape Codes for Terminal Control
@@ -1355,6 +1356,7 @@ int editor_save(editor_t *ed)
     fd = vfs_open(ed->filename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) {
         editor_set_status(ed, "Cannot save file");
+        notify_error("Save failed");
         return -1;
     }
 
@@ -1372,6 +1374,7 @@ int editor_save(editor_t *ed)
     ed->new_file = false;
 
     editor_set_status(ed, "\"%s\" written, %d lines", ed->filename, ed->num_lines);
+    notify_info("Saved");
     return 0;
 }
 
