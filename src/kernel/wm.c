@@ -409,18 +409,21 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
         win = wm_window_at(mouse->x, mouse->y);
 
         if (win) {
+            /* Ignore events on a window that's already running its close animation */
+            if (win->flags & WINDOW_FLAG_CLOSING) {
+                return;
+            }
+
             /* Focus window */
             wm_focus_window(win);
 
             /* Check close button */
             if (window_in_close_button(win, mouse->x, mouse->y)) {
-                if (win->on_close) {
-                    win->on_close(win);
-                } else {
-                    /* Default: destroy window */
-                    wm_unregister_window(win);
-                    window_destroy(win);
-                }
+                /* Defer the actual destruction. wm_reap_closing_windows runs
+                 * the on_close handler once the fade-out completes. */
+                win->flags |= WINDOW_FLAG_CLOSING;
+                win->close_anim_start_ms = timer_get_uptime_ms();
+                wm.needs_redraw = true;
                 return;
             }
 
@@ -504,6 +507,11 @@ static void handle_key(key_event_t *key, bool pressed)
         return;  /* Only handle key down */
     }
 
+    /* Skip closing windows so the fade-out can't be interrupted */
+    if (wm.focused && (wm.focused->flags & WINDOW_FLAG_CLOSING)) {
+        return;
+    }
+
     /* Pass to focused window */
     if (wm.focused && wm.focused->on_key) {
         wm.focused->on_key(wm.focused, key);
@@ -542,6 +550,34 @@ void wm_handle_event(event_t *event)
 }
 
 /**
+ * Reap windows whose close animation has completed. Calls the app-provided
+ * on_close (which unregisters and frees), or falls back to default destroy.
+ */
+static void reap_closing_windows(void)
+{
+    uint64_t now = timer_get_uptime_ms();
+    window_t *win = wm.window_list;
+    window_t *next;
+
+    while (win != NULL) {
+        next = win->next;
+        if ((win->flags & WINDOW_FLAG_CLOSING) &&
+            (now - win->close_anim_start_ms) >= WINDOW_CLOSE_ANIM_MS) {
+            /* Clear the flag first so on_close doesn't loop back through here */
+            win->flags &= ~WINDOW_FLAG_CLOSING;
+            wm.needs_redraw = true;
+            if (win->on_close) {
+                win->on_close(win);
+            } else {
+                wm_unregister_window(win);
+                window_destroy(win);
+            }
+        }
+        win = next;
+    }
+}
+
+/**
  * Main window manager loop
  */
 void wm_run(void)
@@ -561,6 +597,9 @@ void wm_run(void)
         while (event_pop(&event)) {
             wm_handle_event(&event);
         }
+
+        /* Reap any closing windows whose fade-out has completed */
+        reap_closing_windows();
 
         /* Update display periodically (30 FPS) */
         now = timer_get_uptime_ms();
