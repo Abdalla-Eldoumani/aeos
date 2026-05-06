@@ -356,11 +356,6 @@ static void process_input_events(virtio_input_t *dev, input_virtqueue_t *vq, boo
         uint32_t desc_idx = vq->used->ring[vq->last_used_idx % INPUT_VIRTQ_SIZE].id;
         virtio_input_event_t *ev = &vq->events[desc_idx];
 
-        /* Debug: only log button clicks */
-        if (is_mouse && ev->type == EV_KEY) {
-            klog_info("CLICK: code=%u val=%d", ev->code, (int32_t)ev->value);
-        }
-
         /* Process the event */
         if (is_mouse) {
             /* Mouse/tablet event */
