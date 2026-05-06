@@ -21,10 +21,14 @@
 #define BOOT_PROGRESS_FG    THEME_ACCENT
 #define BOOT_BORDER_COLOR   THEME_BORDER_SUBTLE
 
-/* Screen layout constants */
+/* Screen layout constants. Vertical positions follow DESIGN_SYSTEM.md
+ * (logo 25% from top, progress bar 55% from top, footer 8 px from bottom). */
 #define SCREEN_WIDTH        640
 #define SCREEN_HEIGHT       480
-#define LOGO_Y              100
+#define LOGO_Y              120
+#define LOGO_WORDMARK_W     35   /* 4 glyphs of 8 px + 3 px tracking */
+#define LOGO_WORDMARK_H     16
+#define LOGO_SUBTITLE_GAP   8
 #define PROGRESS_BAR_Y      300
 #define PROGRESS_BAR_WIDTH  400
 #define PROGRESS_BAR_HEIGHT 20
@@ -72,36 +76,26 @@ static void draw_rounded_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 }
 
 /**
- * Draw the AEOS logo (stylized text)
+ * Draw the AEOS wordmark (8x16 letters, tracked-out by 1 px) at (x, y),
+ * with the "Educational Operating System" subtitle in 8x8 centered below.
  */
 void bootscreen_draw_logo(uint32_t x, uint32_t y)
 {
-    /* Draw a decorative box around the logo */
-    uint32_t box_x = x - 20;
-    uint32_t box_y = y - 10;
-    uint32_t box_w = 200;
-    uint32_t box_h = 100;
+    static const char wordmark[4] = { 'A', 'E', 'O', 'S' };
+    const char *subtitle = "Educational Operating System";
+    size_t sub_len;
+    int32_t sub_x, sub_y;
+    int i;
 
-    /* Draw border */
-    fb_draw_rect(box_x, box_y, box_w, box_h, BOOT_BORDER_COLOR);
-    fb_draw_rect(box_x + 1, box_y + 1, box_w - 2, box_h - 2, BOOT_BORDER_COLOR);
+    for (i = 0; i < 4; i++) {
+        fb_putchar_large((int32_t)x + i * 9, (int32_t)y, wordmark[i],
+                         BOOT_LOGO_COLOR, BOOT_BG_COLOR);
+    }
 
-    /* Draw "AEOS" in large letters using multiple fb_puts for thickness */
-    /* Shadow */
-    fb_puts(x + 2, y + 2, "A E O S", BOOT_LOGO_SHADOW, BOOT_BG_COLOR);
-    fb_puts(x + 2, y + 12, "A E O S", BOOT_LOGO_SHADOW, BOOT_BG_COLOR);
-
-    /* Main text */
-    fb_puts(x, y, "A E O S", BOOT_LOGO_COLOR, BOOT_BG_COLOR);
-    fb_puts(x, y + 10, "A E O S", BOOT_LOGO_COLOR, BOOT_BG_COLOR);
-
-    /* Decorative line under AEOS */
-    fb_fill_rect(x, y + 28, 112, 2, BOOT_LOGO_COLOR);
-
-    /* Subtitle */
-    fb_puts(x - 10, y + 40, "Educational", BOOT_TEXT_COLOR, BOOT_BG_COLOR);
-    fb_puts(x - 10, y + 52, "Operating", BOOT_TEXT_COLOR, BOOT_BG_COLOR);
-    fb_puts(x - 10, y + 64, "System", BOOT_TEXT_COLOR, BOOT_BG_COLOR);
+    sub_len = strlen(subtitle);
+    sub_x = (int32_t)((SCREEN_WIDTH - (uint32_t)(sub_len * 8)) / 2);
+    sub_y = (int32_t)y + LOGO_WORDMARK_H + LOGO_SUBTITLE_GAP;
+    fb_puts(sub_x, sub_y, subtitle, THEME_TEXT_SECONDARY, BOOT_BG_COLOR);
 }
 
 /**
@@ -193,7 +187,7 @@ static void draw_boot_screen(void)
     fb_clear(BOOT_BG_COLOR);
 
     /* Draw logo centered */
-    bootscreen_draw_logo((SCREEN_WIDTH - 160) / 2, LOGO_Y);
+    bootscreen_draw_logo((SCREEN_WIDTH - LOGO_WORDMARK_W) / 2, LOGO_Y);
 
     /* Draw progress bar */
     draw_progress_bar(current_progress);
