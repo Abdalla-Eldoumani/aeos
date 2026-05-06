@@ -221,6 +221,7 @@ static int deserialize_inodes(vfs_filesystem_t *fs, const void *buffer, size_t b
         inode->mtime = 0;
         inode->ctime = 0;
         inode->nlinks = 1;
+        inode->refcount = 1;  /* Directory entry holds the first reference */
         inode->uid = 0;
         inode->gid = 0;
         inode->fs_data = ramfs_data;
