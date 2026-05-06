@@ -101,11 +101,14 @@ void notify_error(const char *msg) { notify_post(NOTIFY_ERROR, msg); }
 
 bool notify_active(void)
 {
-    int      i;
-    uint64_t now = timer_get_uptime_ms();
+    int i;
+    /* Any in_use slot keeps the WM repainting, including the frame on which
+     * the toast finally reaches its TTL. notify_render is what actually
+     * clears in_use, so the frame that reaps a toast still gets a fresh
+     * window redraw underneath — otherwise the last partially-faded toast
+     * would stay frozen in the framebuffer. */
     for (i = 0; i < NOTIFY_MAX; i++) {
-        if (toasts[i].in_use &&
-            (now - toasts[i].created_ms) < NOTIFY_TOTAL_MS) {
+        if (toasts[i].in_use) {
             return true;
         }
     }
