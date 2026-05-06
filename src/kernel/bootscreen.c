@@ -189,14 +189,25 @@ static void fade_status_message(const char *from, const char *to)
 }
 
 /**
- * Draw copyright/version info at bottom
+ * Bottom-of-screen lines: text-mode hint immediately above the hardware
+ * footer. Both centered, both in TEXT_MUTED, 8x8.
+ *
+ * The 8x8 font ships only ASCII 32-127, so the Latin-1 middle dot in the
+ * design-system spec resolves to space; we use " | " as the separator.
  */
 static void draw_footer(void)
 {
-    fb_puts(10, SCREEN_HEIGHT - 20, "AEOS v1.0 - Abdalla's Educational OS",
-            THEME_TEXT_MUTED, BOOT_BG_COLOR);
-    fb_puts(SCREEN_WIDTH - 180, SCREEN_HEIGHT - 20, "ARMv8-A AArch64",
-            THEME_TEXT_MUTED, BOOT_BG_COLOR);
+    const char *hint   = "Press 'T' for text mode";
+    const char *footer = "AArch64 | cortex-a57 | 256 MB";
+    size_t hint_len    = strlen(hint);
+    size_t footer_len  = strlen(footer);
+
+    fb_puts((int32_t)((SCREEN_WIDTH - (uint32_t)(hint_len * 8)) / 2),
+            (int32_t)(SCREEN_HEIGHT - 32),
+            hint, THEME_TEXT_MUTED, BOOT_BG_COLOR);
+    fb_puts((int32_t)((SCREEN_WIDTH - (uint32_t)(footer_len * 8)) / 2),
+            (int32_t)(SCREEN_HEIGHT - 16),
+            footer, THEME_TEXT_MUTED, BOOT_BG_COLOR);
 }
 
 /**
@@ -216,12 +227,8 @@ static void draw_boot_screen(void)
     /* Draw status message (fb_clear above already wiped the row). */
     draw_status_message(current_message, THEME_TEXT_SECONDARY);
 
-    /* Draw footer */
+    /* Draw footer (hint + hardware line). */
     draw_footer();
-
-    /* Draw hint for text mode */
-    fb_puts((SCREEN_WIDTH - 240) / 2, SCREEN_HEIGHT - 50,
-            "Press 'T' for text mode", THEME_TEXT_MUTED, BOOT_BG_COLOR);
 }
 
 /**
