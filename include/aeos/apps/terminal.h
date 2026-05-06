@@ -10,11 +10,25 @@
 #include <aeos/types.h>
 #include <aeos/window.h>
 
-/* Terminal dimensions (in characters) */
-#define TERMINAL_COLS   80
-#define TERMINAL_ROWS   24
-#define TERMINAL_CHAR_WIDTH  8
-#define TERMINAL_CHAR_HEIGHT 8
+/* Cell metrics. Width stays 8 (the only width our font ships at). Height
+ * doubles so the terminal text matches the rest of the OS now that 8x16 is
+ * the standard body font. Internal padding sits between the cell grid and
+ * the window's client edges. */
+#define TERMINAL_CHAR_WIDTH      8
+#define TERMINAL_CHAR_HEIGHT    16
+#define TERMINAL_PAD_X           4
+#define TERMINAL_PAD_Y           4
+
+/* Window dimensions are fixed first; the cell grid is then computed from the
+ * available client area. The window must fit within the 640x480 framebuffer
+ * after the 32 px taskbar. 634x385 yields 78 cols x 22 rows. */
+#define TERMINAL_WIN_WIDTH      634
+#define TERMINAL_WIN_HEIGHT     385
+
+#define TERMINAL_CLIENT_WIDTH   (TERMINAL_WIN_WIDTH  - 2 * WINDOW_BORDER_WIDTH)
+#define TERMINAL_CLIENT_HEIGHT  (TERMINAL_WIN_HEIGHT - WINDOW_TITLE_HEIGHT - WINDOW_BORDER_WIDTH)
+#define TERMINAL_COLS           ((TERMINAL_CLIENT_WIDTH  - 2 * TERMINAL_PAD_X) / TERMINAL_CHAR_WIDTH)
+#define TERMINAL_ROWS           ((TERMINAL_CLIENT_HEIGHT - 2 * TERMINAL_PAD_Y) / TERMINAL_CHAR_HEIGHT)
 
 /* Terminal colors (ANSI-like) */
 #define TERM_COLOR_BLACK    0

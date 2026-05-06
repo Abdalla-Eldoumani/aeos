@@ -94,10 +94,8 @@ terminal_t *terminal_create(void)
 
     memset(term, 0, sizeof(terminal_t));
 
-    /* Calculate window size */
-    win_width = TERMINAL_COLS * TERMINAL_CHAR_WIDTH + 2 * WINDOW_BORDER_WIDTH + 8;
-    win_height = TERMINAL_ROWS * TERMINAL_CHAR_HEIGHT + WINDOW_TITLE_HEIGHT +
-                 WINDOW_BORDER_WIDTH + 8;
+    win_width  = TERMINAL_WIN_WIDTH;
+    win_height = TERMINAL_WIN_HEIGHT;
 
     /* Create window */
     term->window = window_create("Terminal", 100, 50, win_width, win_height,
@@ -185,30 +183,30 @@ static void terminal_paint(window_t *win)
 
     /* Draw cells */
     for (row = 0; row < TERMINAL_ROWS; row++) {
-        y = row * TERMINAL_CHAR_HEIGHT + 2;
+        y = row * TERMINAL_CHAR_HEIGHT + TERMINAL_PAD_Y;
         for (col = 0; col < TERMINAL_COLS; col++) {
-            x = col * TERMINAL_CHAR_WIDTH + 4;
+            x = col * TERMINAL_CHAR_WIDTH + TERMINAL_PAD_X;
 
             fg = term_colors[term->cells[row][col].fg & 0x0F];
             bg = term_colors[term->cells[row][col].bg & 0x0F];
 
-            window_putchar(win, x, y, term->cells[row][col].ch, fg, bg);
+            window_putchar_large(win, x, y, term->cells[row][col].ch, fg, bg);
         }
     }
 
     /* Draw cursor */
     if (term->cursor_visible && term->cursor_blink_state) {
-        x = term->cursor_x * TERMINAL_CHAR_WIDTH + 4;
-        y = term->cursor_y * TERMINAL_CHAR_HEIGHT + 2;
+        x = term->cursor_x * TERMINAL_CHAR_WIDTH + TERMINAL_PAD_X;
+        y = term->cursor_y * TERMINAL_CHAR_HEIGHT + TERMINAL_PAD_Y;
         window_fill_rect(win, x, y, TERMINAL_CHAR_WIDTH, TERMINAL_CHAR_HEIGHT,
                          term_colors[TERM_COLOR_WHITE]);
 
         /* Draw character under cursor in inverse */
         if (term->cells[term->cursor_y][term->cursor_x].ch != ' ') {
-            window_putchar(win, x, y,
-                           term->cells[term->cursor_y][term->cursor_x].ch,
-                           term_colors[TERM_COLOR_BLACK],
-                           term_colors[TERM_COLOR_WHITE]);
+            window_putchar_large(win, x, y,
+                                 term->cells[term->cursor_y][term->cursor_x].ch,
+                                 term_colors[TERM_COLOR_BLACK],
+                                 term_colors[TERM_COLOR_WHITE]);
         }
     }
 
