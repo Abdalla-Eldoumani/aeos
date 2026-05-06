@@ -89,6 +89,16 @@ void fb_putchar(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);
 void fb_puts(int32_t x, int32_t y, const char *str, uint32_t fg, uint32_t bg);
 
 /**
+ * Draw a character using the 8x16 font (accepts signed coordinates).
+ */
+void fb_putchar_large(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);
+
+/**
+ * Draw a string using the 8x16 font (accepts signed coordinates).
+ */
+void fb_puts_large(int32_t x, int32_t y, const char *str, uint32_t fg, uint32_t bg);
+
+/**
  * Scroll screen up by one line (for console mode)
  */
 void fb_scroll(void);
