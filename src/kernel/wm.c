@@ -11,6 +11,7 @@
 #include <aeos/virtio_gpu.h>
 #include <aeos/virtio_input.h>
 #include <aeos/desktop.h>
+#include <aeos/notify.h>
 #include <aeos/timer.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
@@ -384,11 +385,16 @@ void wm_update_display(void)
     /* Restore cursor background before redraw */
     restore_cursor_background();
 
-    /* Redraw if needed */
-    if (wm.needs_redraw) {
+    /* Redraw if needed. Active toasts force a redraw every frame so the
+     * region under a sliding/fading toast is fresh — otherwise stale window
+     * content would show through where the toast used to be. */
+    if (wm.needs_redraw || notify_active()) {
         wm_redraw();
-        wm.needs_redraw = false;  /* Clear flag after redraw */
+        wm.needs_redraw = false;
     }
+
+    /* Composite toasts above windows but below the cursor. */
+    notify_render();
 
     /* Draw cursor */
     wm_draw_cursor();
