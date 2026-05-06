@@ -134,6 +134,12 @@ static void about_close(window_t *win)
 {
     about_t *about = (about_t *)win->user_data;
 
+    /* Null callbacks before destroy so any in-flight event finds NULL */
+    win->on_paint = NULL;
+    win->on_key = NULL;
+    win->on_mouse = NULL;
+    win->on_close = NULL;
+
     wm_unregister_window(win);
     window_destroy(win);
 
