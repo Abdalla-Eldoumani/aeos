@@ -29,10 +29,10 @@
 #define LOGO_WORDMARK_W     35   /* 4 glyphs of 8 px + 3 px tracking */
 #define LOGO_WORDMARK_H     16
 #define LOGO_SUBTITLE_GAP   8
-#define PROGRESS_BAR_Y      300
-#define PROGRESS_BAR_WIDTH  400
-#define PROGRESS_BAR_HEIGHT 20
-#define STATUS_Y            340
+#define PROGRESS_BAR_Y      264   /* 55% of 480 */
+#define PROGRESS_BAR_WIDTH  384   /* 60% of 640 */
+#define PROGRESS_BAR_HEIGHT 4
+#define STATUS_Y            276   /* 8 px below progress bar */
 
 /* Boot stage information */
 static const boot_stage_info_t boot_stages[] = {
@@ -62,20 +62,6 @@ static void boot_delay(uint32_t iterations)
 }
 
 /**
- * Draw a filled rounded rectangle (approximated with regular rect)
- */
-static void draw_rounded_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                               uint32_t color)
-{
-    fb_fill_rect(x + 2, y, w - 4, h, color);
-    fb_fill_rect(x, y + 2, w, h - 4, color);
-    fb_putpixel(x + 1, y + 1, color);
-    fb_putpixel(x + w - 2, y + 1, color);
-    fb_putpixel(x + 1, y + h - 2, color);
-    fb_putpixel(x + w - 2, y + h - 2, color);
-}
-
-/**
  * Draw the AEOS wordmark (8x16 letters, tracked-out by 1 px) at (x, y),
  * with the "Educational Operating System" subtitle in 8x8 centered below.
  */
@@ -99,54 +85,27 @@ void bootscreen_draw_logo(uint32_t x, uint32_t y)
 }
 
 /**
- * Draw the progress bar
+ * Draw a slim 4 px progress bar centered horizontally.
  */
 static void draw_progress_bar(uint32_t progress)
 {
     uint32_t bar_x = (SCREEN_WIDTH - PROGRESS_BAR_WIDTH) / 2;
-    uint32_t bar_y = PROGRESS_BAR_Y;
     uint32_t fill_width;
 
-    /* Clamp progress */
     if (progress > 100) {
         progress = 100;
     }
 
-    /* Draw background */
-    draw_rounded_rect(bar_x, bar_y, PROGRESS_BAR_WIDTH, PROGRESS_BAR_HEIGHT,
-                      BOOT_PROGRESS_BG);
+    fb_fill_rect((int32_t)bar_x, (int32_t)PROGRESS_BAR_Y,
+                 (int32_t)PROGRESS_BAR_WIDTH, (int32_t)PROGRESS_BAR_HEIGHT,
+                 BOOT_PROGRESS_BG);
 
-    /* Draw fill */
-    fill_width = (PROGRESS_BAR_WIDTH - 4) * progress / 100;
+    fill_width = PROGRESS_BAR_WIDTH * progress / 100;
     if (fill_width > 0) {
-        fb_fill_rect(bar_x + 2, bar_y + 2,
-                     fill_width, PROGRESS_BAR_HEIGHT - 4,
+        fb_fill_rect((int32_t)bar_x, (int32_t)PROGRESS_BAR_Y,
+                     (int32_t)fill_width, (int32_t)PROGRESS_BAR_HEIGHT,
                      BOOT_PROGRESS_FG);
     }
-
-    /* Draw border */
-    fb_draw_rect(bar_x, bar_y, PROGRESS_BAR_WIDTH, PROGRESS_BAR_HEIGHT,
-                 BOOT_BORDER_COLOR);
-
-    /* Draw percentage text */
-    char percent_str[8];
-    int i = 0;
-
-    if (progress >= 100) {
-        percent_str[i++] = '1';
-        percent_str[i++] = '0';
-        percent_str[i++] = '0';
-    } else if (progress >= 10) {
-        percent_str[i++] = '0' + (progress / 10);
-        percent_str[i++] = '0' + (progress % 10);
-    } else {
-        percent_str[i++] = '0' + progress;
-    }
-    percent_str[i++] = '%';
-    percent_str[i] = '\0';
-
-    fb_puts(bar_x + PROGRESS_BAR_WIDTH + 10, bar_y + 6,
-            percent_str, BOOT_TEXT_COLOR, BOOT_BG_COLOR);
 }
 
 /**
