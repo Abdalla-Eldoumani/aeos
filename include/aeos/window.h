@@ -35,13 +35,15 @@
 #define WINDOW_FLAG_DECORATED   (1 << 6)  /* Has title bar and border */
 #define WINDOW_FLAG_DIRTY       (1 << 7)  /* Needs redraw */
 
-/* Window colors. Focus-state title text colors are picked in Phase 3 when
- * decorations get redrawn; for now WINDOW_TITLE_FG keeps the legacy single
- * value so callers don't need to branch on focus. */
+/* Window colors */
 #define WINDOW_TITLE_BG_FOCUSED     THEME_ACCENT
 #define WINDOW_TITLE_BG_UNFOCUSED   THEME_SURFACE_3
-#define WINDOW_TITLE_FG             THEME_TEXT_PRIMARY
-#define WINDOW_BORDER_COLOR         THEME_BORDER_SUBTLE
+#define WINDOW_TITLE_FG_FOCUSED     THEME_BG_DEEP        /* dark on light accent */
+#define WINDOW_TITLE_FG_UNFOCUSED   THEME_TEXT_SECONDARY /* dim on surface 3 */
+#define WINDOW_TITLE_FG             THEME_TEXT_PRIMARY   /* close-button X on red */
+#define WINDOW_BORDER_FOCUSED       THEME_BORDER_STRONG
+#define WINDOW_BORDER_UNFOCUSED     THEME_BORDER_SUBTLE
+#define WINDOW_BORDER_COLOR         WINDOW_BORDER_UNFOCUSED  /* legacy alias */
 #define WINDOW_CLIENT_BG            THEME_SURFACE_1
 #define WINDOW_CLOSE_BTN_BG         THEME_DANGER
 #define WINDOW_CLOSE_BTN_HOVER      THEME_DANGER

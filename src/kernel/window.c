@@ -172,6 +172,8 @@ void window_invalidate(window_t *win)
 void window_draw_decorations(window_t *win, bool focused)
 {
     uint32_t title_bg;
+    uint32_t title_fg;
+    uint32_t border;
     uint32_t close_bg;
     int32_t close_x, close_y;
     fb_info_t *fb = fb_get_info();
@@ -186,8 +188,16 @@ void window_draw_decorations(window_t *win, bool focused)
         return;
     }
 
-    /* Title bar color based on focus */
-    title_bg = focused ? WINDOW_TITLE_BG_FOCUSED : WINDOW_TITLE_BG_UNFOCUSED;
+    /* Title bar, title text, and border each pick a focus-aware color */
+    if (focused) {
+        title_bg = WINDOW_TITLE_BG_FOCUSED;
+        title_fg = WINDOW_TITLE_FG_FOCUSED;
+        border   = WINDOW_BORDER_FOCUSED;
+    } else {
+        title_bg = WINDOW_TITLE_BG_UNFOCUSED;
+        title_fg = WINDOW_TITLE_FG_UNFOCUSED;
+        border   = WINDOW_BORDER_UNFOCUSED;
+    }
 
     /* Draw title bar — fb_fill_rect safely handles signed coordinates */
     fb_fill_rect(win->x, win->y, win->width, WINDOW_TITLE_HEIGHT, title_bg);
@@ -195,7 +205,7 @@ void window_draw_decorations(window_t *win, bool focused)
     /* Draw title text if visible */
     if (win->x + 8 >= 0 && win->y + WINDOW_TITLE_TEXT_Y >= 0) {
         fb_puts(win->x + 8, win->y + WINDOW_TITLE_TEXT_Y, win->title,
-                WINDOW_TITLE_FG, title_bg);
+                title_fg, title_bg);
     }
 
     /* Draw close button if visible */
@@ -207,7 +217,7 @@ void window_draw_decorations(window_t *win, bool focused)
         close_x < (int32_t)fb->width && close_y < (int32_t)fb->height) {
         fb_fill_rect(close_x, close_y, WINDOW_CLOSE_BTN_SIZE, WINDOW_CLOSE_BTN_SIZE, close_bg);
 
-        /* Draw X on close button */
+        /* Draw X on close button — light glyph against the red */
         int32_t cx = close_x + WINDOW_CLOSE_BTN_SIZE / 2;
         int32_t cy = close_y + WINDOW_CLOSE_BTN_SIZE / 2;
         fb_draw_line(cx - 4, cy - 4, cx + 4, cy + 4, WINDOW_TITLE_FG);
@@ -215,7 +225,7 @@ void window_draw_decorations(window_t *win, bool focused)
     }
 
     /* Draw border — fb_draw_rect safely handles signed coordinates */
-    fb_draw_rect(win->x, win->y, win->width, win->height, WINDOW_BORDER_COLOR);
+    fb_draw_rect(win->x, win->y, win->width, win->height, border);
 }
 
 /**
