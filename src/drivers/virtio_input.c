@@ -34,20 +34,42 @@ static input_virtqueue_t mouse_eventq;
 
 /* Event buffers are now allocated inside virtqueue_init and stored in input_virtqueue_t */
 
-/* Keyboard scancode to keycode mapping (simplified) */
-static const uint8_t scancode_to_keycode[] = {
-    0, KEY_ESCAPE, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6,  /* 0-7 */
-    KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL, KEY_BACKSPACE, KEY_TAB,  /* 8-15 */
-    KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I,  /* 16-23 */
-    KEY_O, KEY_P, KEY_LEFTBRACE, KEY_RIGHTBRACE, KEY_ENTER, KEY_LEFTCTRL, KEY_A, KEY_S,  /* 24-31 */
-    KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON,  /* 32-39 */
-    KEY_APOSTROPHE, KEY_GRAVE, KEY_LEFTSHIFT, KEY_BACKSLASH, KEY_Z, KEY_X, KEY_C, KEY_V,  /* 40-47 */
-    KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_RIGHTSHIFT, 0,  /* 48-55 */
-    KEY_LEFTALT, KEY_SPACE, KEY_CAPSLOCK, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5,  /* 56-63 */
-    KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, 0, 0, 0,  /* 64-71 */
-    KEY_UP, 0, 0, KEY_LEFT, 0, KEY_RIGHT, 0, 0,  /* 72-79 */
-    KEY_DOWN, 0, 0, 0, 0, 0, 0, KEY_F11,  /* 80-87 */
-    KEY_F12  /* 88 */
+/* Linux input event code -> keycode_t. The lower section (1-69) doubles as
+ * legacy PC AT scan-set-1 indices since Linux assigned matching values for
+ * historical reasons. Codes 102-111 are the navigation block (Home, arrows,
+ * Page Up/Down, Insert, Delete) that QEMU's virtio-keyboard emits directly. */
+static const uint8_t scancode_to_keycode[128] = {
+    [1]   = KEY_ESCAPE,
+    [2]   = KEY_1,    [3]   = KEY_2,    [4]   = KEY_3,    [5]   = KEY_4,
+    [6]   = KEY_5,    [7]   = KEY_6,    [8]   = KEY_7,    [9]   = KEY_8,
+    [10]  = KEY_9,    [11]  = KEY_0,
+    [12]  = KEY_MINUS, [13]  = KEY_EQUAL,
+    [14]  = KEY_BACKSPACE, [15] = KEY_TAB,
+    [16]  = KEY_Q,    [17]  = KEY_W,    [18]  = KEY_E,    [19]  = KEY_R,
+    [20]  = KEY_T,    [21]  = KEY_Y,    [22]  = KEY_U,    [23]  = KEY_I,
+    [24]  = KEY_O,    [25]  = KEY_P,
+    [26]  = KEY_LEFTBRACE, [27] = KEY_RIGHTBRACE,
+    [28]  = KEY_ENTER, [29] = KEY_LEFTCTRL,
+    [30]  = KEY_A,    [31]  = KEY_S,    [32]  = KEY_D,    [33]  = KEY_F,
+    [34]  = KEY_G,    [35]  = KEY_H,    [36]  = KEY_J,    [37]  = KEY_K,
+    [38]  = KEY_L,    [39]  = KEY_SEMICOLON,
+    [40]  = KEY_APOSTROPHE, [41] = KEY_GRAVE,
+    [42]  = KEY_LEFTSHIFT, [43] = KEY_BACKSLASH,
+    [44]  = KEY_Z,    [45]  = KEY_X,    [46]  = KEY_C,    [47]  = KEY_V,
+    [48]  = KEY_B,    [49]  = KEY_N,    [50]  = KEY_M,    [51]  = KEY_COMMA,
+    [52]  = KEY_DOT,  [53]  = KEY_SLASH, [54] = KEY_RIGHTSHIFT,
+    [56]  = KEY_LEFTALT, [57] = KEY_SPACE,
+    [58]  = KEY_CAPSLOCK,
+    [59]  = KEY_F1,   [60]  = KEY_F2,   [61]  = KEY_F3,   [62]  = KEY_F4,
+    [63]  = KEY_F5,   [64]  = KEY_F6,   [65]  = KEY_F7,   [66]  = KEY_F8,
+    [67]  = KEY_F9,   [68]  = KEY_F10,  [87]  = KEY_F11,  [88]  = KEY_F12,
+    /* Legacy AT keypad/arrow positions (only valid when num-lock is off). */
+    [72]  = KEY_UP,   [75]  = KEY_LEFT, [77]  = KEY_RIGHT,[80]  = KEY_DOWN,
+    /* Linux input event codes for the navigation cluster. */
+    [102] = KEY_HOME,      [103] = KEY_UP,        [104] = KEY_PAGE_UP,
+    [105] = KEY_LEFT,      [106] = KEY_RIGHT,     [107] = KEY_END,
+    [108] = KEY_DOWN,      [109] = KEY_PAGE_DOWN, [110] = KEY_INSERT,
+    [111] = KEY_DELETE,
 };
 
 /**
