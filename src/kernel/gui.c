@@ -16,6 +16,7 @@
 #include <aeos/apps/settings.h>
 #include <aeos/apps/about.h>
 #include <aeos/kprintf.h>
+#include <aeos/theme.h>
 
 /* GUI state */
 static bool gui_running = false;
@@ -68,10 +69,10 @@ int gui_init(void)
     wm_set_desktop_paint(desktop_paint);
 
     /* Add desktop icons */
-    desktop_add_icon("Terminal", 0xFF00AA00, launch_terminal_icon);
-    desktop_add_icon("Files", 0xFFDDAA00, launch_filemanager_icon);
-    desktop_add_icon("Settings", 0xFF6666AA, launch_settings_icon);
-    desktop_add_icon("About", 0xFF0088CC, launch_about_icon);
+    desktop_add_icon("Terminal", THEME_SUCCESS, launch_terminal_icon);
+    desktop_add_icon("Files", THEME_WARNING, launch_filemanager_icon);
+    desktop_add_icon("Settings", THEME_ACCENT_DIM, launch_settings_icon);
+    desktop_add_icon("About", THEME_ACCENT, launch_about_icon);
 
     klog_info("GUI subsystem initialized");
 
