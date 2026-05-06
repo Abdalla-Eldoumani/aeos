@@ -49,7 +49,6 @@ static void idle_process(void)
 void scheduler_init(void)
 {
     klog_info("Initializing scheduler...");
-    kprintf("Step 1\n");
 
     /* Clear scheduler state */
     scheduler.current = NULL;
@@ -61,10 +60,8 @@ void scheduler_init(void)
     scheduler.context_switches = 0;
     scheduler.initialized = false;  /* Set to false until fully initialized */
 
-    kprintf("Step 2\n");
     /* Create idle process - this will add it to the ready queue */
     process_t *idle = process_create(idle_process, "idle");
-    kprintf("Step 3\n");
     if (idle == NULL) {
         klog_fatal("Failed to create idle process");
         while (1) {
@@ -72,13 +69,11 @@ void scheduler_init(void)
         }
     }
 
-    kprintf("Step 4\n");
     /* Remove idle from ready queue since it's a special process
      * It will only run when no other processes are ready
      */
     scheduler_remove_process(idle);
 
-    kprintf("Step 5\n");
     /* Store idle process reference */
     scheduler.idle = idle;
 
@@ -87,7 +82,6 @@ void scheduler_init(void)
     idle->state = PROCESS_RUNNING;
     process_set_current(idle);
 
-    kprintf("Step 6\n");
     /* Now we're initialized */
     scheduler.initialized = true;
 
@@ -99,44 +93,26 @@ void scheduler_init(void)
  */
 void scheduler_add_process(process_t *proc)
 {
-    kprintf("    scheduler_add_process: entry\n");
-
     if (proc == NULL) {
-        kprintf("    NULL process, returning\n");
         return;
     }
 
-    kprintf("    Adding PID=%u '%s'\n", (uint32_t)proc->pid, proc->name);
-
     /* Add to tail of ready queue (circular list) */
-    kprintf("    Setting next: ");
     proc->next = NULL;
-    kprintf("N ");
 
     if (scheduler.ready_head == NULL) {
         /* First process in queue */
-        kprintf("(first)");
         scheduler.ready_head = proc;
-        kprintf("H");
         scheduler.ready_tail = proc;
-        kprintf("T");
     } else {
         /* Add to tail */
-        kprintf("(tail)");
         scheduler.ready_tail->next = proc;
-        kprintf("L");
         scheduler.ready_tail = proc;
-        kprintf("T");
     }
-    kprintf("\n");
 
-    kprintf("    Setting state & counters: ");
     proc->state = PROCESS_READY;
-    kprintf("S");
     scheduler.total_processes++;
-    kprintf("t");
     scheduler.running_processes++;
-    kprintf("r\n");
 
     klog_debug("Added process PID=%u '%s' to ready queue",
                (uint32_t)proc->pid, proc->name);
@@ -374,21 +350,13 @@ void scheduler_start(void)
  */
 void scheduler_get_stats(scheduler_stats_t *stats)
 {
-    kprintf("  scheduler_get_stats: entry\n");
-
     if (stats == NULL) {
-        kprintf("  scheduler_get_stats: NULL stats, returning\n");
         return;
     }
 
-    kprintf("  scheduler_get_stats: copying stats: ");
-    kprintf("t");
     stats->total_processes = scheduler.total_processes;
-    kprintf("r");
     stats->running_processes = scheduler.running_processes;
-    kprintf("c");
     stats->context_switches = scheduler.context_switches;
-    kprintf(" done\n");
 }
 
 /* ============================================================================
