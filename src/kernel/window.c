@@ -229,6 +229,24 @@ void window_draw_decorations(window_t *win, bool focused)
 }
 
 /**
+ * Draw drop shadow for focused windows (single-line fallback).
+ */
+void window_draw_shadow(window_t *win)
+{
+    if (!win || !(win->flags & WINDOW_FLAG_FOCUSED)) {
+        return;
+    }
+    /* 2-px-tall dark band offset 1 px below the window. Cheap stand-in for
+     * the three-rect alpha shadow described in DESIGN_SYSTEM.md, which needs
+     * per-pixel alpha blending we don't yet have. */
+    fb_fill_rect(win->x + 2,
+                 win->y + (int32_t)win->height + 1,
+                 win->width,
+                 2,
+                 THEME_BORDER_SUBTLE);
+}
+
+/**
  * Draw window (decorations + content)
  */
 void window_draw(window_t *win)
@@ -250,6 +268,11 @@ void window_draw(window_t *win)
     }
 
     focused = (win->flags & WINDOW_FLAG_FOCUSED) != 0;
+
+    /* Drop shadow goes under the decorations of focused windows */
+    if (focused) {
+        window_draw_shadow(win);
+    }
 
     /* Draw decorations */
     window_draw_decorations(win, focused);

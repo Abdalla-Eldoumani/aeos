@@ -162,6 +162,13 @@ void window_draw(window_t *win);
 void window_draw_decorations(window_t *win, bool focused);
 
 /**
+ * Draw drop shadow for focused windows. Currently the design-system fallback:
+ * a single 1-px BORDER_SUBTLE line offset below the window. The 3-rect alpha
+ * version is deferred until alpha blending exists.
+ */
+void window_draw_shadow(window_t *win);
+
+/**
  * Check if point is in window
  */
 bool window_contains_point(window_t *win, int32_t x, int32_t y);
