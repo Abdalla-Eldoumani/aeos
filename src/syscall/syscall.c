@@ -200,8 +200,6 @@ static uint64_t sys_getpid_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
     (void)arg0; (void)arg1; (void)arg2;
     (void)arg3; (void)arg4; (void)arg5;
 
-    kprintf("[sys_getpid] proc=%p, proc->pid=%u\n", proc, (uint32_t)proc->pid);
-
     return proc->pid;
 }
 
