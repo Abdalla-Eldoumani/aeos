@@ -79,6 +79,10 @@ static void print_exception_class(uint32_t ec)
  */
 void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
 {
+    /* Mask debug, SError, IRQ, and FIQ before touching kprintf. The print path
+     * is not reentrant, so a timer FIQ landing here would corrupt the trace. */
+    __asm__ volatile("msr DAIFSet, #0xF" ::: "memory");
+
     uint64_t esr, far, ec;
 
     /* Update statistics */
