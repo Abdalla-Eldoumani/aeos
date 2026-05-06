@@ -13,14 +13,31 @@
  * Stored before each allocated or free block
  */
 typedef struct heap_block {
+    uint32_t magic;             /* HEAP_MAGIC; mismatch indicates corruption */
     size_t size;                /* Size of block (including header) */
     bool is_free;               /* True if block is free */
     struct heap_block *next;    /* Next block in list */
     struct heap_block *prev;    /* Previous block in list */
 } heap_block_t;
 
+#define HEAP_MAGIC          0xAEDA110Cu
 #define BLOCK_HEADER_SIZE   sizeof(heap_block_t)
 #define MIN_BLOCK_SIZE      (BLOCK_HEADER_SIZE + 16)
+
+/**
+ * Validate a block header magic. Logs a fatal message and halts on mismatch
+ * so the corruption is visible at the actual fault site, not somewhere downstream.
+ */
+static void heap_check_magic(const heap_block_t *block, const char *where)
+{
+    if (block->magic != HEAP_MAGIC) {
+        klog_fatal("heap corruption at %p in %s: magic=%x size=%u",
+                   block, where, block->magic, (uint32_t)block->size);
+        while (1) {
+            __asm__ volatile("wfi");
+        }
+    }
+}
 
 /**
  * Heap state
@@ -58,6 +75,7 @@ void heap_init(void *heap_start, size_t heap_size)
 
     /* Create initial free block spanning entire heap */
     initial_block = (heap_block_t *)heap_start;
+    initial_block->magic = HEAP_MAGIC;
     initial_block->size = heap_size;
     initial_block->is_free = true;
     initial_block->next = NULL;
@@ -173,6 +191,8 @@ void kfree(void *ptr)
         return;
     }
 
+    heap_check_magic(block, "kfree");
+
     /* Check if already free (double-free detection) */
     if (block->is_free) {
         klog_error("kfree: Double free detected at %p", ptr);
@@ -211,6 +231,7 @@ void *krealloc(void *ptr, size_t new_size)
 
     /* Get current block */
     block = (heap_block_t *)((uint64_t)ptr - BLOCK_HEADER_SIZE);
+    heap_check_magic(block, "krealloc");
 
     /* If block is large enough, just return it */
     if (block->size >= new_size + BLOCK_HEADER_SIZE) {
@@ -329,6 +350,7 @@ static heap_block_t *find_free_block(size_t size)
     heap_block_t *block = heap.first_block;
 
     while (block != NULL) {
+        heap_check_magic(block, "find_free_block");
         if (block->is_free && block->size >= size) {
             return block;
         }
@@ -350,6 +372,7 @@ static void split_block(heap_block_t *block, size_t size)
 
     /* Create new block in remaining space */
     new_block = (heap_block_t *)((uint64_t)block + size);
+    new_block->magic = HEAP_MAGIC;
     new_block->size = remaining_size;
     new_block->is_free = true;
     new_block->next = block->next;
