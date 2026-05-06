@@ -14,7 +14,9 @@
 #include <aeos/kprintf.h>
 #include <aeos/timer.h>
 
-/* Terminal colors (RGB values) */
+/* Terminal colors. These are the standard ANSI 16-color SGR palette and stay
+ * literal on purpose — they're the spec, not design tokens. Theme colors live
+ * in include/aeos/theme.h. */
 static const uint32_t term_colors[] = {
     0xFF000000,  /* Black */
     0xFFCC0000,  /* Red */
