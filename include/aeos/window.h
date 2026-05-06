@@ -9,6 +9,7 @@
 
 #include <aeos/types.h>
 #include <aeos/event.h>
+#include <aeos/theme.h>
 
 /* Maximum windows */
 #define MAX_WINDOWS 16
@@ -31,14 +32,16 @@
 #define WINDOW_FLAG_DECORATED   (1 << 6)  /* Has title bar and border */
 #define WINDOW_FLAG_DIRTY       (1 << 7)  /* Needs redraw */
 
-/* Window colors */
-#define WINDOW_TITLE_BG_FOCUSED     0xFF2060A0  /* Blue title bar */
-#define WINDOW_TITLE_BG_UNFOCUSED   0xFF404050  /* Gray title bar */
-#define WINDOW_TITLE_FG             0xFFFFFFFF  /* White text */
-#define WINDOW_BORDER_COLOR         0xFF303040  /* Dark border */
-#define WINDOW_CLIENT_BG            0xFF1A1A2E  /* Dark client area */
-#define WINDOW_CLOSE_BTN_BG         0xFFC04040  /* Red close button */
-#define WINDOW_CLOSE_BTN_HOVER      0xFFFF4040  /* Brighter red on hover */
+/* Window colors. Focus-state title text colors are picked in Phase 3 when
+ * decorations get redrawn; for now WINDOW_TITLE_FG keeps the legacy single
+ * value so callers don't need to branch on focus. */
+#define WINDOW_TITLE_BG_FOCUSED     THEME_ACCENT
+#define WINDOW_TITLE_BG_UNFOCUSED   THEME_SURFACE_3
+#define WINDOW_TITLE_FG             THEME_TEXT_PRIMARY
+#define WINDOW_BORDER_COLOR         THEME_BORDER_SUBTLE
+#define WINDOW_CLIENT_BG            THEME_SURFACE_1
+#define WINDOW_CLOSE_BTN_BG         THEME_DANGER
+#define WINDOW_CLOSE_BTN_HOVER      THEME_DANGER
 
 /* Forward declaration */
 struct window;
