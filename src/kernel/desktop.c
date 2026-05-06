@@ -240,7 +240,7 @@ void desktop_draw_taskbar(void)
     time_str[4] = '0' + (minutes % 10);
     time_str[5] = '\0';
 
-    fb_puts(FB_WIDTH - 50, taskbar_y + 10, time_str, CLOCK_COLOR, TASKBAR_BG);
+    fb_puts_large(FB_WIDTH - 48, taskbar_y + 8, time_str, CLOCK_COLOR, TASKBAR_BG);
 }
 
 /**
