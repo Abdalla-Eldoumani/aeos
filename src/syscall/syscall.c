@@ -145,9 +145,6 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
 
     (void)arg3; (void)arg4; (void)arg5;
 
-    /* DEBUG: Show syscall parameters */
-    kprintf("[sys_write] fd=%d, buf=%p, count=%u\n", fd, buf, (uint32_t)count);
-
     /* Validate arguments */
     if (buf == NULL) {
         klog_error("sys_write: NULL buffer");
@@ -161,16 +158,10 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
         return (uint64_t)-1;
     }
 
-    /* DEBUG: Show we passed validation */
-    kprintf("[sys_write] Validation passed, writing %u bytes\n", (uint32_t)count);
-
     /* Write each character */
     for (i = 0; i < count; i++) {
         uart_putc(str[i]);
     }
-
-    /* DEBUG: Confirm write complete */
-    kprintf("[sys_write] Write complete\n");
 
     return count;  /* Return number of bytes written */
 }
