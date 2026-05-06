@@ -99,6 +99,19 @@ void notify_info(const char *msg)  { notify_post(NOTIFY_INFO,  msg); }
 void notify_warn(const char *msg)  { notify_post(NOTIFY_WARN,  msg); }
 void notify_error(const char *msg) { notify_post(NOTIFY_ERROR, msg); }
 
+bool notify_active(void)
+{
+    int      i;
+    uint64_t now = timer_get_uptime_ms();
+    for (i = 0; i < NOTIFY_MAX; i++) {
+        if (toasts[i].in_use &&
+            (now - toasts[i].created_ms) < NOTIFY_TOTAL_MS) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * Composite one toast at vertical stack slot `pos` (0 = top, newest). The
  * caller must already have evicted expired toasts and sorted by age.

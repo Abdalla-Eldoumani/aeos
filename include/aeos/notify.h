@@ -40,6 +40,14 @@ void notify_error(const char *msg);
  */
 void notify_render(void);
 
+/**
+ * Returns true if at least one toast is alive (sliding in, visible, or
+ * fading out). The WM uses this to force a window redraw each frame so the
+ * area under the toast is fresh — otherwise sliding/fading toasts leave
+ * trails over un-redrawn windows.
+ */
+bool notify_active(void);
+
 #endif /* AEOS_NOTIFY_H */
 
 /* ============================================================================
