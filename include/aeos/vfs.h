@@ -53,6 +53,8 @@ typedef struct vfs_inode {
     uint64_t mtime;             /* Last modification time */
     uint64_t ctime;             /* Creation time */
     uint32_t nlinks;            /* Number of hard links */
+    uint32_t refcount;          /* Live references: 1 for the directory entry,
+                                 * +1 for each open vfs_file_t. Free when 0. */
     void *fs_data;              /* Filesystem-specific data */
     struct vfs_filesystem *fs;  /* Filesystem this inode belongs to */
 } vfs_inode_t;
@@ -85,6 +87,10 @@ typedef struct vfs_fs_ops {
 
     /* Directory operations */
     int (*dir_readdir)(struct vfs_file *file, vfs_dirent_t **dirent);
+
+    /* Release fs-specific data and free the inode itself. Called when an
+     * inode's refcount drops to zero. */
+    void (*inode_destroy)(vfs_inode_t *inode);
 } vfs_fs_ops_t;
 
 /* Filesystem type registration */
