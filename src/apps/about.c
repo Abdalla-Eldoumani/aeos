@@ -10,13 +10,14 @@
 #include <aeos/heap.h>
 #include <aeos/string.h>
 #include <aeos/kprintf.h>
+#include <aeos/theme.h>
 
 /* Colors */
-#define ABOUT_BG            0xFF1A1A2E
-#define ABOUT_LOGO_COLOR    0xFF00D9FF
-#define ABOUT_TEXT          0xFFCCCCCC
-#define ABOUT_HIGHLIGHT     0xFFFFFFFF
-#define ABOUT_DIM           0xFF666666
+#define ABOUT_BG            THEME_SURFACE_1
+#define ABOUT_LOGO_COLOR    THEME_ACCENT
+#define ABOUT_TEXT          THEME_TEXT_PRIMARY
+#define ABOUT_HIGHLIGHT     THEME_TEXT_PRIMARY
+#define ABOUT_DIM           THEME_TEXT_SECONDARY
 
 /* Forward declarations */
 static void about_paint(window_t *win);
@@ -28,19 +29,19 @@ static void about_close(window_t *win);
 static void draw_logo(window_t *win, int32_t x, int32_t y)
 {
     /* Draw "AEOS" in a box */
-    window_fill_rect(win, x, y, 120, 60, 0xFF252540);
+    window_fill_rect(win, x, y, 120, 60, THEME_SURFACE_2);
     window_draw_rect(win, x, y, 120, 60, ABOUT_LOGO_COLOR);
     window_draw_rect(win, x + 1, y + 1, 118, 58, ABOUT_LOGO_COLOR);
 
     /* Draw text */
-    window_puts(win, x + 20, y + 12, "A E O S", ABOUT_LOGO_COLOR, 0xFF252540);
-    window_puts(win, x + 20, y + 22, "A E O S", ABOUT_LOGO_COLOR, 0xFF252540);
+    window_puts(win, x + 20, y + 12, "A E O S", ABOUT_LOGO_COLOR, THEME_SURFACE_2);
+    window_puts(win, x + 20, y + 22, "A E O S", ABOUT_LOGO_COLOR, THEME_SURFACE_2);
 
     /* Decorative line */
     window_fill_rect(win, x + 20, y + 38, 80, 2, ABOUT_LOGO_COLOR);
 
     /* Version */
-    window_puts(win, x + 32, y + 44, "v1.0", ABOUT_TEXT, 0xFF252540);
+    window_puts(win, x + 32, y + 44, "v1.0", ABOUT_TEXT, THEME_SURFACE_2);
 }
 
 /**
