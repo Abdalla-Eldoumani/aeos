@@ -15,6 +15,7 @@
 #include <aeos/apps/filemanager.h>
 #include <aeos/apps/settings.h>
 #include <aeos/apps/about.h>
+#include <aeos/notify.h>
 #include <aeos/kprintf.h>
 #include <aeos/theme.h>
 
@@ -61,6 +62,10 @@ int gui_init(void)
 
     /* Initialize window manager */
     wm_init();
+
+    /* Toast notifications run inside the wm main loop. Init before any
+     * subsystem that might want to surface a notify_info on startup. */
+    notify_init();
 
     /* Initialize desktop */
     desktop_init();
