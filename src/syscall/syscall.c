@@ -71,9 +71,6 @@ uint64_t syscall_handler(uint64_t syscall_num,
                          uint64_t arg0, uint64_t arg1, uint64_t arg2,
                          uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
-    kprintf("[syscall_handler] num=%u, args=(%lx,%lx,%lx,%lx,%lx,%lx)\n",
-            (uint32_t)syscall_num, arg0, arg1, arg2, arg3, arg4, arg5);
-
     /* Validate syscall number */
     if (syscall_num >= MAX_SYSCALLS) {
         klog_error("syscall_handler: Invalid syscall number %u", (uint32_t)syscall_num);
