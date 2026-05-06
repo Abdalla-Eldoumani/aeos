@@ -106,10 +106,10 @@ static void about_paint(window_t *win)
     y = 80;
 
     /* Title */
-    window_puts(win, 30, y, "Abdalla's Educational", ABOUT_HIGHLIGHT, ABOUT_BG);
-    y += 12;
-    window_puts(win, 50, y, "Operating System", ABOUT_HIGHLIGHT, ABOUT_BG);
-    y += 20;
+    window_puts_large(win, 30, y, "Abdalla's Educational", ABOUT_HIGHLIGHT, ABOUT_BG);
+    y += 18;
+    window_puts_large(win, 50, y, "Operating System", ABOUT_HIGHLIGHT, ABOUT_BG);
+    y += 24;
 
     /* Info */
     window_puts(win, 50, y, "Architecture:", ABOUT_DIM, ABOUT_BG);

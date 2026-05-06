@@ -99,15 +99,15 @@ static void settings_paint(window_t *win)
     window_clear(win, SETTINGS_BG);
 
     /* Title */
-    window_puts(win, 10, y, "System Information", SETTINGS_HEADER, SETTINGS_BG);
+    window_puts_large(win, 10, y, "System Information", SETTINGS_HEADER, SETTINGS_BG);
     y += 24;
 
     /* Memory section */
     window_fill_rect(win, 10, y, win->client_width - 20, 80, SETTINGS_SECTION_BG);
     y += 8;
 
-    window_puts(win, 20, y, "Memory", SETTINGS_HEADER, SETTINGS_SECTION_BG);
-    y += 16;
+    window_puts_large(win, 20, y, "Memory", SETTINGS_HEADER, SETTINGS_SECTION_BG);
+    y += 18;
 
     heap_get_stats(&heap_stats);
 
@@ -130,8 +130,8 @@ static void settings_paint(window_t *win)
     window_fill_rect(win, 10, y, win->client_width - 20, 80, SETTINGS_SECTION_BG);
     y += 8;
 
-    window_puts(win, 20, y, "System", SETTINGS_HEADER, SETTINGS_SECTION_BG);
-    y += 16;
+    window_puts_large(win, 20, y, "System", SETTINGS_HEADER, SETTINGS_SECTION_BG);
+    y += 18;
 
     window_puts(win, 20, y, "Arch:", SETTINGS_LABEL, SETTINGS_SECTION_BG);
     window_puts(win, 120, y, "ARMv8-A AArch64", SETTINGS_VALUE, SETTINGS_SECTION_BG);
@@ -155,8 +155,8 @@ static void settings_paint(window_t *win)
     window_fill_rect(win, 10, y, win->client_width - 20, 50, SETTINGS_SECTION_BG);
     y += 8;
 
-    window_puts(win, 20, y, "Display", SETTINGS_HEADER, SETTINGS_SECTION_BG);
-    y += 16;
+    window_puts_large(win, 20, y, "Display", SETTINGS_HEADER, SETTINGS_SECTION_BG);
+    y += 18;
 
     window_puts(win, 20, y, "Resolution:", SETTINGS_LABEL, SETTINGS_SECTION_BG);
     window_puts(win, 120, y, "640x480 @ 32bpp", SETTINGS_VALUE, SETTINGS_SECTION_BG);
