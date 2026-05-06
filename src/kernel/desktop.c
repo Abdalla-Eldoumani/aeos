@@ -11,20 +11,23 @@
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
 #include <aeos/gui.h>
+#include <aeos/theme.h>
 
-/* Color scheme */
-#define DESKTOP_BG_TOP      0xFF1a1a2e
-#define DESKTOP_BG_BOTTOM   0xFF16213e
-#define TASKBAR_BG          0xFF0f0f23
-#define TASKBAR_BORDER      0xFF2a2a4a
-#define START_BTN_BG        0xFF00aa55
-#define START_BTN_HOVER     0xFF00cc66
+/* Color scheme. Hover and selected variants reuse the same theme token until
+ * Phase 3 redoes decorations. ICON_SELECTED_BG and ICON_LABEL_BG are alpha
+ * overlays that the framebuffer draws as opaque today; keep them as one-offs. */
+#define DESKTOP_BG_TOP      THEME_BG_GRADIENT_TOP
+#define DESKTOP_BG_BOTTOM   THEME_BG_GRADIENT_BOT
+#define TASKBAR_BG          THEME_SURFACE_1
+#define TASKBAR_BORDER      THEME_BORDER_SUBTLE
+#define START_BTN_BG        THEME_SUCCESS
+#define START_BTN_HOVER     THEME_SUCCESS
 #define ICON_SELECTED_BG    0x4000aaff  /* Semi-transparent blue */
 #define ICON_LABEL_BG       0xC0000000  /* Semi-transparent black */
-#define CLOCK_COLOR         0xFFcccccc
-#define TASKBAR_BTN_BG      0xFF1a1a3a
-#define TASKBAR_BTN_ACTIVE  0xFF2a2a5a
-#define TASKBAR_BTN_BORDER  0xFF3a3a6a
+#define CLOCK_COLOR         THEME_TEXT_PRIMARY
+#define TASKBAR_BTN_BG      THEME_SURFACE_2
+#define TASKBAR_BTN_ACTIVE  THEME_SURFACE_3
+#define TASKBAR_BTN_BORDER  THEME_BORDER_SUBTLE
 
 /* Desktop state */
 static struct {
@@ -105,7 +108,7 @@ static void draw_desktop_icon(desktop_icon_t *icon, int type)
 
     /* Label text */
     fb_puts(label_x, icon->y + ICON_HEIGHT + 4,
-            icon->name, 0xFFFFFFFF, ICON_LABEL_BG);
+            icon->name, THEME_TEXT_PRIMARY, ICON_LABEL_BG);
 }
 
 /**
@@ -186,7 +189,7 @@ void desktop_draw_taskbar(void)
 
     /* Start button */
     fb_fill_rect(4, taskbar_y + 4, START_BUTTON_WIDTH, TASKBAR_HEIGHT - 8, START_BTN_BG);
-    fb_puts(12, taskbar_y + 10, "AEOS", 0xFFFFFFFF, START_BTN_BG);
+    fb_puts(12, taskbar_y + 10, "AEOS", THEME_TEXT_PRIMARY, START_BTN_BG);
 
     /* Window buttons */
     btn_x = START_BUTTON_WIDTH + 12;
@@ -214,7 +217,7 @@ void desktop_draw_taskbar(void)
             short_title[15] = '\0';
         }
 
-        fb_puts(btn_x + 8, taskbar_y + 10, short_title, 0xFFFFFFFF, btn_bg);
+        fb_puts(btn_x + 8, taskbar_y + 10, short_title, THEME_TEXT_PRIMARY, btn_bg);
 
         btn_x += TASKBAR_BUTTON_WIDTH + 4;
 
@@ -262,31 +265,31 @@ static void draw_start_menu(void)
     /* Menu items with color indicators */
     item_y = menu_y + 8;
 
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF00CC00);  /* Green */
-    fb_puts(menu_x + 26, item_y, "Terminal", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_SUCCESS);
+    fb_puts(menu_x + 26, item_y, "Terminal", THEME_TEXT_PRIMARY, TASKBAR_BG);
     item_y += 24;
 
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFFCCCC00);  /* Yellow */
-    fb_puts(menu_x + 26, item_y, "Files", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_WARNING);
+    fb_puts(menu_x + 26, item_y, "Files", THEME_TEXT_PRIMARY, TASKBAR_BG);
     item_y += 24;
 
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF6688CC);  /* Blue-gray */
-    fb_puts(menu_x + 26, item_y, "Settings", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_ACCENT_DIM);
+    fb_puts(menu_x + 26, item_y, "Settings", THEME_TEXT_PRIMARY, TASKBAR_BG);
     item_y += 24;
 
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFF0099FF);  /* Blue */
-    fb_puts(menu_x + 26, item_y, "About", 0xFFFFFFFF, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_ACCENT);
+    fb_puts(menu_x + 26, item_y, "About", THEME_TEXT_PRIMARY, TASKBAR_BG);
     item_y += 24;
 
     /* Separator */
     fb_fill_rect(menu_x + 8, item_y, menu_width - 16, 1, TASKBAR_BORDER);
     item_y += 12;
 
-    fb_puts(menu_x + 26, item_y, "Text Mode", 0xFF888888, TASKBAR_BG);
+    fb_puts(menu_x + 26, item_y, "Text Mode", THEME_TEXT_SECONDARY, TASKBAR_BG);
     item_y += 24;
 
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, 0xFFFF4444);  /* Red */
-    fb_puts(menu_x + 26, item_y, "Shutdown", 0xFFff6666, TASKBAR_BG);
+    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_DANGER);
+    fb_puts(menu_x + 26, item_y, "Shutdown", THEME_DANGER, TASKBAR_BG);
 }
 
 /**
