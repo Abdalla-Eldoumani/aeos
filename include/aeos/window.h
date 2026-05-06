@@ -34,6 +34,12 @@
 #define WINDOW_FLAG_MAXIMIZED   (1 << 5)
 #define WINDOW_FLAG_DECORATED   (1 << 6)  /* Has title bar and border */
 #define WINDOW_FLAG_DIRTY       (1 << 7)  /* Needs redraw */
+#define WINDOW_FLAG_CLOSING     (1 << 8)  /* Close-out animation in progress */
+
+/* Animation durations (ms) and slide distance */
+#define WINDOW_OPEN_ANIM_MS     180
+#define WINDOW_CLOSE_ANIM_MS    120
+#define WINDOW_OPEN_SLIDE_PX    4
 
 /* Window colors */
 #define WINDOW_TITLE_BG_FOCUSED     THEME_ACCENT
@@ -101,6 +107,10 @@ typedef struct window {
     /* Linked list for window manager */
     struct window *next;
     struct window *prev;
+
+    /* Open/close animation timestamps (ms since boot). 0 means no animation. */
+    uint64_t open_anim_start_ms;
+    uint64_t close_anim_start_ms;
 } window_t;
 
 /**

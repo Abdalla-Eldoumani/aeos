@@ -9,6 +9,8 @@
 #include <aeos/heap.h>
 #include <aeos/string.h>
 #include <aeos/kprintf.h>
+#include <aeos/timer.h>
+#include <aeos/anim.h>
 
 /* Window ID counter */
 static uint32_t next_window_id = 1;
@@ -247,12 +249,20 @@ void window_draw_shadow(window_t *win)
 }
 
 /**
- * Draw window (decorations + content)
+ * Draw window (decorations + content). Applies open/close animation: a 4-px
+ * slide-up plus a fade overlay over the window rect. Cubic ease-out, 180 ms
+ * to open, 120 ms to close.
  */
 void window_draw(window_t *win)
 {
     bool focused;
     fb_info_t *fb = fb_get_info();
+    uint64_t now;
+    int32_t open_t, close_t, eased;
+    int32_t slide_offset = 0;
+    int32_t saved_y = 0, saved_client_y = 0;
+    uint32_t fade_alpha = 0;
+    bool slid = false;
 
     if (!win || !(win->flags & WINDOW_FLAG_VISIBLE)) {
         return;
@@ -268,6 +278,36 @@ void window_draw(window_t *win)
     }
 
     focused = (win->flags & WINDOW_FLAG_FOCUSED) != 0;
+    now = timer_get_uptime_ms();
+
+    /* Open animation: slide-up + fade-in. Once eased reaches ANIM_Q8_ONE the
+     * draw is identical to a non-animated window. */
+    open_t = anim_progress_q8(now, win->open_anim_start_ms, WINDOW_OPEN_ANIM_MS);
+    if (win->open_anim_start_ms != 0 && open_t < ANIM_Q8_ONE) {
+        eased = ease_out_cubic_q8(open_t);
+        slide_offset = WINDOW_OPEN_SLIDE_PX -
+                       ((WINDOW_OPEN_SLIDE_PX * eased) >> 8);
+        fade_alpha = (uint32_t)(ANIM_Q8_ONE - eased);
+    }
+
+    /* Close animation: fade-out only. WM keeps the window flagged CLOSING and
+     * reaps it once the duration elapses. */
+    if (win->flags & WINDOW_FLAG_CLOSING) {
+        close_t = anim_progress_q8(now, win->close_anim_start_ms,
+                                    WINDOW_CLOSE_ANIM_MS);
+        eased = ease_out_cubic_q8(close_t);
+        fade_alpha = (uint32_t)eased;  /* opaque -> bg as we close */
+    }
+
+    /* Apply slide offset to the draw position only; hit-testing keeps the
+     * unanimated coordinates so events still land where the user clicked. */
+    if (slide_offset > 0) {
+        saved_y = win->y;
+        saved_client_y = win->client_y;
+        win->y += slide_offset;
+        win->client_y += slide_offset;
+        slid = true;
+    }
 
     /* Drop shadow goes under the decorations of focused windows */
     if (focused) {
@@ -285,6 +325,18 @@ void window_draw(window_t *win)
     /* Call paint callback if set */
     if (win->on_paint) {
         win->on_paint(win);
+    }
+
+    /* Fade overlay: blend the bg color over the whole window rect at fade_alpha */
+    if (fade_alpha != 0) {
+        fb_blend_rect(win->x, win->y, (int32_t)win->width, (int32_t)win->height,
+                      THEME_BG_DEEP, fade_alpha);
+    }
+
+    /* Restore original positions for hit-testing */
+    if (slid) {
+        win->y = saved_y;
+        win->client_y = saved_client_y;
     }
 
     /* Clear dirty flag */

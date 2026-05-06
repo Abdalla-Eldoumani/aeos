@@ -179,6 +179,10 @@ void wm_register_window(window_t *win)
     win->z_order = wm.window_count;
     wm.window_count++;
 
+    /* Stamp open animation start so window_draw fades + slides it in */
+    win->open_anim_start_ms = timer_get_uptime_ms();
+    win->close_anim_start_ms = 0;
+
     /* Focus new window */
     wm_focus_window(win);
 

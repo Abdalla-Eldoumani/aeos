@@ -325,6 +325,46 @@ uint32_t fb_getpixel(uint32_t x, uint32_t y)
 }
 
 /**
+ * Blend one pixel: dst' = dst*(1-a) + src*a in Q0.8.
+ */
+static inline uint32_t fb_blend_pixel(uint32_t dst, uint32_t src, uint32_t a)
+{
+    uint32_t inv = 256u - a;
+    uint32_t r = (((dst >> 16) & 0xFFu) * inv + ((src >> 16) & 0xFFu) * a) >> 8;
+    uint32_t g = (((dst >> 8) & 0xFFu) * inv + ((src >> 8) & 0xFFu) * a) >> 8;
+    uint32_t b = ((dst & 0xFFu) * inv + (src & 0xFFu) * a) >> 8;
+    return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
+void fb_blend_rect(int32_t x, int32_t y, int32_t width, int32_t height,
+                   uint32_t color, uint32_t alpha_q8)
+{
+    int32_t i, j;
+
+    if (!fb_info.initialized || alpha_q8 == 0) {
+        return;
+    }
+    if (alpha_q8 >= 256u) {
+        fb_fill_rect(x, y, width, height, color);
+        return;
+    }
+
+    /* Same clipping as fb_fill_rect */
+    if (x < 0) { width += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (width <= 0 || height <= 0) return;
+    if (x + width > (int32_t)fb_info.width)  width  = (int32_t)fb_info.width  - x;
+    if (y + height > (int32_t)fb_info.height) height = (int32_t)fb_info.height - y;
+
+    for (j = 0; j < height; j++) {
+        uint32_t *row = &fb_info.base[(y + j) * fb_info.width + x];
+        for (i = 0; i < width; i++) {
+            row[i] = fb_blend_pixel(row[i], color, alpha_q8);
+        }
+    }
+}
+
+/**
  * Draw a filled rectangle (accepts signed coordinates, clips internally)
  */
 void fb_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color)

@@ -69,6 +69,14 @@ uint32_t fb_getpixel(uint32_t x, uint32_t y);
 void fb_fill_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color);
 
 /**
+ * Blend a colored rectangle over the existing framebuffer pixels with the
+ * given Q0.8 alpha (0 = no change, 256 = fully opaque). Used by window
+ * animations for fade overlays.
+ */
+void fb_blend_rect(int32_t x, int32_t y, int32_t width, int32_t height,
+                   uint32_t color, uint32_t alpha_q8);
+
+/**
  * Draw a rectangle outline (accepts signed coordinates, clips internally)
  */
 void fb_draw_rect(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color);
