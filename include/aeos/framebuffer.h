@@ -53,9 +53,10 @@ fb_info_t *fb_get_info(void);
 void fb_clear(uint32_t color);
 
 /**
- * Draw a pixel at (x, y)
+ * Draw a pixel at (x, y). Accepts signed coordinates; negative or out-of-range
+ * values are clipped, mirroring fb_fill_rect.
  */
-void fb_putpixel(uint32_t x, uint32_t y, uint32_t color);
+void fb_putpixel(int32_t x, int32_t y, uint32_t color);
 
 /**
  * Get pixel color at (x, y)

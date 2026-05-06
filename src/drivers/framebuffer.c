@@ -195,11 +195,15 @@ void fb_clear(uint32_t color)
 }
 
 /**
- * Draw a pixel at (x, y)
+ * Draw a pixel at (x, y). Negative or out-of-range coordinates are clipped.
  */
-void fb_putpixel(uint32_t x, uint32_t y, uint32_t color)
+void fb_putpixel(int32_t x, int32_t y, uint32_t color)
 {
-    if (!fb_info.initialized || x >= fb_info.width || y >= fb_info.height) {
+    if (!fb_info.initialized) {
+        return;
+    }
+    if (x < 0 || y < 0 ||
+        x >= (int32_t)fb_info.width || y >= (int32_t)fb_info.height) {
         return;
     }
 
