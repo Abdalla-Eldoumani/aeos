@@ -73,6 +73,7 @@ C_SOURCES   = src/kernel/main.c \
               src/fs/ramfs.c \
               src/fs/fs_persist.c \
               src/lib/string.c \
+              src/lib/anim.c \
               src/apps/terminal.c \
               src/apps/filemanager.c \
               src/apps/settings.c \
