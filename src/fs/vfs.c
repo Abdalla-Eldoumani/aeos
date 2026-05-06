@@ -173,11 +173,29 @@ void vfs_fd_table_destroy(vfs_fd_table_t *table)
         return;
     }
 
-    /* Close all open files */
+    /* Close every open fd in this table. Walk the table directly instead of
+     * going through vfs_close, which would look up process_current()'s table
+     * and close the wrong fds when this isn't the current process. */
     for (i = 0; i < MAX_OPEN_FILES; i++) {
-        if (table->fds[i].file != NULL) {
-            vfs_close(i);
+        vfs_file_t *file = table->fds[i].file;
+        if (file == NULL) {
+            continue;
         }
+
+        if (file->refcount > 0) {
+            file->refcount--;
+        }
+        if (file->refcount == 0) {
+            vfs_inode_t *inode = file->inode;
+            if (inode && inode->fs && inode->fs->ops->file_close) {
+                inode->fs->ops->file_close(file);
+            }
+            kfree(file);
+            vfs_inode_unref(inode);
+        }
+
+        table->fds[i].file = NULL;
+        table->fds[i].flags = 0;
     }
 
     kfree(table);
