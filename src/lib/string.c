@@ -471,6 +471,7 @@ int snprintf(char *buf, size_t size, const char *fmt, ...)
         if (*fmt == '%') {
             fmt++;
             int width = 0;
+            int precision = -1;
             char pad_char = ' ';
 
             /* Check for zero-pad flag */
@@ -485,12 +486,23 @@ int snprintf(char *buf, size_t size, const char *fmt, ...)
                 fmt++;
             }
 
+            /* Parse precision (e.g. %.40s caps the string at 40 chars) */
+            if (*fmt == '.') {
+                fmt++;
+                precision = 0;
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    fmt++;
+                }
+            }
+
             switch (*fmt) {
                 case 's':
                     str = va_arg(args, const char *);
                     if (str == NULL) str = "(null)";
-                    while (*str && pos < size - 1) {
+                    while (*str && pos < size - 1 && precision != 0) {
                         buf[pos++] = *str++;
+                        if (precision > 0) precision--;
                     }
                     break;
 
