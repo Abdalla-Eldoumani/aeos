@@ -206,6 +206,18 @@ void window_putchar(window_t *win, int32_t x, int32_t y,
                      char c, uint32_t fg, uint32_t bg);
 
 /**
+ * Draw text in window client area using the 8x16 font.
+ */
+void window_puts_large(window_t *win, int32_t x, int32_t y,
+                        const char *text, uint32_t fg, uint32_t bg);
+
+/**
+ * Draw single character in window client area using the 8x16 font.
+ */
+void window_putchar_large(window_t *win, int32_t x, int32_t y,
+                           char c, uint32_t fg, uint32_t bg);
+
+/**
  * Draw line in window client area
  */
 void window_draw_line(window_t *win, int32_t x1, int32_t y1,

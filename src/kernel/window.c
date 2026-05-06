@@ -443,6 +443,52 @@ void window_putchar(window_t *win, int32_t x, int32_t y,
 }
 
 /**
+ * Draw text in client area using the 8x16 font.
+ */
+void window_puts_large(window_t *win, int32_t x, int32_t y,
+                        const char *text, uint32_t fg, uint32_t bg)
+{
+    int32_t abs_x, abs_y;
+
+    if (!win || !text) {
+        return;
+    }
+
+    abs_x = win->client_x + x;
+    abs_y = win->client_y + y;
+
+    if (y < 0 || y >= (int32_t)win->client_height) {
+        return;
+    }
+
+    fb_puts_large(abs_x, abs_y, text, fg, bg);
+}
+
+/**
+ * Draw single character in client area using the 8x16 font.
+ */
+void window_putchar_large(window_t *win, int32_t x, int32_t y,
+                           char c, uint32_t fg, uint32_t bg)
+{
+    int32_t abs_x, abs_y;
+
+    if (!win) {
+        return;
+    }
+
+    abs_x = win->client_x + x;
+    abs_y = win->client_y + y;
+
+    if (x < 0 || y < 0 ||
+        x + 8 > (int32_t)win->client_width ||
+        y + 16 > (int32_t)win->client_height) {
+        return;
+    }
+
+    fb_putchar_large(abs_x, abs_y, c, fg, bg);
+}
+
+/**
  * Draw line in client area
  */
 void window_draw_line(window_t *win, int32_t x1, int32_t y1,
