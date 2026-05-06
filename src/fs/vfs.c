@@ -18,6 +18,22 @@ static struct {
     bool initialized;
 } vfs;
 
+/* Drop one live reference to an inode. When the count hits zero, ask the
+ * filesystem to release fs-specific data and free the inode itself. */
+static void vfs_inode_unref(vfs_inode_t *inode)
+{
+    if (inode == NULL) {
+        return;
+    }
+    if (inode->refcount > 0) {
+        inode->refcount--;
+    }
+    if (inode->refcount == 0 && inode->fs && inode->fs->ops &&
+        inode->fs->ops->inode_destroy) {
+        inode->fs->ops->inode_destroy(inode);
+    }
+}
+
 /* ============================================================================
  * VFS Initialization
  * ============================================================================ */
@@ -239,10 +255,14 @@ void vfs_fd_free(int fd)
 
         /* If no more references, close the file */
         if (file->refcount == 0) {
-            if (file->inode && file->inode->fs && file->inode->fs->ops->file_close) {
-                file->inode->fs->ops->file_close(file);
+            vfs_inode_t *inode = file->inode;
+            if (inode && inode->fs && inode->fs->ops->file_close) {
+                inode->fs->ops->file_close(file);
             }
             kfree(file);
+            /* Drop the inode reference held by this open. The inode itself
+             * may now hit zero and get destroyed by the filesystem. */
+            vfs_inode_unref(inode);
         }
     }
 
@@ -420,9 +440,13 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
     file->refcount = 0;  /* Will be incremented by fd_alloc */
     file->private_data = NULL;
 
+    /* Pin the inode while this open file references it */
+    inode->refcount++;
+
     /* Allocate file descriptor */
     fd = vfs_fd_alloc(file, 0);
     if (fd < 0) {
+        vfs_inode_unref(inode);
         kfree(file);
         return -1;
     }
