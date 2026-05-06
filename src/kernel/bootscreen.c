@@ -11,6 +11,8 @@
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
 #include <aeos/theme.h>
+#include <aeos/anim.h>
+#include <aeos/timer.h>
 
 /* Color definitions for boot screen */
 #define BOOT_BG_COLOR       THEME_BG_DEEP
@@ -33,6 +35,7 @@
 #define PROGRESS_BAR_WIDTH  384   /* 60% of 640 */
 #define PROGRESS_BAR_HEIGHT 4
 #define STATUS_Y            276   /* 8 px below progress bar */
+#define STAGE_FADE_MS       240u  /* duration of stage-message cross-fade */
 
 /* Boot stage information */
 static const boot_stage_info_t boot_stages[] = {
@@ -51,6 +54,10 @@ static bool initialized = false;
 static bool text_mode_requested = false;
 static uint32_t current_progress = 0;
 static const char *current_message = "Booting...";
+
+/* Forward decls so fade_status_message can use them. */
+static void refresh_display(void);
+static uint32_t blend_color(uint32_t a, uint32_t b, int32_t t_q8);
 
 /* Simple delay using busy loop (for use before timer is ready) */
 static void boot_delay(uint32_t iterations)
@@ -109,21 +116,76 @@ static void draw_progress_bar(uint32_t progress)
 }
 
 /**
- * Draw status message
+ * Linear blend between two RGBA colors. t_q8 in 0..256 (Q0.8): 0 -> a, 256 -> b.
  */
-static void draw_status_message(const char *message)
+static uint32_t blend_color(uint32_t a, uint32_t b, int32_t t_q8)
 {
-    uint32_t msg_x;
+    uint32_t inv;
+    uint32_t ar, ag, ab, br, bg, bb, r, g, bl;
+
+    if (t_q8 <= 0) return a;
+    if (t_q8 >= ANIM_Q8_ONE) return b;
+
+    inv = (uint32_t)(ANIM_Q8_ONE - t_q8);
+    ar = (a >> 16) & 0xFFu; ag = (a >> 8) & 0xFFu; ab = a & 0xFFu;
+    br = (b >> 16) & 0xFFu; bg = (b >> 8) & 0xFFu; bb = b & 0xFFu;
+    r  = (ar * inv + br * (uint32_t)t_q8) >> 8;
+    g  = (ag * inv + bg * (uint32_t)t_q8) >> 8;
+    bl = (ab * inv + bb * (uint32_t)t_q8) >> 8;
+    return 0xFF000000u | (r << 16) | (g << 8) | bl;
+}
+
+/**
+ * Draw the status message in the given foreground color, centered on STATUS_Y.
+ * Caller is responsible for clearing the row first if required.
+ */
+static void draw_status_message(const char *message, uint32_t fg)
+{
+    int32_t msg_x;
     size_t len;
 
-    /* Clear previous message area */
-    fb_fill_rect(0, STATUS_Y, SCREEN_WIDTH, 20, BOOT_BG_COLOR);
-
-    /* Center the message */
+    if (message == NULL) {
+        return;
+    }
     len = strlen(message);
-    msg_x = (SCREEN_WIDTH - len * 8) / 2;
+    msg_x = (int32_t)((SCREEN_WIDTH - (uint32_t)(len * 8)) / 2);
+    fb_puts(msg_x, (int32_t)STATUS_Y, message, fg, BOOT_BG_COLOR);
+}
 
-    fb_puts(msg_x, STATUS_Y, message, BOOT_TEXT_COLOR, BOOT_BG_COLOR);
+/**
+ * Cross-fade the status row between two messages over STAGE_FADE_MS using
+ * cubic ease-out. Pass from=NULL to fade only the new message in.
+ */
+static void fade_status_message(const char *from, const char *to)
+{
+    uint64_t start, now;
+    int32_t t_q8, eased;
+    uint32_t fg_from, fg_to;
+
+    if (from == to) {
+        fb_fill_rect(0, (int32_t)STATUS_Y, (int32_t)SCREEN_WIDTH, 8, BOOT_BG_COLOR);
+        draw_status_message(to, THEME_TEXT_SECONDARY);
+        refresh_display();
+        return;
+    }
+
+    start = timer_get_uptime_ms();
+    do {
+        now = timer_get_uptime_ms();
+        t_q8 = anim_progress_q8(now, start, STAGE_FADE_MS);
+        eased = ease_out_cubic_q8(t_q8);
+
+        fb_fill_rect(0, (int32_t)STATUS_Y, (int32_t)SCREEN_WIDTH, 8, BOOT_BG_COLOR);
+
+        if (from != NULL) {
+            fg_from = blend_color(THEME_TEXT_SECONDARY, BOOT_BG_COLOR, eased);
+            draw_status_message(from, fg_from);
+        }
+        fg_to = blend_color(BOOT_BG_COLOR, THEME_TEXT_SECONDARY, eased);
+        draw_status_message(to, fg_to);
+
+        refresh_display();
+    } while (t_q8 < ANIM_Q8_ONE);
 }
 
 /**
@@ -151,8 +213,8 @@ static void draw_boot_screen(void)
     /* Draw progress bar */
     draw_progress_bar(current_progress);
 
-    /* Draw status message */
-    draw_status_message(current_message);
+    /* Draw status message (fb_clear above already wiped the row). */
+    draw_status_message(current_message, THEME_TEXT_SECONDARY);
 
     /* Draw footer */
     draw_footer();
@@ -208,24 +270,20 @@ void bootscreen_init(void)
  */
 void bootscreen_update(boot_stage_t stage)
 {
+    const char *old_message;
+
     if (!initialized || stage >= BOOT_STAGE_COUNT) {
         return;
     }
 
-    /* Check for text mode request */
     check_text_mode_key();
 
-    /* Update progress */
+    old_message = current_message;
     current_progress = boot_stages[stage].progress;
     current_message = boot_stages[stage].message;
 
-    /* Redraw progress bar and message */
     draw_progress_bar(current_progress);
-    draw_status_message(current_message);
-    refresh_display();
-
-    /* Brief delay for visual effect */
-    boot_delay(500000);
+    fade_status_message(old_message, current_message);
 }
 
 /**
@@ -233,20 +291,20 @@ void bootscreen_update(boot_stage_t stage)
  */
 void bootscreen_set_progress(const char *message, uint32_t progress)
 {
+    const char *old_message;
+
     if (!initialized) {
         return;
     }
 
-    /* Check for text mode request */
     check_text_mode_key();
 
+    old_message = current_message;
     current_progress = progress;
     current_message = message;
 
-    /* Redraw */
     draw_progress_bar(current_progress);
-    draw_status_message(current_message);
-    refresh_display();
+    fade_status_message(old_message, current_message);
 }
 
 /**
@@ -254,22 +312,23 @@ void bootscreen_set_progress(const char *message, uint32_t progress)
  */
 bool bootscreen_complete(void)
 {
+    const char *old_message;
+
     if (!initialized) {
         return true;  /* Default to GUI mode */
     }
 
-    /* Final check for text mode */
     check_text_mode_key();
 
-    /* Update to complete */
+    old_message = current_message;
     current_progress = 100;
     current_message = "Boot complete!";
-    draw_progress_bar(current_progress);
-    draw_status_message(current_message);
-    refresh_display();
 
-    /* Short delay before transition */
-    boot_delay(1000000);
+    draw_progress_bar(current_progress);
+    fade_status_message(old_message, current_message);
+
+    /* Brief pause so the user can register "Boot complete!" before transition. */
+    boot_delay(800000);
 
     return !text_mode_requested;
 }
