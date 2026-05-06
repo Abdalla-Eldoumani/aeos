@@ -12,13 +12,14 @@
 #include <aeos/process.h>
 #include <aeos/string.h>
 #include <aeos/kprintf.h>
+#include <aeos/theme.h>
 
 /* Colors */
-#define SETTINGS_BG         0xFF1A1A2E
-#define SETTINGS_SECTION_BG 0xFF252540
-#define SETTINGS_LABEL      0xFF888888
-#define SETTINGS_VALUE      0xFFFFFFFF
-#define SETTINGS_HEADER     0xFF00AAFF
+#define SETTINGS_BG         THEME_SURFACE_1
+#define SETTINGS_SECTION_BG THEME_SURFACE_2
+#define SETTINGS_LABEL      THEME_TEXT_SECONDARY
+#define SETTINGS_VALUE      THEME_TEXT_PRIMARY
+#define SETTINGS_HEADER     THEME_ACCENT
 
 /* Forward declarations */
 static void settings_paint(window_t *win);
