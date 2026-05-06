@@ -47,6 +47,7 @@ C_SOURCES   = src/kernel/main.c \
               src/kernel/shell.c \
               src/kernel/editor.c \
               src/kernel/bootscreen.c \
+              src/kernel/notify.c \
               src/kernel/event.c \
               src/kernel/window.c \
               src/kernel/wm.c \
