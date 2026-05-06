@@ -17,10 +17,13 @@
 /* Window title maximum length */
 #define WINDOW_TITLE_MAX 64
 
-/* Window decoration sizes */
-#define WINDOW_TITLE_HEIGHT 20
-#define WINDOW_BORDER_WIDTH 1
-#define WINDOW_CLOSE_BTN_SIZE 16
+/* Window decoration sizes (Phase 3 design tokens) */
+#define WINDOW_TITLE_HEIGHT     24
+#define WINDOW_BORDER_WIDTH     1
+#define WINDOW_CLOSE_BTN_SIZE   18
+#define WINDOW_CLOSE_BTN_MARGIN 6  /* right margin */
+#define WINDOW_CLOSE_BTN_TOP    3  /* top margin */
+#define WINDOW_TITLE_TEXT_Y     4  /* title text offset from top of title bar */
 
 /* Window flags */
 #define WINDOW_FLAG_VISIBLE     (1 << 0)

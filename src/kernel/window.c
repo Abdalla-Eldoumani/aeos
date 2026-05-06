@@ -193,13 +193,14 @@ void window_draw_decorations(window_t *win, bool focused)
     fb_fill_rect(win->x, win->y, win->width, WINDOW_TITLE_HEIGHT, title_bg);
 
     /* Draw title text if visible */
-    if (win->x + 8 >= 0 && win->y + 6 >= 0) {
-        fb_puts(win->x + 8, win->y + 6, win->title, WINDOW_TITLE_FG, title_bg);
+    if (win->x + 8 >= 0 && win->y + WINDOW_TITLE_TEXT_Y >= 0) {
+        fb_puts(win->x + 8, win->y + WINDOW_TITLE_TEXT_Y, win->title,
+                WINDOW_TITLE_FG, title_bg);
     }
 
     /* Draw close button if visible */
-    close_x = win->x + win->width - WINDOW_CLOSE_BTN_SIZE - 2;
-    close_y = win->y + 2;
+    close_x = win->x + win->width - WINDOW_CLOSE_BTN_SIZE - WINDOW_CLOSE_BTN_MARGIN;
+    close_y = win->y + WINDOW_CLOSE_BTN_TOP;
     close_bg = WINDOW_CLOSE_BTN_BG;
 
     if (close_x >= 0 && close_y >= 0 &&
@@ -294,8 +295,8 @@ bool window_in_close_button(window_t *win, int32_t x, int32_t y)
         return false;
     }
 
-    close_x = win->x + win->width - WINDOW_CLOSE_BTN_SIZE - 2;
-    close_y = win->y + 2;
+    close_x = win->x + win->width - WINDOW_CLOSE_BTN_SIZE - WINDOW_CLOSE_BTN_MARGIN;
+    close_y = win->y + WINDOW_CLOSE_BTN_TOP;
 
     return (x >= close_x && x < close_x + WINDOW_CLOSE_BTN_SIZE &&
             y >= close_y && y < close_y + WINDOW_CLOSE_BTN_SIZE);
