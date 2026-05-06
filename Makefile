@@ -21,6 +21,9 @@ INCLUDE_DIR = include
 # Compiler flags
 CFLAGS  = -Wall -Wextra -Werror -nostdlib -ffreestanding -fno-builtin
 CFLAGS += -mcpu=cortex-a57 -march=armv8-a
+# Forbid FP/SIMD codegen. CPACR_EL1 is not configured to allow Q-register access
+# at EL1, so any vectorized integer code (e.g. paired uint64_t increments) traps.
+CFLAGS += -mgeneral-regs-only
 CFLAGS += -O2 -g
 CFLAGS += -I$(INCLUDE_DIR)
 
