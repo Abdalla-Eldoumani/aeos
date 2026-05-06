@@ -36,6 +36,7 @@
 #define PROGRESS_BAR_HEIGHT 4
 #define STATUS_Y            276   /* 8 px below progress bar */
 #define STAGE_FADE_MS       240u  /* duration of stage-message cross-fade */
+#define EXIT_FADE_MS        200u  /* fade boot content to BG_DEEP before GUI */
 
 /* Boot stage information */
 static const boot_stage_info_t boot_stages[] = {
@@ -315,6 +316,30 @@ void bootscreen_set_progress(const char *message, uint32_t progress)
 }
 
 /**
+ * Fade the rendered boot screen to BG_DEEP over duration_ms. Each frame
+ * redraws the boot content from current state, then composites a BG_DEEP
+ * rectangle on top with eased alpha. At t=1 the screen is solid BG_DEEP,
+ * giving a clean handoff to whatever paints next.
+ */
+static void fade_out_to_bg(uint32_t duration_ms)
+{
+    uint64_t start, now;
+    int32_t t_q8, eased;
+
+    start = timer_get_uptime_ms();
+    do {
+        now = timer_get_uptime_ms();
+        t_q8 = anim_progress_q8(now, start, duration_ms);
+        eased = ease_out_cubic_q8(t_q8);
+
+        draw_boot_screen();
+        fb_blend_rect(0, 0, (int32_t)SCREEN_WIDTH, (int32_t)SCREEN_HEIGHT,
+                      BOOT_BG_COLOR, (uint32_t)eased);
+        refresh_display();
+    } while (t_q8 < ANIM_Q8_ONE);
+}
+
+/**
  * Complete boot screen and transition
  */
 bool bootscreen_complete(void)
@@ -336,6 +361,10 @@ bool bootscreen_complete(void)
 
     /* Brief pause so the user can register "Boot complete!" before transition. */
     boot_delay(800000);
+
+    if (!text_mode_requested) {
+        fade_out_to_bg(EXIT_FADE_MS);
+    }
 
     return !text_mode_requested;
 }
