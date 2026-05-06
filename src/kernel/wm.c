@@ -482,16 +482,19 @@ static void handle_mouse_move(mouse_event_t *mouse)
         int32_t new_x = mouse->x - wm.drag_start_x;
         int32_t new_y = mouse->y - wm.drag_start_y;
 
-        /* Clamp to screen bounds */
-        if (new_x < -(int32_t)(wm.drag_window->width - 40)) {
-            new_x = -(int32_t)(wm.drag_window->width - 40);
+        /* Keep at least 32 px of the title bar on-screen so the user can
+         * always grab the window again. */
+        const int32_t MIN_VISIBLE = 32;
+        int32_t w = (int32_t)wm.drag_window->width;
+        if (new_x < MIN_VISIBLE - w) {
+            new_x = MIN_VISIBLE - w;
         }
-        if (new_x > (int32_t)FB_WIDTH - 40) {
-            new_x = FB_WIDTH - 40;
+        if (new_x > (int32_t)FB_WIDTH - MIN_VISIBLE) {
+            new_x = (int32_t)FB_WIDTH - MIN_VISIBLE;
         }
         if (new_y < 0) new_y = 0;
         if (new_y > (int32_t)FB_HEIGHT - WINDOW_TITLE_HEIGHT) {
-            new_y = FB_HEIGHT - WINDOW_TITLE_HEIGHT;
+            new_y = (int32_t)FB_HEIGHT - WINDOW_TITLE_HEIGHT;
         }
 
         window_move(wm.drag_window, new_x, new_y);
