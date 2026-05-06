@@ -12,15 +12,16 @@
 #include <aeos/heap.h>
 #include <aeos/string.h>
 #include <aeos/kprintf.h>
+#include <aeos/theme.h>
 
 /* Colors */
-#define FM_BG_COLOR         0xFF1A1A2E
-#define FM_PATH_BG          0xFF252540
-#define FM_ENTRY_BG         0xFF202035
-#define FM_ENTRY_SELECTED   0xFF303055
-#define FM_FOLDER_COLOR     0xFF5588FF
-#define FM_FILE_COLOR       0xFFCCCCCC
-#define FM_BORDER_COLOR     0xFF404060
+#define FM_BG_COLOR         THEME_SURFACE_1
+#define FM_PATH_BG          THEME_SURFACE_2
+#define FM_ENTRY_BG         THEME_SURFACE_1
+#define FM_ENTRY_SELECTED   THEME_SURFACE_3
+#define FM_FOLDER_COLOR     THEME_ACCENT
+#define FM_FILE_COLOR       THEME_TEXT_PRIMARY
+#define FM_BORDER_COLOR     THEME_BORDER_SUBTLE
 
 /* Layout */
 #define FM_PATH_HEIGHT      24
@@ -240,8 +241,8 @@ static void filemanager_paint_viewer(window_t *win, filemanager_t *fm)
 
     /* Draw header bar */
     window_fill_rect(win, 0, 0, win->client_width, FM_PATH_HEIGHT, FM_PATH_BG);
-    window_puts(win, FM_PADDING, 8, fm->view_filename, 0xFFFFFFFF, FM_PATH_BG);
-    window_puts(win, win->client_width - 88, 8, "[Bksp]", 0xFF888888, FM_PATH_BG);
+    window_puts(win, FM_PADDING, 8, fm->view_filename, THEME_TEXT_PRIMARY, FM_PATH_BG);
+    window_puts(win, win->client_width - 88, 8, "[Bksp]", THEME_TEXT_SECONDARY, FM_PATH_BG);
 
     /* Draw separator */
     window_fill_rect(win, 0, FM_PATH_HEIGHT, win->client_width, 1, FM_BORDER_COLOR);
@@ -298,7 +299,7 @@ static void filemanager_paint(window_t *win)
 
     /* Draw path bar */
     window_fill_rect(win, 0, 0, win->client_width, FM_PATH_HEIGHT, FM_PATH_BG);
-    window_puts(win, FM_PADDING, 8, fm->current_path, 0xFFFFFFFF, FM_PATH_BG);
+    window_puts(win, FM_PADDING, 8, fm->current_path, THEME_TEXT_PRIMARY, FM_PATH_BG);
 
     /* Draw separator */
     window_fill_rect(win, 0, FM_PATH_HEIGHT, win->client_width, 1, FM_BORDER_COLOR);
@@ -335,7 +336,7 @@ static void filemanager_paint(window_t *win)
                 snprintf(size_str, sizeof(size_str), "%uB", entry->size);
             }
             window_puts(win, win->client_width - 60, y + 6, size_str,
-                        0xFF888888, bg);
+                        THEME_TEXT_SECONDARY, bg);
         }
 
         y += FM_ENTRY_HEIGHT;
