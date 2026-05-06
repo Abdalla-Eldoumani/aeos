@@ -16,6 +16,7 @@ static int ramfs_inode_create(vfs_inode_t *parent, const char *name, uint32_t mo
 static int ramfs_inode_mkdir(vfs_inode_t *parent, const char *name, uint32_t mode, vfs_inode_t **result);
 static int ramfs_inode_unlink(vfs_inode_t *parent, const char *name);
 static int ramfs_inode_rmdir(vfs_inode_t *parent, const char *name);
+static void ramfs_inode_destroy(vfs_inode_t *inode);
 static ssize_t ramfs_file_read(vfs_file_t *file, void *buf, size_t count);
 static ssize_t ramfs_file_write(vfs_file_t *file, const void *buf, size_t count);
 static int ramfs_file_close(vfs_file_t *file);
@@ -32,6 +33,7 @@ static vfs_fs_ops_t ramfs_ops = {
     .file_write = ramfs_file_write,
     .file_close = ramfs_file_close,
     .dir_readdir = ramfs_dir_readdir,
+    .inode_destroy = ramfs_inode_destroy,
 };
 
 /* Global inode counter */
@@ -70,6 +72,7 @@ static vfs_inode_t *ramfs_create_inode(vfs_file_type_t type, uint32_t mode)
     inode->mtime = 0;
     inode->ctime = 0;
     inode->nlinks = 1;
+    inode->refcount = 1;  /* The directory entry holds the first reference */
     inode->fs_data = ramfs_data;
     inode->fs = NULL;  /* Set by caller */
 
@@ -253,13 +256,37 @@ static int ramfs_inode_mkdir(vfs_inode_t *parent, const char *name, uint32_t mod
 }
 
 /**
- * Delete a file
+ * Free fs-specific data and the inode itself. Called by the VFS layer when
+ * the inode's refcount drops to zero.
+ */
+static void ramfs_inode_destroy(vfs_inode_t *inode)
+{
+    ramfs_inode_t *child_data;
+
+    if (inode == NULL) {
+        return;
+    }
+
+    child_data = (ramfs_inode_t *)inode->fs_data;
+    if (child_data != NULL) {
+        if (child_data->data != NULL) {
+            kfree(child_data->data);
+        }
+        kfree(child_data);
+    }
+    kfree(inode);
+}
+
+/**
+ * Delete a file. Removes the directory entry, then drops the inode reference
+ * the entry held. If the inode is still open by a process, it stays alive
+ * until the last close, when vfs_inode_unref calls ramfs_inode_destroy.
  */
 static int ramfs_inode_unlink(vfs_inode_t *parent, const char *name)
 {
     ramfs_inode_t *parent_data;
     ramfs_dirent_t *entry, *prev;
-    ramfs_inode_t *child_data;
+    vfs_inode_t *child_inode;
 
     if (parent == NULL || name == NULL) {
         return -1;
@@ -291,14 +318,17 @@ static int ramfs_inode_unlink(vfs_inode_t *parent, const char *name)
             }
             parent_data->num_entries--;
 
-            /* Free the inode and its data */
-            child_data = (ramfs_inode_t *)entry->inode->fs_data;
-            if (child_data->data != NULL) {
-                kfree(child_data->data);
-            }
-            kfree(child_data);
-            kfree(entry->inode);
+            /* The directory entry held one reference. Drop it; if no open
+             * file still references the inode, destroy it now. */
+            child_inode = entry->inode;
             kfree(entry);
+
+            if (child_inode->refcount > 0) {
+                child_inode->refcount--;
+            }
+            if (child_inode->refcount == 0) {
+                ramfs_inode_destroy(child_inode);
+            }
 
             klog_debug("ramfs_unlink: Deleted file '%s'", name);
             return 0;
