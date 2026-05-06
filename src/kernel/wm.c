@@ -14,6 +14,7 @@
 #include <aeos/timer.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
+#include <aeos/theme.h>
 
 /* Window manager state */
 static struct {
@@ -314,8 +315,8 @@ void wm_redraw(void)
     if (wm.desktop_paint) {
         wm.desktop_paint();
     } else {
-        /* Default background */
-        fb_clear(0xFF202040);
+        /* Default background when no desktop paint hook is set */
+        fb_clear(THEME_BG_DEEP);
     }
 
     /* Draw windows from bottom to top */
