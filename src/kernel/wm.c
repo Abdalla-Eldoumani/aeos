@@ -499,29 +499,6 @@ static void handle_key(key_event_t *key, bool pressed)
         return;  /* Only handle key down */
     }
 
-    /* Debug: show key in title bar to verify keyboard events reach WM */
-    if (wm.focused) {
-        char debug_title[WINDOW_TITLE_MAX];
-        /* Find base title (strip previous debug suffix) */
-        char base[WINDOW_TITLE_MAX];
-        strncpy(base, wm.focused->title, WINDOW_TITLE_MAX - 1);
-        base[WINDOW_TITLE_MAX - 1] = '\0';
-        char *bracket = strchr(base, '[');
-        if (bracket && bracket > base) {
-            /* Trim trailing space before bracket */
-            bracket--;
-            while (bracket > base && *bracket == ' ') bracket--;
-            bracket[1] = '\0';
-        }
-        if (key->ascii >= 32 && key->ascii < 127) {
-            snprintf(debug_title, sizeof(debug_title), "%s [%c]", base, key->ascii);
-        } else {
-            snprintf(debug_title, sizeof(debug_title), "%s [k%d]", base, key->keycode);
-        }
-        window_set_title(wm.focused, debug_title);
-        wm.needs_redraw = true;
-    }
-
     /* Pass to focused window */
     if (wm.focused && wm.focused->on_key) {
         wm.focused->on_key(wm.focused, key);
