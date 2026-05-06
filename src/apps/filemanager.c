@@ -12,6 +12,7 @@
 #include <aeos/heap.h>
 #include <aeos/string.h>
 #include <aeos/kprintf.h>
+#include <aeos/notify.h>
 #include <aeos/theme.h>
 
 /* Colors */
@@ -120,6 +121,7 @@ void filemanager_refresh(filemanager_t *fm)
     dir_fd = vfs_open(fm->current_path, O_RDONLY, 0);
     if (dir_fd < 0) {
         klog_error("Failed to open %s", fm->current_path);
+        notify_error("Cannot open directory");
         fm->entry_count = index;
         return;
     }
@@ -207,6 +209,7 @@ static void filemanager_view_file(filemanager_t *fm, const char *name)
 
     fd = vfs_open(filepath, O_RDONLY, 0);
     if (fd < 0) {
+        notify_error("Cannot open file");
         return;
     }
 
