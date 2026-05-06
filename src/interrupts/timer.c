@@ -194,19 +194,41 @@ uint64_t timer_get_ticks(void)
 }
 
 /**
- * Get system uptime in milliseconds
+ * Get system uptime in milliseconds.
+ *
+ * Reads the ARM Generic Timer virtual counter directly. The FIQ-driven
+ * `timer.ticks` counter is fine for scheduling but can't be relied on for
+ * wall-time animation pacing: in tight busy-loops (e.g. bootscreen fades,
+ * window open/close animations) FIQ delivery is unreliable, so ticks fall
+ * behind real time and a 240 ms fade collapses to milliseconds. CNTVCT_EL0
+ * advances at CNTFRQ_EL0 (62.5 MHz on QEMU virt) regardless of FIQ delivery,
+ * so deltas computed from this function track wall time exactly.
  */
 uint64_t timer_get_uptime_ms(void)
 {
-    return (timer.ticks * 1000) / TIMER_FREQ_HZ;
+    uint64_t cnt;
+    uint32_t freq;
+
+    freq = timer.initialized ? timer.frequency : read_cntfrq();
+    if (freq == 0) {
+        return 0;
+    }
+    cnt = read_cntvct();
+    return (cnt * 1000ULL) / freq;
 }
 
 /**
- * Get system uptime in seconds
+ * Get system uptime in seconds. Same source as timer_get_uptime_ms.
  */
 uint64_t timer_get_uptime_sec(void)
 {
-    return timer.ticks / TIMER_FREQ_HZ;
+    uint32_t freq;
+
+    freq = timer.initialized ? timer.frequency : read_cntfrq();
+    if (freq == 0) {
+        return 0;
+    }
+    return read_cntvct() / freq;
 }
 
 /**
