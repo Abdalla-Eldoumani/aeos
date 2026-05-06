@@ -25,6 +25,11 @@
 #define TERMINAL_WIN_WIDTH      634
 #define TERMINAL_WIN_HEIGHT     385
 
+/* Lines retained above the live grid so the user can scroll back. 200 rows of
+ * 78 cells of 4 bytes ~= 62 KB, allocated separately on the heap so the
+ * terminal_t struct itself stays small. */
+#define TERMINAL_SCROLLBACK_LINES 200
+
 #define TERMINAL_CLIENT_WIDTH   (TERMINAL_WIN_WIDTH  - 2 * WINDOW_BORDER_WIDTH)
 #define TERMINAL_CLIENT_HEIGHT  (TERMINAL_WIN_HEIGHT - WINDOW_TITLE_HEIGHT - WINDOW_BORDER_WIDTH)
 #define TERMINAL_COLS           ((TERMINAL_CLIENT_WIDTH  - 2 * TERMINAL_PAD_X) / TERMINAL_CHAR_WIDTH)
@@ -81,6 +86,15 @@ typedef struct {
     bool     ansi_seen_param;   /* at least one digit consumed in current CSI */
     uint8_t  ansi_param_count;  /* index of parameter currently being filled */
     uint16_t ansi_params[8];
+
+    /* Scrollback ring. scrollback[i][col] is the i'th slot's cell column.
+     * scrollback_head is the next slot to write; when count < MAX it equals
+     * count, after that it wraps. viewport_offset is the number of rows back
+     * from the live grid we're currently viewing (0 = live). */
+    terminal_cell_t (*scrollback)[TERMINAL_COLS];
+    uint32_t scrollback_head;
+    uint32_t scrollback_count;
+    uint32_t viewport_offset;
 } terminal_t;
 
 /**

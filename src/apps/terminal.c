@@ -59,11 +59,22 @@ static void ansi_dispatch(terminal_t *term, char final);
 static void ansi_reset_parser(terminal_t *term);
 
 /**
- * Scroll terminal up by one line
+ * Scroll terminal up by one line. The line that falls off the top is copied
+ * into the scrollback ring before being discarded.
  */
 static void terminal_scroll(terminal_t *term)
 {
     uint32_t row, col;
+
+    if (term->scrollback != NULL) {
+        for (col = 0; col < TERMINAL_COLS; col++) {
+            term->scrollback[term->scrollback_head][col] = term->cells[0][col];
+        }
+        term->scrollback_head = (term->scrollback_head + 1) % TERMINAL_SCROLLBACK_LINES;
+        if (term->scrollback_count < TERMINAL_SCROLLBACK_LINES) {
+            term->scrollback_count++;
+        }
+    }
 
     /* Move all lines up */
     for (row = 0; row < TERMINAL_ROWS - 1; row++) {
@@ -78,6 +89,35 @@ static void terminal_scroll(terminal_t *term)
         term->cells[TERMINAL_ROWS - 1][col].fg = term->current_fg;
         term->cells[TERMINAL_ROWS - 1][col].bg = term->current_bg;
     }
+}
+
+/**
+ * Resolve viewport row -> cell row. Returns NULL if the row is above the
+ * oldest scrollback line (viewport showing pre-history; render blank).
+ */
+static const terminal_cell_t *viewport_row(const terminal_t *term, uint32_t row)
+{
+    int32_t logical = (int32_t)term->scrollback_count
+                    - (int32_t)term->viewport_offset
+                    + (int32_t)row;
+    uint32_t ring_idx;
+
+    if (logical < 0) {
+        return NULL;
+    }
+    if (logical < (int32_t)term->scrollback_count) {
+        if (term->scrollback == NULL) {
+            return NULL;
+        }
+        if (term->scrollback_count < TERMINAL_SCROLLBACK_LINES) {
+            ring_idx = (uint32_t)logical;
+        } else {
+            ring_idx = (term->scrollback_head + (uint32_t)logical)
+                       % TERMINAL_SCROLLBACK_LINES;
+        }
+        return term->scrollback[ring_idx];
+    }
+    return term->cells[(uint32_t)logical - term->scrollback_count];
 }
 
 /**
@@ -100,10 +140,21 @@ terminal_t *terminal_create(void)
     win_width  = TERMINAL_WIN_WIDTH;
     win_height = TERMINAL_WIN_HEIGHT;
 
+    term->scrollback = (terminal_cell_t (*)[TERMINAL_COLS])
+        kmalloc(sizeof(terminal_cell_t) * TERMINAL_SCROLLBACK_LINES * TERMINAL_COLS);
+    if (!term->scrollback) {
+        klog_error("Failed to allocate scrollback");
+        kfree(term);
+        return NULL;
+    }
+    memset(term->scrollback, 0,
+           sizeof(terminal_cell_t) * TERMINAL_SCROLLBACK_LINES * TERMINAL_COLS);
+
     /* Create window */
     term->window = window_create("Terminal", 100, 50, win_width, win_height,
                                   WINDOW_FLAG_VISIBLE);
     if (!term->window) {
+        kfree(term->scrollback);
         kfree(term);
         return NULL;
     }
@@ -184,21 +235,28 @@ static void terminal_paint(window_t *win)
     /* Clear background */
     window_clear(win, term_colors[TERM_COLOR_BLACK]);
 
-    /* Draw cells */
+    /* Draw cells (live grid when viewport_offset == 0, else through scrollback) */
     for (row = 0; row < TERMINAL_ROWS; row++) {
+        const terminal_cell_t *src = viewport_row(term, row);
         y = row * TERMINAL_CHAR_HEIGHT + TERMINAL_PAD_Y;
         for (col = 0; col < TERMINAL_COLS; col++) {
             x = col * TERMINAL_CHAR_WIDTH + TERMINAL_PAD_X;
-
-            fg = term_colors[term->cells[row][col].fg & 0x0F];
-            bg = term_colors[term->cells[row][col].bg & 0x0F];
-
-            window_putchar_large(win, x, y, term->cells[row][col].ch, fg, bg);
+            if (src == NULL) {
+                window_putchar_large(win, x, y, ' ',
+                                     term_colors[TERM_COLOR_WHITE],
+                                     term_colors[TERM_COLOR_BLACK]);
+                continue;
+            }
+            fg = term_colors[src[col].fg & 0x0F];
+            bg = term_colors[src[col].bg & 0x0F];
+            window_putchar_large(win, x, y, src[col].ch, fg, bg);
         }
     }
 
-    /* Draw cursor */
-    if (term->cursor_visible && term->cursor_blink_state) {
+    /* Draw cursor only in live view; while paged back the cursor coords map
+     * into off-screen live cells and would render at the wrong place. */
+    if (term->viewport_offset == 0 &&
+        term->cursor_visible && term->cursor_blink_state) {
         x = term->cursor_x * TERMINAL_CHAR_WIDTH + TERMINAL_PAD_X;
         y = term->cursor_y * TERMINAL_CHAR_HEIGHT + TERMINAL_PAD_Y;
         window_fill_rect(win, x, y, TERMINAL_CHAR_WIDTH, TERMINAL_CHAR_HEIGHT,
@@ -256,6 +314,10 @@ static void terminal_close(window_t *win)
     if (term) {
         if (active_terminal == term) {
             active_terminal = NULL;
+        }
+        if (term->scrollback) {
+            kfree(term->scrollback);
+            term->scrollback = NULL;
         }
         kfree(term);
     }
@@ -593,8 +655,41 @@ void terminal_execute_command(terminal_t *term, const char *cmd)
  */
 void terminal_handle_key(terminal_t *term, key_event_t *key)
 {
+    uint32_t step;
+
     if (!term) {
         return;
+    }
+
+    /* Scrollback navigation. Page Up moves the viewport into history, Page
+     * Down moves it back toward live; we keep one row of overlap so the user
+     * doesn't lose context between pages. */
+    if (key->keycode == KEY_PAGE_UP) {
+        step = (TERMINAL_ROWS > 1) ? (TERMINAL_ROWS - 1) : 1;
+        if (term->viewport_offset + step > term->scrollback_count) {
+            term->viewport_offset = term->scrollback_count;
+        } else {
+            term->viewport_offset += step;
+        }
+        window_invalidate(term->window);
+        return;
+    }
+    if (key->keycode == KEY_PAGE_DOWN) {
+        step = (TERMINAL_ROWS > 1) ? (TERMINAL_ROWS - 1) : 1;
+        if (term->viewport_offset > step) {
+            term->viewport_offset -= step;
+        } else {
+            term->viewport_offset = 0;
+        }
+        window_invalidate(term->window);
+        return;
+    }
+
+    /* Any other key implies the user wants to interact with live; snap back
+     * before processing, otherwise typed input lands in invisible cells. */
+    if (term->viewport_offset != 0) {
+        term->viewport_offset = 0;
+        window_invalidate(term->window);
     }
 
     /* Handle printable characters */
