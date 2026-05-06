@@ -55,7 +55,7 @@ static struct {
 /* Forward declarations */
 static heap_block_t *find_free_block(size_t size);
 static void split_block(heap_block_t *block, size_t size);
-static void merge_free_blocks(void);
+static void merge_free_blocks(heap_block_t *block);
 
 /**
  * Initialize the kernel heap
@@ -204,7 +204,7 @@ void kfree(void *ptr)
     heap.num_frees++;
 
     /* Merge adjacent free blocks */
-    merge_free_blocks();
+    merge_free_blocks(block);
 }
 
 /**
@@ -389,23 +389,36 @@ static void split_block(heap_block_t *block, size_t size)
 }
 
 /**
- * Merge adjacent free blocks
+ * Merge a freed block with its immediate free neighbours. Constant-time per
+ * kfree, since the caller hands us the block and we only inspect prev/next.
  */
-static void merge_free_blocks(void)
+static void merge_free_blocks(heap_block_t *block)
 {
-    heap_block_t *block = heap.first_block;
+    heap_block_t *next, *prev;
 
-    while (block != NULL && block->next != NULL) {
-        if (block->is_free && block->next->is_free) {
-            /* Merge with next block */
-            block->size += block->next->size;
-            block->next = block->next->next;
+    if (block == NULL) {
+        return;
+    }
 
-            if (block->next != NULL) {
-                block->next->prev = block;
-            }
-        } else {
-            block = block->next;
+    /* Absorb the next block if it's free */
+    next = block->next;
+    if (next != NULL && next->is_free) {
+        heap_check_magic(next, "merge_free_blocks/next");
+        block->size += next->size;
+        block->next = next->next;
+        if (block->next != NULL) {
+            block->next->prev = block;
+        }
+    }
+
+    /* Absorb the previous block by folding ourselves into it */
+    prev = block->prev;
+    if (prev != NULL && prev->is_free) {
+        heap_check_magic(prev, "merge_free_blocks/prev");
+        prev->size += block->size;
+        prev->next = block->next;
+        if (prev->next != NULL) {
+            prev->next->prev = prev;
         }
     }
 }
