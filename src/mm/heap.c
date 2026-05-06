@@ -233,8 +233,18 @@ void *krealloc(void *ptr, size_t new_size)
     block = (heap_block_t *)((uint64_t)ptr - BLOCK_HEADER_SIZE);
     heap_check_magic(block, "krealloc");
 
-    /* If block is large enough, just return it */
+    /* If block is large enough, return it. Split the unused tail back to the
+     * free list when there's enough room for a real free block. */
     if (block->size >= new_size + BLOCK_HEADER_SIZE) {
+        size_t needed = (new_size + BLOCK_HEADER_SIZE + 7) & ~7;
+        if (needed < MIN_BLOCK_SIZE) {
+            needed = MIN_BLOCK_SIZE;
+        }
+        if (block->size >= needed + MIN_BLOCK_SIZE) {
+            split_block(block, needed);
+            /* Tail came back free; coalesce it with anything free past it */
+            merge_free_blocks(block->next);
+        }
         return ptr;
     }
 
