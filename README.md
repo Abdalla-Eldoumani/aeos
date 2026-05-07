@@ -203,7 +203,9 @@ The `edit` and `vi` commands open a vim-like text editor:
 
 ## Testing
 
-`make test` builds the kernel with `TEST=1`, which links a self-contained test runner (`src/kernel/test_runner.c`) as `kernel_main` instead of the normal entry point. The runner brings up memory, the VFS, and the process subsystem, then exercises PMM, heap, VFS, and process scenarios. Each scenario logs `PASS: <name>` or `FAIL: <name> (<why>)`. After the suite finishes the runner prints `TEST RESULTS: P PASSED, F FAILED` and exits via semihosting; the `test` target captures stdout to `build/test.log`, parses that line, and exits 0 only when the failure count is zero. Run takes well under a second.
+`make test` builds the kernel with `TEST=1`, which links a self-contained test runner (`src/kernel/test_runner.c`) as `kernel_main` instead of the normal entry point. The runner brings up memory, the VFS, and the process subsystem, then exercises PMM, heap, VFS, process, shell-parse, and symbol-lookup scenarios — 13 in total. Each scenario logs `PASS: <name>` or `FAIL: <name> (<why>)`. After the suite finishes the runner prints `TEST RESULTS: P PASSED, F FAILED` and exits via semihosting; the `test` target captures stdout to `build/test.log`, parses that line, and exits 0 only when the failure count is zero. Run takes well under a second.
+
+GitHub Actions runs `make`, `make TEST=1`, `make test`, and a TODO/FIXME guard on every push and pull request to `master` (see `.github/workflows/ci.yml`).
 
 ## Filesystem Persistence
 
