@@ -104,12 +104,6 @@ el1_sp0_sync:
     str x1, [x0, #0]        /* Store back */
     ldp x0, x1, [sp], #16
 
-    /* DEBUG: Print that we entered SP0 SYNC handler */
-    stp x0, x1, [sp, #-16]!
-    adr x0, sp0_sync_msg
-    bl kprintf
-    ldp x0, x1, [sp], #16
-
     /* Check if this is an SVC instruction */
     mrs x0, esr_el1
     lsr x1, x0, #26
@@ -418,14 +412,6 @@ exception_counters:
     .quad 0  /* 13: el0_aarch32_irq */
     .quad 0  /* 14: el0_aarch32_fiq */
     .quad 0  /* 15: el0_aarch32_serror */
-
-    .section .rodata
-sp0_sync_msg:
-    .asciz "[ASM DEBUG] el1_sp0_sync entered\n"
-fiq_entry_msg:
-    .asciz "[ASM DEBUG] el1_sp0_fiq entered\n"
-svc_detected_msg:
-    .asciz "[ASM DEBUG] SVC detected in FIQ handler\n"
 
 /* ============================================================================
  * End of vectors.asm
