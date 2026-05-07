@@ -72,17 +72,17 @@ drop_to_el1:
 ```assembly
 el1_entry:
     /* Set BOTH SP_EL0 and SP_EL1 to the SAME value */
-    ldr x0, =__stack_top        /* x0 = 0x4001a000 */
+    ldr x0, =__stack_top        /* x0 = __stack_top */
 
     /* Set SP_EL0 */
     msr spsel, #0
     ISB
-    mov sp, x0                  /* SP_EL0 = 0x4001a000 */
+    mov sp, x0                  /* SP_EL0 = __stack_top */
 
     /* Set SP_EL1 */
     msr spsel, #1
     ISB
-    mov sp, x0                  /* SP_EL1 = 0x4001a000 */
+    mov sp, x0                  /* SP_EL1 = __stack_top */
 ```
 
 **Why Both Stack Pointers?**

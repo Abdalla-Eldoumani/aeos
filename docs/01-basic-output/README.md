@@ -52,8 +52,8 @@ This section covers the bootstrap code and basic output functionality for AEOS. 
    - Configures EL1 for AArch64 execution
    - Masks all interrupts (DAIF)
 4. **Stack Setup**:
-   - Sets both SP_EL0 and SP_EL1 to same value (0x4001a000)
-   - 128KB stack allocated by linker
+   - Sets both SP_EL0 and SP_EL1 to the same `__stack_top` value (currently around `0x40649000`; the linker places the stack 128 KB above `__heap_end`)
+   - 128 KB stack allocated by linker
 5. **MMU/Cache Disable**: Ensures clean state
 6. **BSS Clearing**: Zeros uninitialized data section
 7. **Jump to C**: Calls `kernel_main()` with device tree pointer
@@ -63,7 +63,9 @@ This section covers the bootstrap code and basic output functionality for AEOS. 
 ```
 0x09000000: UART0 (PL011)
 0x40000000: RAM start (kernel loaded here)
-0x4001a000: Stack top (grows downward)
+0x40229000: __heap_start (4 MB heap follows; address shifts with kernel size)
+0x40629000: __heap_end
+0x40649000: __stack_top (128 KB stack ends here; SP grows downward into the stack region)
 ```
 
 ## Important Notes
