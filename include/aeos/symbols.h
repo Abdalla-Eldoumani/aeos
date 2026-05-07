@@ -40,4 +40,11 @@ void symbol_lookup(uint64_t addr, char *name_buf, uint32_t buf_size);
  */
 void backtrace(uint64_t fp);
 
+/**
+ * Persist the kprintf ring buffer (i.e., the last 4 KB of kernel output) to
+ * `path` on the host via semihosting. Called from the panic path so post
+ * mortems retain the EXCEPTION block and backtrace after the kernel halts.
+ */
+void crash_dump_save(const char *path);
+
 #endif /* AEOS_SYMBOLS_H */
