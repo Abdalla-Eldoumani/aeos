@@ -210,23 +210,27 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
 ```c
 void handle_irq(uint32_t source, uint32_t type, cpu_context_t *context)
 {
-    /* Acknowledge interrupt and get IRQ number */
     uint32_t irq = gic_acknowledge_irq();
 
-    /* Call registered handler */
-    if (irq < GIC_MAX_IRQ && irq_handlers[irq] != NULL) {
+    /* GICv2 reserves IDs 1020-1023 as spurious indicators. They must not be
+     * EOI'd and must never be looked up in the handler table. */
+    if (irq >= 1020) {
+        return;
+    }
+
+    if (irq_handlers[irq] != NULL) {
         irq_handlers[irq]();
     }
 
-    /* Signal end of interrupt */
     gic_end_of_irq(irq);
 }
 ```
 
 **Flow**:
 1. Read GICC_IAR to get IRQ number and acknowledge
-2. Call handler function
-3. Write to GICC_EOIR to signal completion
+2. Filter the GICv2 spurious range (1020-1023) and return without an EOI
+3. Call any registered handler
+4. Write to GICC_EOIR to signal completion
 
 ### FIQ Handler
 
@@ -243,16 +247,19 @@ void handle_fiq(uint32_t source, uint32_t type, cpu_context_t *context)
 
     /* Fallback: try GIC acknowledge for other FIQ sources */
     uint32_t irq = gic_acknowledge_irq();
-    if (irq < GIC_MAX_IRQ) {
+    if (irq < 1020) {
         if (irq_handlers[irq]) {
             irq_handlers[irq]();
         }
         gic_end_of_irq(irq);
     }
+    /* IDs 1020-1023 are GICv2 spurious indicators; drop them silently. */
 }
 ```
 
 **Why direct timer check?** On QEMU virt, timer interrupts arrive as FIQ regardless of GIC group configuration. The GIC doesn't track FIQs, so `gic_acknowledge_irq()` returns spurious (1022). We check the timer's ISTATUS bit directly instead.
+
+**Why 1020 and not GIC_MAX_IRQ?** GICv2 reserves IDs 1020-1023 as spurious-interrupt indicators (1022 = group-0 spurious, 1023 = group-1 spurious). Using `< 1020` correctly drops them; an earlier version compared against the full table size and produced thousands of "Unhandled IRQ: 1022" log spam on every redraw tick.
 
 ### Timer FIQ Handler
 
