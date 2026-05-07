@@ -636,18 +636,19 @@ void terminal_execute_command(terminal_t *term, const char *cmd)
         return;
     }
 
-    /* Parse command */
-    if (shell_parse(line, &argc, argv) == 0 && argc > 0) {
-        /* Set active terminal and redirect kprintf output */
-        active_terminal = term;
-        kprintf_output_hook = terminal_kprintf_hook;
+    /* Set active terminal and redirect kprintf output. shell_run_line
+     * supports `|` pipes by transiently rerouting kprintf into a ring
+     * buffer for non-final stages, then restores it (to the terminal hook
+     * we install here) for the final stage. */
+    active_terminal = term;
+    kprintf_output_hook = terminal_kprintf_hook;
 
-        /* Execute */
-        shell_execute(argc, argv);
+    shell_run_line(line);
 
-        /* Restore normal UART output */
-        kprintf_output_hook = NULL;
-    }
+    /* Restore normal UART output */
+    kprintf_output_hook = NULL;
+    (void)argc;
+    (void)argv;
 }
 
 /**
