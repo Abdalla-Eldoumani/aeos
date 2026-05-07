@@ -575,10 +575,18 @@ app_t *app_create(void)
 
 ### Close Handler
 
+Window close is **deferred** in the WM: clicking the close button stamps `close_anim_start_ms` and the WM reaps the window after `WINDOW_CLOSE_ANIM_MS`. The reap path is what calls `on_close`. To avoid an in-flight event landing on a freed callback, null the callbacks **before** unregistering the window:
+
 ```c
 static void app_close(window_t *win)
 {
     app_t *app = (app_t *)win->user_data;
+
+    /* Null callbacks first so any pending event sees NULL, not a stale fn. */
+    win->on_paint = NULL;
+    win->on_key   = NULL;
+    win->on_mouse = NULL;
+    win->on_close = NULL;
 
     wm_unregister_window(win);
     window_destroy(win);
