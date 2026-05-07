@@ -51,6 +51,32 @@ AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machin
 - `m4` macro processor
 - QEMU: `qemu-system-aarch64`
 
+### Installing the toolchain
+
+On Debian, Ubuntu, or WSL Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+                    qemu-system-arm m4 make
+```
+
+On Fedora:
+
+```bash
+sudo dnf install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+                    qemu-system-aarch64 m4 make
+```
+
+On macOS (Homebrew):
+
+```bash
+brew install aarch64-elf-gcc qemu m4 make
+# then build with: make CROSS_COMPILE=aarch64-elf-
+```
+
+The Makefile defaults to the `aarch64-linux-gnu-` prefix; override `CROSS_COMPILE` if your toolchain uses a different one.
+
 ## Building
 
 ```bash
