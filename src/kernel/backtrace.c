@@ -9,6 +9,7 @@
 
 #include <aeos/symbols.h>
 #include <aeos/kprintf.h>
+#include <aeos/semihosting.h>
 #include <aeos/string.h>
 
 extern char _kernel_start;
@@ -100,6 +101,42 @@ void backtrace(uint64_t fp)
     }
 
     kprintf("  (truncated at depth 16)\n");
+}
+
+/* File descriptor used by crash_dump_sink. Not thread-safe, but the panic
+ * path runs with all interrupts masked and never returns, so single-writer
+ * is the only mode it ever sees. */
+static int crash_dump_fd = -1;
+
+static void crash_dump_sink(const char *buf, uint32_t len)
+{
+    if (crash_dump_fd < 0 || buf == NULL || len == 0) {
+        return;
+    }
+    semihost_write(crash_dump_fd, buf, len);
+}
+
+void crash_dump_save(const char *path)
+{
+    if (path == NULL) {
+        return;
+    }
+
+    crash_dump_fd = semihost_open(path, SEMIHOST_OPEN_W);
+    if (crash_dump_fd < 0) {
+        kprintf("crash dump: semihost_open(%s) failed\n", path);
+        return;
+    }
+
+    /* Header is written direct-to-fd so it appears at the top even if the
+     * ring already wrapped past the start of the boot log. */
+    static const char banner[] = "==== AEOS CRASH LOG ====\n";
+    semihost_write(crash_dump_fd, banner, sizeof(banner) - 1);
+
+    kprintf_ring_walk(crash_dump_sink);
+
+    semihost_close(crash_dump_fd);
+    crash_dump_fd = -1;
 }
 
 /* ============================================================================
