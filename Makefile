@@ -81,12 +81,21 @@ C_SOURCES   = src/kernel/main.c \
               src/apps/about.c \
               src/apps/calculator.c \
               src/apps/sysmon.c \
-              src/apps/notes.c
+              src/apps/notes.c \
+              src/kernel/backtrace.c
 
 # Object files
 ASM_OBJECTS = $(patsubst src/%.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
 C_OBJECTS   = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(C_SOURCES))
 ALL_OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
+
+# Generated symbol table for the in-kernel backtrace. See the "Symbol table
+# two-pass build" comment near the link rules.
+SYMBOLS_C       = $(BUILD_DIR)/kernel/symbol_data.c
+SYMBOLS_STUB_C  = $(BUILD_DIR)/kernel/symbol_data_stub.c
+SYMBOLS_OBJ     = $(BUILD_DIR)/kernel/symbol_data.o
+SYMBOLS_STUB_O  = $(BUILD_DIR)/kernel/symbol_data_stub.o
+KERNEL_STAGE1   = $(BUILD_DIR)/kernel-stage1.elf
 
 # Output files
 KERNEL_ELF = kernel.elf
@@ -124,11 +133,49 @@ directories:
 	@mkdir -p $(BUILD_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/apps
 
-# Build kernel ELF
-$(KERNEL_ELF): $(ALL_OBJECTS)
-	@echo "Linking kernel..."
-	$(LD) $(LDFLAGS) $(ALL_OBJECTS) -o $@
+# ----------------------------------------------------------------------------
+# Symbol table two-pass build
+#
+# The in-kernel backtrace prints "<name>+0x<offset>" for each saved LR, which
+# requires linking a sorted address-to-name table into the kernel itself.
+# Linking that table changes the kernel image (the table lives in .rodata),
+# so we cannot generate it from the same ELF we want to ship. The pipeline:
+#
+#   1. Link kernel-stage1.elf with an empty stub symbol table, just to get
+#      stable addresses for every function.
+#   2. Run scripts/gen-symbols.sh on kernel-stage1.elf to emit the real
+#      symbol_data.c.
+#   3. Compile symbol_data.c and re-link kernel.elf with the real table.
+#
+# Function addresses are stable across the two passes because the symbol
+# table lives in .rodata, which sits AFTER .text in linker.ld; growing it
+# does not shift any code.
+# ----------------------------------------------------------------------------
+
+$(KERNEL_ELF): $(ALL_OBJECTS) $(SYMBOLS_OBJ)
+	@echo "Linking kernel (pass 2 - with symbol table)..."
+	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_OBJ) -o $@
 	@echo "Kernel linked successfully: $@"
+
+$(KERNEL_STAGE1): $(ALL_OBJECTS) $(SYMBOLS_STUB_O)
+	@echo "Linking kernel (pass 1 - empty symbol table)..."
+	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_STUB_O) -o $@
+
+$(SYMBOLS_C): $(KERNEL_STAGE1) scripts/gen-symbols.sh
+	@echo "Generating symbol table from $<..."
+	@bash scripts/gen-symbols.sh $< $@
+
+$(SYMBOLS_STUB_C):
+	@mkdir -p $(dir $@)
+	@printf '/* Auto-generated stub used only for the stage-1 link. */\n#include <aeos/symbols.h>\nconst symbol_entry_t aeos_symbols[1] = { { 0, "" } };\nconst uint32_t aeos_symbols_count = 0u;\n' > $@
+
+$(SYMBOLS_OBJ): $(SYMBOLS_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(SYMBOLS_STUB_O): $(SYMBOLS_STUB_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Create raw binary
 $(KERNEL_BIN): $(KERNEL_ELF)
