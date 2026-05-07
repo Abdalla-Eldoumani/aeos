@@ -95,7 +95,11 @@ int vfs_mount(const char *path, vfs_filesystem_t *fs)
     mount->path[MAX_PATH_LEN - 1] = '\0';
 
     mount->fs = fs;
-    mount->mountpoint = NULL;  /* TODO: lookup mountpoint inode */
+    /* The mountpoint inode (the directory in the parent fs that the new fs
+     * shadows) is unused today because ramfs is the only filesystem and it
+     * mounts at root. Multi-fs mounts would set this by walking the parent
+     * fs to the mount path and pinning the inode here. */
+    mount->mountpoint = NULL;
 
     /* Special case: mounting root filesystem */
     if (strcmp(path, "/") == 0) {
