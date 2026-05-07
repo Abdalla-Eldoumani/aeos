@@ -632,6 +632,11 @@ void wm_request_exit(void)
     wm.should_exit = true;
 }
 
+void wm_request_redraw(void)
+{
+    wm.needs_redraw = true;
+}
+
 /**
  * Check if should exit
  */

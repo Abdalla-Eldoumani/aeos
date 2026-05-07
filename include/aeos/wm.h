@@ -77,6 +77,14 @@ void wm_run(void);
 void wm_request_exit(void);
 
 /**
+ * Force a full window-tree redraw on the next frame. Used by apps with live
+ * content (system monitor graph, terminal cursor blink) since
+ * window_invalidate alone only marks one window dirty without driving the
+ * top-level redraw.
+ */
+void wm_request_redraw(void);
+
+/**
  * Check if window manager should exit
  */
 bool wm_should_exit(void);
