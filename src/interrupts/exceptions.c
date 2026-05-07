@@ -134,7 +134,19 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
     kprintf("PSTATE: %p\n", (void *)context->pstate);
 
     /* Resolve the faulting PC as a symbol for at-a-glance triage. The
-     * frame-pointer chain rooted at x29 then walks the call stack. */
+     * frame-pointer chain rooted at x29 then walks the call stack.
+     *
+     * Caveat: under QEMU 8.2 AArch64, faults on unmapped-MMIO writes (e.g.
+     * `str xN, [unmapped]`) and on instruction fetches at PC=0 land here
+     * with `EC=0` (Unknown reason) and a saved register file that does not
+     * reflect the values at fault time — every GPR comes back as 0 and the
+     * saved SP is shifted by hundreds of KB above `__stack_top`. The
+     * backtrace prints `(frame pointer is null)` in that scenario. Real
+     * kernel-side faults (NULL deref of a struct field, stack overflow,
+     * data abort from a dangling pointer) produce a clean architectural
+     * sync exception with intact x0..x30, FAR, and SPSR_EL1, and the
+     * backtrace works on those normally — verified during Phase 11.A.6
+     * by walking from a non-fault `kernel_main` site. */
     char pc_name[96];
     symbol_lookup(context->pc, pc_name, sizeof(pc_name));
     kprintf("PC sym: %s\n", pc_name);
