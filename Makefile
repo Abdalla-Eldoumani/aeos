@@ -78,7 +78,8 @@ C_SOURCES   = src/kernel/main.c \
               src/apps/terminal.c \
               src/apps/filemanager.c \
               src/apps/settings.c \
-              src/apps/about.c
+              src/apps/about.c \
+              src/apps/calculator.c
 
 # Object files
 ASM_OBJECTS = $(patsubst src/%.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
