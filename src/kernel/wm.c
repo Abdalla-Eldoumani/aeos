@@ -37,6 +37,11 @@ static struct {
     int32_t drag_start_x;
     int32_t drag_start_y;
 
+    /* Alt+Tab cycle state. While Alt is held, each Tab press advances the
+     * focused window WITHOUT changing z-order, so the user can cycle past
+     * more than two windows. The focused window is raised on Alt release. */
+    bool alt_tab_active;
+
     /* Desktop paint callback */
     wm_desktop_paint_fn desktop_paint;
 
@@ -508,12 +513,76 @@ static void handle_mouse_move(mouse_event_t *mouse)
 }
 
 /**
+ * Set focus on `win` without changing the window z-order. Used during
+ * Alt+Tab cycling so the user can step past more than two windows.
+ */
+static void focus_no_raise(window_t *win)
+{
+    if (!win || win == wm.focused) {
+        return;
+    }
+    if (wm.focused) {
+        wm.focused->flags &= ~WINDOW_FLAG_FOCUSED;
+        wm.focused->flags |= WINDOW_FLAG_DIRTY;
+    }
+    wm.focused = win;
+    win->flags |= WINDOW_FLAG_FOCUSED | WINDOW_FLAG_DIRTY;
+    wm.needs_redraw = true;
+}
+
+/**
+ * Walk z-order downward (newest to oldest) from `current`, skipping
+ * invisible or closing windows, wrapping back to the top once we hit the
+ * bottom. Returns `current` if no other candidate exists.
+ */
+static window_t *next_focus_candidate(window_t *current)
+{
+    window_t *c;
+
+    if (!current) {
+        return wm.top_window;
+    }
+    for (c = current->prev; c != NULL; c = c->prev) {
+        if ((c->flags & WINDOW_FLAG_VISIBLE) &&
+            !(c->flags & WINDOW_FLAG_CLOSING)) {
+            return c;
+        }
+    }
+    /* Wrap: walk down from top until we either find a candidate other than
+     * `current`, or end up back at `current` itself. */
+    for (c = wm.top_window; c != NULL && c != current; c = c->prev) {
+        if ((c->flags & WINDOW_FLAG_VISIBLE) &&
+            !(c->flags & WINDOW_FLAG_CLOSING)) {
+            return c;
+        }
+    }
+    return current;
+}
+
+/**
  * Handle key event
  */
 static void handle_key(key_event_t *key, bool pressed)
 {
+    /* Alt release commits an in-progress Alt+Tab cycle by raising the
+     * currently selected window to the top of the z-order. */
     if (!pressed) {
-        return;  /* Only handle key down */
+        if ((key->keycode == KEY_LEFTALT || key->keycode == KEY_RIGHTALT)
+                && wm.alt_tab_active) {
+            wm.alt_tab_active = false;
+            if (wm.focused) {
+                wm_focus_window(wm.focused);
+            }
+        }
+        return;
+    }
+
+    /* Alt+Tab — cycle focus without raising; commit happens on Alt up. */
+    if (key->keycode == KEY_TAB && (key->modifiers & MOD_ALT)) {
+        window_t *next = next_focus_candidate(wm.focused);
+        wm.alt_tab_active = true;
+        focus_no_raise(next);
+        return;
     }
 
     /* Skip closing windows so the fade-out can't be interrupted */
