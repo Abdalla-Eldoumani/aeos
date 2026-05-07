@@ -9,17 +9,21 @@ AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machin
 ## Features
 
 ### Graphical Desktop Environment
-- **Boot Screen**: Animated boot progress with logo, progress bar, and stage messages
-- **Desktop**: Gradient background with clickable application icons
-- **Window Manager**: Overlapping windows with title bars, close buttons, and drag support
-- **Taskbar**: Start menu button, window buttons for running apps, and system clock
-- **Mouse Cursor**: Hardware-accelerated cursor with proper compositing
+- **Boot Screen**: 8x16 wordmark, slim progress bar, cross-faded stage messages, fade-out to desktop
+- **Desktop**: Gradient background, clickable icons, taskbar with start menu, window buttons, system clock
+- **Window Manager**: Overlapping windows with title bars, close buttons, drag clamping, focused-window drop shadow, slide+fade open animation, fade-out close animation, 30 FPS compositing
+- **Notifications**: Three-slot toast stack in the top-right; 220 ms slide-in, 4 s visible, 240 ms fade-out, info / warn / error stripe colors
+- **Keyboard Shortcuts**: Alt+Tab cycles focus through windows in z-order, Alt+F4 closes the focused window, Esc dismisses overlays
+- **Mouse Cursor**: Software cursor with backup/restore compositing
 
 ### Applications
-- **Terminal**: GUI terminal emulator with shell access
-- **File Manager**: Browse the filesystem graphically
+- **Terminal**: 78x22 GUI terminal emulator (8x16 cells) with ANSI parser and 200-line scrollback
+- **File Manager**: Browse the filesystem graphically; toast errors on VFS failures
 - **Settings**: View system information and memory usage
 - **About**: System information dialog
+- **Calculator**: Standard four-function calculator with int64 fixed-point arithmetic
+- **System Monitor**: Live 60-second heap-usage graph
+- **Notes**: Flat (non-modal) text editor that wraps the editor buffer engine and saves to `/notes.txt`
 
 ### Core OS Features
 - **Bootstrap**: EL2 to EL1 privilege level transition with stack and BSS setup
@@ -81,11 +85,14 @@ Exit QEMU: Press `Ctrl+A` then `X`
 When running in graphical mode (`make run-ramfb`), AEOS displays:
 
 1. **Boot Screen** - Progress bar showing initialization stages
-2. **Desktop** - Four application icons:
+2. **Desktop** - Seven application icons:
    - Terminal (green) - Opens terminal emulator
    - Files (yellow) - Opens file manager
    - Settings (blue) - Opens system settings
    - About (purple) - Opens about dialog
+   - Calc (purple) - Opens calculator
+   - SysMon (green) - Opens system monitor
+   - Notes (yellow) - Opens notes editor
 3. **Taskbar** - Start button, window buttons, clock
 
 ### Mouse Controls
@@ -177,8 +184,8 @@ Filesystem saved successfully!
 ### Memory Map
 ```
 0x40000000  Kernel start
-0x40217000  Heap start
-0x40617000  Heap end / PMM start
+0x40225000  Heap start (4 MB)
+0x40625000  Heap end / PMM start
 0x50000000  RAM end (256MB total)
 ```
 
@@ -201,6 +208,7 @@ aeos/
 │   │   ├── shell.c    # Text-mode shell
 │   │   ├── editor.c   # Vim-like editor
 │   │   ├── bootscreen.c # Boot progress screen
+│   │   ├── notify.c   # Toast notification engine
 │   │   ├── event.c    # Event queue system
 │   │   ├── window.c   # Window management
 │   │   ├── wm.c       # Window manager
@@ -216,7 +224,10 @@ aeos/
 │   │   ├── terminal.c # Terminal emulator
 │   │   ├── filemanager.c # File browser
 │   │   ├── settings.c # System settings
-│   │   └── about.c    # About dialog
+│   │   ├── about.c    # About dialog
+│   │   ├── calculator.c # Four-function calculator
+│   │   ├── sysmon.c   # Live heap usage graph
+│   │   └── notes.c    # GUI text editor
 │   ├── mm/            # Memory management (PMM, heap)
 │   ├── interrupts/    # Exception handling (vectors, GIC, timer)
 │   ├── proc/          # Process management (scheduler, context)

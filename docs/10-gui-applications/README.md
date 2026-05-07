@@ -10,13 +10,13 @@ This section implements the built-in graphical applications for AEOS. These appl
 - **Location**: `src/apps/terminal.c`
 - **Purpose**: GUI terminal emulator with shell access
 - **Features**:
-  - 80x24 character text buffer
-  - 16-color support (ANSI colors)
+  - 78x22 character text buffer using 8x16 cells (computed from window client area)
+  - 16-color ANSI palette
+  - ANSI CSI parser: `H`/`f` (cursor pos), `J`/`K` (clear), `m` (SGR: 0/7/30-37/40-47/90-97/100-107), `?25h`/`?25l` (cursor visibility)
   - Blinking cursor
-  - Command input and execution
-  - Colorized shell prompt
-  - Line scrolling
-  - Shell command integration
+  - 200-line scrollback ring (Page Up / Page Down to scroll, any other key snaps back to live)
+  - Command input and execution; colorized shell prompt
+  - Shell command integration via the `kprintf_output_hook`
 
 ### File Manager (filemanager.c)
 - **Location**: `src/apps/filemanager.c`
@@ -49,6 +49,31 @@ This section implements the built-in graphical applications for AEOS. These appl
   - Version information
   - Architecture details
   - Platform information
+
+### Calculator (calculator.c)
+- **Location**: `src/apps/calculator.c`
+- **Purpose**: Standard four-function calculator
+- **Features**:
+  - 200x260 window, 8x16 right-aligned display, 4x5 button grid (`C ± % ÷` row, then 7-9, 4-6, 1-3, then 0/./=)
+  - Buttons rendered as `THEME_SURFACE_2` rects with `THEME_BORDER_SUBTLE`; operator labels use `THEME_ACCENT`
+  - All arithmetic in int64 fixed-point at 10^6 scale, so decimals work under `-mgeneral-regs-only` (no FP)
+  - `Error` shown on divide-by-zero; next digit press clears it
+
+### System Monitor (sysmon.c)
+- **Location**: `src/apps/sysmon.c`
+- **Purpose**: Live heap usage graph
+- **Features**:
+  - 280x180 window, header reads `Heap: USED / TOTAL`
+  - 60-bar ring buffer, one bar per wall second, newest on the right
+  - Sample driven inside `on_paint` from `timer_get_uptime_sec()`; the paint hook calls `wm_request_redraw()` so the WM keeps ticking even when nothing else changes
+
+### Notes (notes.c)
+- **Location**: `src/apps/notes.c`
+- **Purpose**: Flat (non-modal) text editor
+- **Features**:
+  - 360x300 window, 8x16 cells, blinking caret driven from the WM clock
+  - Wraps the `editor_t` storage from `src/kernel/editor.c` so the buffer + save logic stays in one place; `editor_init`, `editor_open`, `editor_save`, plus the now-public `editor_insert_char` / `editor_insert_newline` / `editor_delete_char` / `editor_backspace` helpers do all the buffer mutation
+  - Saves to `/notes.txt` by default; Ctrl+S saves and posts a `notify_info("Saved")` toast; close also saves if dirty
 
 ## Application Architecture
 
@@ -306,10 +331,9 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 ## Known Limitations
 
 ### Terminal
-- No ANSI escape sequence parsing (colors set programmatically)
-- No command history navigation
+- No command history navigation inside the GUI terminal
 - No tab completion
-- Fixed 80x24 size
+- `edit` and `vi` are blocked from the GUI terminal — the editor's input loop reads UART directly and would freeze `wm_run`. The block message points users to text mode
 
 ### File Manager
 - No file creation/deletion UI
@@ -324,3 +348,15 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 
 ### About
 - Static content only
+
+### Calculator
+- 16-character display ceiling — long results truncate
+- No memory keys (M+, MR), no scientific functions
+
+### System Monitor
+- Heap is the only sampled metric (no CPU%, no per-process info — no userspace yet)
+- Sampling is driven from the paint hook, so closing the window stops sampling
+
+### Notes
+- Single-file editor — cannot pick a different filename without changing `NOTES_DEFAULT_PATH`
+- Plain text only; no syntax highlighting or selection

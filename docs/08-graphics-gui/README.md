@@ -10,11 +10,13 @@ This section implements the complete graphical desktop environment for AEOS. It 
 - **Location**: `src/kernel/bootscreen.c`
 - **Purpose**: Visual boot progress display
 - **Features**:
-  - AEOS logo with decorative border
-  - Animated progress bar (0-100%)
-  - Stage messages during initialization
+  - 8x16 wordmark `A E O S` over an 8x8 "Educational Operating System" subtitle
+  - 4-px slim progress bar at 60% width (no percentage number)
+  - Stage messages cross-fade over 240 ms with cubic ease-out
+  - 200 ms fade-to-`THEME_BG_DEEP` before the desktop appears
   - Text mode fallback (press 'T' during boot)
-  - Footer with version and architecture info
+  - Footer: text-mode hint above `AArch64 | cortex-a57 | 256 MB` hardware line
+  - Animations driven from `timer_get_uptime_ms` which reads `CNTVCT_EL0` directly so the timing pages with wall time on QEMU
 
 ### Event System (event.c)
 - **Location**: `src/kernel/event.c`
@@ -30,11 +32,14 @@ This section implements the complete graphical desktop environment for AEOS. It 
 - **Location**: `src/kernel/wm.c`
 - **Purpose**: Window compositing and management
 - **Features**:
-  - Z-ordered window list (front to back)
-  - Focus tracking and switching
-  - Window dragging by title bar
+  - Z-ordered window list (front to back); doubly linked
+  - Focus tracking and switching (`wm_focus_window` raises; `focus_no_raise` for Alt+Tab cycling)
+  - Window dragging by title bar with edge clamping (32 px of title bar stays on-screen)
+  - Window open animation (slide + fade), deferred close animation, focused-window drop shadow
   - Mouse cursor rendering with backup/restore
-  - 30 FPS display refresh
+  - 30 FPS display refresh; toasts force per-frame redraws while alive
+  - Keyboard shortcuts: Alt+Tab focus cycle, Alt+F4 close-via-fade, Esc dismiss start menu + toasts
+  - `wm_request_redraw()` for live-content apps that need the WM to keep ticking
 
 ### Window (window.c)
 - **Location**: `src/kernel/window.c`
@@ -63,9 +68,19 @@ This section implements the complete graphical desktop environment for AEOS. It 
 - **Purpose**: Coordinate GUI subsystem initialization
 - **Features**:
   - Initialize all GUI components in order
-  - Register desktop icons with launch callbacks
-  - Provide application launch functions
+  - Register seven desktop icons (Terminal, Files, Settings, About, Calc, SysMon, Notes) with launch callbacks
+  - Provide application launch functions (`gui_launch_*`)
   - Main GUI entry point
+
+### Notifications (notify.c)
+- **Location**: `src/kernel/notify.c`
+- **Purpose**: Floating toast notifications above windows
+- **Features**:
+  - Three-slot ring; oldest evicted on overflow
+  - 220 ms slide-in from the right, 4 s visible, 240 ms fade-out (eased)
+  - Per-level stripe color: `THEME_ACCENT` (info), `THEME_WARNING` (warn), `THEME_DANGER` (error)
+  - Composited above windows but below the cursor in `wm_update_display`
+  - `notify_dismiss_all()` for the Esc shortcut force-fades everything at once
 
 ## Architecture
 
