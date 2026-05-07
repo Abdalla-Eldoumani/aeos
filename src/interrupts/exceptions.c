@@ -145,6 +145,11 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
 
     /* Halt system on unexpected exceptions */
     klog_fatal("Unhandled exception - system halted");
+
+    /* Persist the kprintf ring (boot log + EXCEPTION block + backtrace) to
+     * the host before halting so the user can read it after QEMU exits. */
+    crash_dump_save("/crash.log");
+
     while (1) {
         __asm__ volatile("wfi");
     }
