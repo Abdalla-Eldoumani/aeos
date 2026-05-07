@@ -149,20 +149,6 @@ void process_set_current(process_t *proc)
 }
 
 /**
- * Get process by PID. Always returns NULL today: there is no global process
- * table — only the scheduler's ready queue and `current_process`. The PCB's
- * `next` pointer is already claimed by the run queue, so adding lookup means
- * either a parallel list, a hash table, or a second linked-list field on
- * `process_t`. No caller depends on this yet, so the API exists as a
- * placeholder for the day a future shell command (e.g. `kill`) needs it.
- */
-process_t *process_get_by_pid(uint64_t pid)
-{
-    (void)pid;
-    return NULL;
-}
-
-/**
  * Initialize process subsystem
  */
 void process_init(void)
