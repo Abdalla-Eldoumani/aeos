@@ -24,6 +24,7 @@ AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machin
 - **Calculator**: Standard four-function calculator with int64 fixed-point arithmetic
 - **System Monitor**: Live 60-second heap-usage graph
 - **Notes**: Flat (non-modal) text editor that wraps the editor buffer engine and saves to `/notes.txt`
+- **Tetris**: 10x20 board with all seven tetrominoes, gravity that speeds up by level, soft/hard drop, hold-to-pause, and a high score persisted to `/tetris_high.bin`
 
 ### Core OS Features
 - **Bootstrap**: EL2 to EL1 privilege level transition with stack and BSS setup
@@ -85,7 +86,7 @@ Exit QEMU: Press `Ctrl+A` then `X`
 When running in graphical mode (`make run-ramfb`), AEOS displays:
 
 1. **Boot Screen** - Progress bar showing initialization stages
-2. **Desktop** - Seven application icons:
+2. **Desktop** - Eight application icons:
    - Terminal (green) - Opens terminal emulator
    - Files (yellow) - Opens file manager
    - Settings (blue) - Opens system settings
@@ -93,6 +94,7 @@ When running in graphical mode (`make run-ramfb`), AEOS displays:
    - Calc (purple) - Opens calculator
    - SysMon (green) - Opens system monitor
    - Notes (yellow) - Opens notes editor
+   - Tetris (red) - Opens the Tetris game
 3. **Taskbar** - Start button, window buttons, clock
 
 ### Mouse Controls
@@ -232,7 +234,8 @@ aeos/
 │   │   ├── about.c    # About dialog
 │   │   ├── calculator.c # Four-function calculator
 │   │   ├── sysmon.c   # Live heap usage graph
-│   │   └── notes.c    # GUI text editor
+│   │   ├── notes.c    # GUI text editor
+│   │   └── tetris.c   # Tetris game
 │   ├── mm/            # Memory management (PMM, heap)
 │   ├── interrupts/    # Exception handling (vectors, GIC, timer)
 │   ├── proc/          # Process management (scheduler, context)
