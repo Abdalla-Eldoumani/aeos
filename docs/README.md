@@ -62,17 +62,18 @@ Command-line interface and text editor.
 ### 8. [Graphics and GUI](./08-graphics-gui/)
 Graphical desktop environment implementation.
 
-- **Location**: `src/kernel/bootscreen.c`, `src/kernel/gui.c`, `src/kernel/wm.c`, `src/kernel/window.c`, `src/kernel/desktop.c`, `src/kernel/event.c`
-- **What it does**: Provides a complete graphical desktop environment with boot screen, window manager, desktop icons, and taskbar
-- **Key concepts**: Framebuffer graphics, window compositing, event-driven architecture, mouse cursor rendering
+- **Location**: `src/kernel/bootscreen.c`, `src/kernel/gui.c`, `src/kernel/wm.c`, `src/kernel/window.c`, `src/kernel/desktop.c`, `src/kernel/event.c`, `src/kernel/notify.c`
+- **What it does**: Provides a complete graphical desktop environment with animated boot screen, window manager (open/close animations + drop shadow + Alt+Tab/F4/Esc shortcuts), desktop icons, taskbar, and toast notifications
+- **Key concepts**: Framebuffer graphics, direct compositing (no per-window backbuffer), Q0.8 fixed-point easing, event-driven architecture, software cursor with backup/restore
 
 #### Key Components:
-- **Boot Screen** (`bootscreen.c`): Animated progress bar with stage messages
+- **Boot Screen** (`bootscreen.c`): 8x16 wordmark, slim progress bar, cross-faded stage messages, fade-out to desktop
 - **Event System** (`event.c`): Circular queue for keyboard/mouse events
-- **Window Manager** (`wm.c`): Z-ordered window list, focus tracking, window dragging
-- **Window** (`window.c`): Window creation, decorations, client area management
-- **Desktop** (`desktop.c`): Background, icons, taskbar, start menu
-- **GUI Init** (`gui.c`): Coordinates initialization of all GUI subsystems
+- **Window Manager** (`wm.c`): Z-ordered window list, focus tracking with Alt+Tab cycle, dragging with edge clamping, open/close animations, focused-window drop shadow, global keyboard shortcuts
+- **Window** (`window.c`): Window creation, decorations, client area management, slide+fade open animation
+- **Notifications** (`notify.c`): Three-slot toast ring with 220 ms slide-in / 4 s visible / 240 ms fade-out
+- **Desktop** (`desktop.c`): Background gradient, icons (7), taskbar, start menu (table-driven)
+- **GUI Init** (`gui.c`): Coordinates initialization, registers desktop icons, owns the `gui_launch_*` entry points
 
 ### 9. [VirtIO Drivers](./09-virtio-drivers/)
 VirtIO device drivers for graphics and input.
@@ -92,10 +93,13 @@ Built-in graphical applications.
 - **Location**: `src/apps/`
 - **What it does**: Provides user-facing applications for the desktop environment
 - **Applications**:
-  - **Terminal** (`terminal.c`): GUI terminal emulator with shell integration
-  - **File Manager** (`filemanager.c`): Graphical file browser
+  - **Terminal** (`terminal.c`): 78x22 GUI terminal emulator with ANSI parser and 200-line scrollback
+  - **File Manager** (`filemanager.c`): Graphical file browser with toast errors on VFS failures
   - **Settings** (`settings.c`): System information and memory statistics
   - **About** (`about.c`): System information dialog
+  - **Calculator** (`calculator.c`): Four-function calculator with int64 fixed-point arithmetic
+  - **System Monitor** (`sysmon.c`): Live 60-second heap usage graph
+  - **Notes** (`notes.c`): GUI text editor wrapping the editor buffer engine; saves to `/notes.txt`
 
 ## Documentation Structure
 
@@ -112,7 +116,8 @@ Each section directory contains:
 5. **Kernel Mode Only**: All code runs at EL1, no user space (EL0)
 6. **VirtIO Legacy Mode**: GPU and input use VirtIO MMIO with legacy (v1) protocol
 7. **Event-Driven GUI**: Mouse/keyboard events queued and processed in main loop
-8. **Compositing Window Manager**: Windows have backbuffers, composited to main framebuffer
+8. **Direct-Compositing Window Manager**: Windows draw straight into the main framebuffer in z-order from `wm_redraw`; no per-window backbuffers
+9. **Wall-Clock Animation**: All easing reads `CNTVCT_EL0` directly via `timer_get_uptime_ms` so animations pace to wall time, not the FIQ counter
 
 ## Build Environment
 
