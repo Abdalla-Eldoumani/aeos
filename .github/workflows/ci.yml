@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install AArch64 toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            qemu-system-arm m4 make
+
+      - name: Build kernel
+        run: make
+
+      - name: Build test runner
+        run: make TEST=1
+
+      - name: Run test suite
+        run: make test
+
+      - name: Confirm zero TODO markers in tracked source
+        run: |
+          if grep -rn 'TODO\|FIXME\|XXX\|HACK' --include='*.c' --include='*.h' --include='*.asm' src/ include/; then
+            echo 'Tracked source contains TODO/FIXME markers; clean them up or convert to documented limitations.' >&2
+            exit 1
+          fi
