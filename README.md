@@ -161,6 +161,10 @@ The `edit` and `vi` commands open a vim-like text editor:
 - `:wq` - Save and quit
 - `:q!` - Quit without saving
 
+## Testing
+
+`make test` builds the kernel with `TEST=1`, which links a self-contained test runner (`src/kernel/test_runner.c`) as `kernel_main` instead of the normal entry point. The runner brings up memory, the VFS, and the process subsystem, then exercises PMM, heap, VFS, and process scenarios. Each scenario logs `PASS: <name>` or `FAIL: <name> (<why>)`. After the suite finishes the runner prints `TEST RESULTS: P PASSED, F FAILED` and exits via semihosting; the `test` target captures stdout to `build/test.log`, parses that line, and exits 0 only when the failure count is zero. Run takes well under a second.
+
 ## Filesystem Persistence
 
 Files are stored in RAM during runtime. Use the `save` command to persist the filesystem to the host machine. The filesystem is saved to `aeos_fs.img` and automatically loaded on next boot.
