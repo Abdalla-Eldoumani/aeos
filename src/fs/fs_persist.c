@@ -145,7 +145,11 @@ ssize_t fs_save(vfs_filesystem_t *fs, void *buffer, size_t buffer_size)
     /* Prepare header */
     header.magic = FS_MAGIC;
     header.version = FS_VERSION;
-    header.timestamp = 0;  /* TODO: Get real timestamp when RTC is implemented */
+    /* Timestamp is always 0: there is no RTC driver and `timer_get_uptime_ms`
+     * resets every boot, so a real wall-clock here would lie. Bump
+     * FS_VERSION if you ever add a real clock and want to repurpose the
+     * field. */
+    header.timestamp = 0;
     header.num_inodes = 0;  /* Will be calculated during serialization */
     header.data_size = 0;
 
