@@ -160,8 +160,10 @@ void handle_irq(uint32_t source, uint32_t type, cpu_context_t *context)
     /* Acknowledge interrupt and get IRQ number */
     irq = gic_acknowledge_irq();
 
-    /* Spurious interrupt check */
-    if (irq >= GIC_MAX_IRQ) {
+    /* GICv2 reserves IDs 1020-1023 as spurious indicators (1022 = group-0
+     * spurious, 1023 = group-1 spurious). They must not be EOI'd and must
+     * never be looked up in the handler table. */
+    if (irq >= 1020) {
         return;
     }
 
@@ -198,14 +200,14 @@ void handle_fiq(uint32_t source, uint32_t type, cpu_context_t *context)
 
     /* Unknown FIQ source - try GIC acknowledge as fallback */
     uint32_t irq = gic_acknowledge_irq();
-    if (irq < GIC_MAX_IRQ) {
+    if (irq < 1020) {
         irq_handler_t handler = irq_handlers[irq];
         if (handler != NULL) {
             handler();
         }
         gic_end_of_irq(irq);
     }
-    /* If irq >= GIC_MAX_IRQ (spurious), just return */
+    /* If irq is in the GICv2 spurious range (1020-1023), just return. */
 }
 
 /**
