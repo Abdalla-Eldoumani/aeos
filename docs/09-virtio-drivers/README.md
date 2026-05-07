@@ -34,8 +34,8 @@ This section implements VirtIO device drivers for AEOS, enabling graphics displa
   - Pixel drawing
   - Rectangle filling and outlining
   - Line drawing (Bresenham's algorithm)
-  - 8x8 font character rendering
-  - String output
+  - Two bitmap fonts: 8x8 (`fb_putchar`/`fb_puts`) and 8x16 (`fb_putchar_large`/`fb_puts_large`)
+  - All primitives accept signed coordinates and clip to the framebuffer internally
 
 ## VirtIO MMIO Transport
 
@@ -190,8 +190,10 @@ uint32_t fb_getpixel(int32_t x, int32_t y);
 void fb_fill_rect(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color);
 void fb_draw_rect(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color);
 void fb_draw_line(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color);
-void fb_putchar(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);
-void fb_puts(int32_t x, int32_t y, const char *s, uint32_t fg, uint32_t bg);
+void fb_putchar(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);          /* 8x8 */
+void fb_puts(int32_t x, int32_t y, const char *s, uint32_t fg, uint32_t bg);      /* 8x8 */
+void fb_putchar_large(int32_t x, int32_t y, char c, uint32_t fg, uint32_t bg);    /* 8x16 */
+void fb_puts_large(int32_t x, int32_t y, const char *s, uint32_t fg, uint32_t bg);/* 8x16 */
 void fb_clear(uint32_t color);
 ```
 
@@ -260,7 +262,7 @@ while (1) {
 - Input: No tablet absolute mode scrolling
 - Input: No multi-touch support
 - Framebuffer: No hardware acceleration
-- Font: Fixed 8x8 bitmap font only
+- Fonts: only 8x8 and 8x16 bitmap fonts (no scalable / antialiased text)
 
 ## Debugging
 
