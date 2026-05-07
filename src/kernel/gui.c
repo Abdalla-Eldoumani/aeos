@@ -18,6 +18,7 @@
 #include <aeos/apps/calculator.h>
 #include <aeos/apps/sysmon.h>
 #include <aeos/apps/notes.h>
+#include <aeos/apps/tetris.h>
 #include <aeos/notify.h>
 #include <aeos/kprintf.h>
 #include <aeos/theme.h>
@@ -61,6 +62,11 @@ static void launch_notes_icon(void)
     gui_launch_notes();
 }
 
+static void launch_tetris_icon(void)
+{
+    gui_launch_tetris();
+}
+
 /**
  * Initialize GUI subsystem
  */
@@ -99,6 +105,7 @@ int gui_init(void)
     desktop_add_icon("Calc", THEME_ACCENT, launch_calculator_icon);
     desktop_add_icon("SysMon", THEME_SUCCESS, launch_sysmon_icon);
     desktop_add_icon("Notes", THEME_WARNING, launch_notes_icon);
+    desktop_add_icon("Tetris", THEME_DANGER, launch_tetris_icon);
 
     klog_info("GUI subsystem initialized");
 
@@ -212,6 +219,17 @@ void gui_launch_notes(void)
     notes_t *n = notes_create();
     if (!n) {
         klog_error("Failed to launch Notes");
+    }
+}
+
+/**
+ * Launch Tetris app
+ */
+void gui_launch_tetris(void)
+{
+    tetris_t *t = tetris_create();
+    if (!t) {
+        klog_error("Failed to launch Tetris");
     }
 }
 
