@@ -41,26 +41,6 @@ extern char __stack_top;
 extern uint64_t exception_counters[16];
 
 /**
- * Print exception handler counters (for debugging syscalls)
- */
-// static void print_exception_counters(void)
-// {
-//     kprintf("[EXCEPTION COUNTERS - ALL 16 VECTORS]\n");
-//     kprintf("  EL1 SP0: sync=%u irq=%u fiq=%u serr=%u\n",
-//             (uint32_t)exception_counters[0], (uint32_t)exception_counters[1],
-//             (uint32_t)exception_counters[2], (uint32_t)exception_counters[3]);
-//     kprintf("  EL1 SPx: sync=%u irq=%u fiq=%u serr=%u\n",
-//             (uint32_t)exception_counters[4], (uint32_t)exception_counters[5],
-//             (uint32_t)exception_counters[6], (uint32_t)exception_counters[7]);
-//     kprintf("  EL0 A64: sync=%u irq=%u fiq=%u serr=%u\n",
-//             (uint32_t)exception_counters[8], (uint32_t)exception_counters[9],
-//             (uint32_t)exception_counters[10], (uint32_t)exception_counters[11]);
-//     kprintf("  EL0 A32: sync=%u irq=%u fiq=%u serr=%u\n",
-//             (uint32_t)exception_counters[12], (uint32_t)exception_counters[13],
-//             (uint32_t)exception_counters[14], (uint32_t)exception_counters[15]);
-// }
-
-/**
  * Display AEOS banner
  */
 static void display_banner(void)
@@ -164,18 +144,6 @@ static void test_pmm(void)
         klog_info("Freed large allocation");
     }
 }
-
-/**
- * Helper function to write strings using syscall
- */
-// static void puts_syscall(const char *str)
-// {
-//     size_t len = 0;
-//     while (str[len]) len++;
-//     write(STDOUT_FILENO, str, len);
-// }
-
-/* Test processes removed - using interactive shell instead (Phase 7) */
 
 /**
  * Test kernel heap allocator
