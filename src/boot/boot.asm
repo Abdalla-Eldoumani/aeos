@@ -106,17 +106,17 @@ el1_entry:
     /* CRITICAL FIX: Set BOTH SP_EL0 and SP_EL1 to the SAME value */
     /* This way it doesn't matter if SPSel changes unexpectedly */
 
-    ldr x0, =__stack_top        /* x0 = 0x4001a000 */
+    ldr x0, =__stack_top        /* x0 = __stack_top (linker symbol) */
 
     /* Set SP_EL0 by switching to it */
     msr spsel, #0
     ISB
-    mov sp, x0                  /* SP_EL0 = 0x4001a000 */
+    mov sp, x0                  /* SP_EL0 = __stack_top */
 
     /* Set SP_EL1 by switching to it */
     msr spsel, #1
     ISB
-    mov sp, x0                  /* SP_EL1 = 0x4001a000 */
+    mov sp, x0                  /* SP_EL1 = __stack_top */
 
     /* Both SP_EL0 and SP_EL1 now point to the same stack */
     /* Interrupts will work regardless of SPSel value */
