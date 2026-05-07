@@ -259,6 +259,7 @@ static const struct {
     { "Calc",     THEME_ACCENT      },
     { "SysMon",   THEME_SUCCESS     },
     { "Notes",    THEME_WARNING     },
+    { "Tetris",   THEME_DANGER      },
 };
 #define START_MENU_APP_COUNT \
     (int)(sizeof(START_MENU_APPS) / sizeof(START_MENU_APPS[0]))
@@ -388,6 +389,7 @@ static bool handle_start_menu_click(int32_t x, int32_t y)
         case 4: gui_launch_calculator();  break;
         case 5: gui_launch_sysmon();      break;
         case 6: gui_launch_notes();       break;
+        case 7: gui_launch_tetris();      break;
         default: break;
         }
     } else {
