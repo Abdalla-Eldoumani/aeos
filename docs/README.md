@@ -100,6 +100,7 @@ Built-in graphical applications.
   - **Calculator** (`calculator.c`): Four-function calculator with int64 fixed-point arithmetic
   - **System Monitor** (`sysmon.c`): Live 60-second heap usage graph
   - **Notes** (`notes.c`): GUI text editor wrapping the editor buffer engine; saves to `/notes.txt`
+  - **Tetris** (`tetris.c`): 10x20 board, seven tetrominoes, gravity that scales with level, hard/soft drop, pause, and a high score persisted to `/tetris_high.bin`
 
 ## Documentation Structure
 
