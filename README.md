@@ -184,9 +184,10 @@ Filesystem saved successfully!
 ### Memory Map
 ```
 0x40000000  Kernel start
-0x40225000  Heap start (4 MB)
-0x40625000  Heap end / PMM start
-0x50000000  RAM end (256MB total)
+0x40229000  Heap start (4 MB; address moves with kernel size)
+0x40629000  Heap end
+0x40649000  Stack top (128 KB above heap end)
+0x50000000  RAM end (256 MB total; PMM owns everything past stack top)
 ```
 
 ### Hardware (QEMU virt)
