@@ -2,7 +2,7 @@
 
 ## Key Implementation Details
 
-Due to the comprehensive nature of the VFS implementation, this document highlights the most critical implementation aspects and common pitfalls.
+The VFS layer spans `vfs.c`, `ramfs.c`, and `fs_persist.c`. This walkthrough focuses on the parts that bite — the AArch64 struct-assignment hazard, path resolution, ramfs's allocation pattern, the file-descriptor table, and the persistence handoff. Headers and source files are the source of truth for everything else.
 
 ## Struct Assignment Bug (Critical)
 
