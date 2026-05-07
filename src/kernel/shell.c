@@ -884,14 +884,21 @@ static int cmd_cd(int argc, char **argv)
         }
     }
 
-    /* Try to open the directory to verify it exists and is a directory */
+    /* Open and confirm it's actually a directory before committing the cd. */
     fd = vfs_open(new_cwd, O_RDONLY, 0);
     if (fd < 0) {
         kprintf("cd: %s: No such file or directory\n", path);
         return -1;
     }
-
-    /* TODO: Check if it's actually a directory (currently trusting vfs_open) */
+    {
+        vfs_file_t *file = vfs_fd_to_file(fd);
+        if (file == NULL || file->inode == NULL ||
+            file->inode->type != VFS_FILE_DIRECTORY) {
+            vfs_close(fd);
+            kprintf("cd: %s: Not a directory\n", path);
+            return -1;
+        }
+    }
     vfs_close(fd);
 
     /* Update current working directory */
