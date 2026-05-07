@@ -67,4 +67,9 @@ void gui_launch_sysmon(void);
  */
 void gui_launch_notes(void);
 
+/**
+ * Launch Tetris app
+ */
+void gui_launch_tetris(void);
+
 #endif /* AEOS_GUI_H */
