@@ -21,6 +21,8 @@
 #include <aeos/process.h>
 #include <aeos/scheduler.h>
 #include <aeos/semihosting.h>
+#include <aeos/shell.h>
+#include <aeos/symbols.h>
 #include <aeos/string.h>
 
 static uint32_t test_pass_count = 0;
@@ -250,6 +252,107 @@ static void test_process_create_remove(void)
 }
 
 /* ============================================================================
+ * Shell parser scenarios
+ * ============================================================================ */
+
+static void test_shell_parse_basic(void)
+{
+    /* shell_parse modifies its input buffer in place and fills argv from it. */
+    char line[] = "ls -la /tmp";
+    char *argv[SHELL_MAX_ARGS];
+    int argc = 0;
+
+    if (shell_parse(line, &argc, argv) != 0) {
+        test_fail("shell_parse_basic", "non-zero return from shell_parse");
+        return;
+    }
+    if (argc != 3) {
+        test_fail("shell_parse_basic", "argc != 3");
+        return;
+    }
+    if (strcmp(argv[0], "ls") != 0 ||
+        strcmp(argv[1], "-la") != 0 ||
+        strcmp(argv[2], "/tmp") != 0) {
+        test_fail("shell_parse_basic", "argv content mismatch");
+        return;
+    }
+    test_pass("shell_parse_basic");
+}
+
+static void test_shell_parse_whitespace(void)
+{
+    /* Multiple spaces, leading whitespace, and trailing whitespace must all
+     * collapse into the same argv as a single-space version. */
+    char line[] = "   echo    hello   world   ";
+    char *argv[SHELL_MAX_ARGS];
+    int argc = 0;
+
+    shell_parse(line, &argc, argv);
+    if (argc != 3 ||
+        strcmp(argv[0], "echo") != 0 ||
+        strcmp(argv[1], "hello") != 0 ||
+        strcmp(argv[2], "world") != 0) {
+        test_fail("shell_parse_whitespace", "argv content mismatch");
+        return;
+    }
+    test_pass("shell_parse_whitespace");
+}
+
+static void test_shell_parse_empty(void)
+{
+    char line[] = "      ";
+    char *argv[SHELL_MAX_ARGS];
+    int argc = 0;
+
+    shell_parse(line, &argc, argv);
+    if (argc != 0) {
+        test_fail("shell_parse_empty", "argc != 0 on whitespace-only input");
+        return;
+    }
+    test_pass("shell_parse_empty");
+}
+
+/* ============================================================================
+ * symbol_lookup scenarios — exercises the binary search over the generated
+ * aeos_symbols[] table so a regression in the search bounds shows up
+ * immediately.
+ * ============================================================================ */
+
+static void test_symbol_lookup_known(void)
+{
+    /* kernel_main is in the symbol table at a stable address. Look it up by
+     * its known address (taken via the function pointer) and confirm the
+     * formatted name starts with "kernel_main". */
+    extern void kernel_main(void *dtb_addr);
+    uint64_t addr = (uint64_t)(uintptr_t)&kernel_main;
+    char buf[64];
+
+    symbol_lookup(addr, buf, sizeof(buf));
+
+    /* The result is "kernel_main+0x0" (or close) — anything else means the
+     * search picked a wrong neighbour. Accept any "+0xN" suffix. */
+    const char *expected = "kernel_main";
+    if (strncmp(buf, expected, strlen(expected)) != 0) {
+        test_fail("symbol_lookup_known", "wrong name resolved");
+        return;
+    }
+    test_pass("symbol_lookup_known");
+}
+
+static void test_symbol_lookup_below_first(void)
+{
+    /* An address below the first text symbol must come back as "<unknown ...>"
+     * rather than crashing or wrapping into the last entry. */
+    char buf[64];
+    symbol_lookup(0x100ULL, buf, sizeof(buf));
+    if (buf[0] != '<') {
+        test_fail("symbol_lookup_below_first", "expected <unknown ...> form");
+        return;
+    }
+    test_pass("symbol_lookup_below_first");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -292,6 +395,13 @@ void kernel_main(void *dtb_addr)
     }
 
     test_process_create_remove();
+
+    test_shell_parse_basic();
+    test_shell_parse_whitespace();
+    test_shell_parse_empty();
+
+    test_symbol_lookup_known();
+    test_symbol_lookup_below_first();
 
     kprintf("\n");
     klog_info("==== TEST RESULTS: %u PASSED, %u FAILED ====",
