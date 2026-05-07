@@ -61,4 +61,13 @@ void klog(log_level_t level, const char *fmt, ...);
 typedef void (*kprintf_hook_fn)(char c);
 extern kprintf_hook_fn kprintf_output_hook;
 
+/**
+ * Iterate the last 4 KB of kprintf output in chronological order.
+ * The kernel's panic path uses this to persist a crash log via semihosting.
+ * `sink` is called with one or two contiguous chunks of the ring; concatenate
+ * them in order.
+ */
+typedef void (*kprintf_ring_sink_fn)(const char *buf, uint32_t len);
+void kprintf_ring_walk(kprintf_ring_sink_fn sink);
+
 #endif /* AEOS_KPRINTF_H */
