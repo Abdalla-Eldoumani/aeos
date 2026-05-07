@@ -371,6 +371,8 @@ void gic_set_priority(uint32_t irq, uint8_t priority)
 
 ## timer.c - ARM Generic Timer
 
+The kernel uses the **virtual** timer (CNTV) — that's the right choice for non-secure EL1 on QEMU virt. The PPI for the virtual timer is **IRQ 27**.
+
 ### System Register Access
 
 ```c
@@ -381,17 +383,24 @@ static inline uint32_t read_cntfrq(void)
     return val;
 }
 
-static inline uint64_t read_cntpct(void)
+static inline uint64_t read_cntvct(void)
 {
     uint64_t val;
-    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(val));
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
     return val;
 }
 
-static inline void write_cntp_tval(uint32_t val)
+static inline void write_cntv_tval(int32_t val)
 {
-    __asm__ volatile("msr cntp_tval_el0, %0" : : "r"(val));
+    __asm__ volatile("msr cntv_tval_el0, %0" : : "r"(val));
     __asm__ volatile("isb");
+}
+
+static inline uint32_t read_cntv_ctl(void)
+{
+    uint32_t val;
+    __asm__ volatile("mrs %0, cntv_ctl_el0" : "=r"(val));
+    return val;
 }
 ```
 
@@ -401,23 +410,21 @@ static inline void write_cntp_tval(uint32_t val)
 void timer_init(void)
 {
     /* Get timer frequency */
-    timer.frequency = read_cntfrq();  /* e.g., 62500000 Hz */
+    timer.frequency = read_cntfrq();  /* e.g., 62500000 Hz on QEMU virt */
 
     /* Calculate tick interval */
     timer.tick_interval = timer.frequency / TIMER_FREQ_HZ;
-    /* e.g., 62500000 / 100 = 625000 */
 
-    /* Disable timer */
-    write_cntp_ctl(0);
+    write_cntv_ctl(0);                          /* disable while configuring */
+    write_cntv_tval(timer.tick_interval);
 
-    /* Set initial value */
-    write_cntp_tval(timer.tick_interval);
-
-    /* Register handler for IRQ 30 */
-    irq_register_handler(30, timer_irq_handler);
-    gic_enable_irq(30);
+    irq_register_handler(27, timer_irq_handler); /* virtual timer PPI */
+    gic_set_priority(27, GIC_PRIORITY_HIGH);
+    gic_enable_irq(27);
 }
 ```
+
+`timer_start` is a separate call invoked after `interrupts_enable()` so the kernel doesn't take spurious interrupts during init.
 
 ### Timer Interrupt Handler
 
@@ -425,13 +432,23 @@ void timer_init(void)
 static void timer_irq_handler(void)
 {
     timer.ticks++;
-
-    /* Set next interrupt */
-    write_cntp_tval(timer.tick_interval);
+    write_cntv_tval(timer.tick_interval);  /* re-arm */
+    scheduler_tick();                      /* drive preemption */
 }
 ```
 
-**CNTP_TVAL_EL0**: Countdown timer. When it reaches 0, interrupt fires. Writing a value starts a new countdown.
+On QEMU virt the same path is reached via FIQ (`timer_handle_fiq` checks `CNTV_CTL`'s ISTATUS and only acts when the bit is set; see the FIQ Handler section above).
+
+### Wall-clock Uptime
+
+```c
+uint64_t timer_get_uptime_ms(void)
+{
+    return (read_cntvct() * 1000) / timer.frequency;
+}
+```
+
+This deliberately reads `CNTVCT_EL0` directly instead of returning `timer.ticks * 10`. The FIQ-driven counter falls behind real time during busy-wait loops (bootscreen fades, window animations), so animations would appear frozen. CNTVCT keeps advancing regardless.
 
 ### Busy-Wait Delay
 
@@ -439,16 +456,16 @@ static void timer_irq_handler(void)
 void timer_delay_ms(uint32_t ms)
 {
     uint64_t ticks_per_ms = timer.frequency / 1000;
-    uint64_t start = read_cntpct();
+    uint64_t start = read_cntvct();
     uint64_t target = start + (ticks_per_ms * ms);
 
-    while (read_cntpct() < target) {
+    while (read_cntvct() < target) {
         /* Busy wait */
     }
 }
 ```
 
-**Works without interrupts**: Uses the free-running counter (CNTPCT_EL0), not the timer interrupt.
+**Works without interrupts**: uses the free-running virtual counter, not the timer interrupt.
 
 ## Debugging
 
