@@ -1,5 +1,11 @@
 # Graphics and GUI - Implementation Details
 
+> The snippets below are simplified illustrations. The actual behavior in
+> `src/kernel/{wm,window,desktop,notify,bootscreen}.c` is the source of
+> truth — newer additions (deferred close animation, toast compositing,
+> Alt+Tab focus cycle, `wm_request_redraw` for live-content apps) are
+> documented in the in-tree `CLAUDE.md` files.
+
 ## Boot Screen Implementation
 
 ### Boot Stages
@@ -211,32 +217,32 @@ void wm_run(void)
 {
     event_t event;
     uint64_t last_update = 0;
-    uint64_t now;
 
     while (!wm.should_exit) {
-        /* Poll input devices */
         event_poll();
         virtio_input_poll();
 
-        /* Process all pending events */
         while (event_pop(&event)) {
             wm_handle_event(&event);
         }
 
-        /* Update display periodically (30 FPS) */
-        now = timer_get_uptime_ms();
+        /* Windows in the close-button fade get destroyed once
+         * WINDOW_CLOSE_ANIM_MS has elapsed since the click. */
+        reap_closing_windows();
+
+        /* 30 FPS redraw, or whenever a dirty flag / live toast asks for it. */
+        uint64_t now = timer_get_uptime_ms();
         if (now - last_update >= 33 || wm.needs_redraw) {
             wm_update_display();
             last_update = now;
         }
 
-        /* Small delay to prevent busy looping */
         timer_delay_ms(1);
     }
 }
 ```
 
-The main loop polls input, processes events, and refreshes the display at approximately 30 FPS.
+`wm_update_display` itself redraws when `wm.needs_redraw` is true OR `notify_active()` is true, then calls `notify_render` to composite toast notifications above the windows but below the cursor before pushing the framebuffer to the GPU.
 
 ### Focus Management
 
