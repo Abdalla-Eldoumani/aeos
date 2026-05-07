@@ -159,16 +159,47 @@ static void tet_spawn_piece(tetris_t *t)
     }
 }
 
-/* ----- High-score persistence ----------------------------------------- */
+/* ----- High-score persistence -----------------------------------------
+ *
+ * On-disk format for /tetris_high.bin:
+ *   uint32_t magic    (TET_HIGH_MAGIC, "AETT" little-endian)
+ *   uint32_t version  (TET_HIGH_VERSION)
+ *   uint32_t score    (the actual value)
+ *   uint32_t checksum (magic ^ version ^ score)
+ *
+ * Total: 16 bytes. Anything else (truncated file, mismatched magic, wrong
+ * version, bad checksum) is treated as "no saved score" and we return 0.
+ * That way a corrupted file just means the player starts with no high
+ * score, never garbage on the side panel. */
+#define TET_HIGH_MAGIC   0x54544541u  /* 'AETT' little-endian */
+#define TET_HIGH_VERSION 1u
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t score;
+    uint32_t checksum;
+} tet_high_record_t;
+
 static uint32_t tet_load_high_score(void)
 {
     int fd = vfs_open(TET_HIGH_SCORE_PATH, O_RDONLY, 0);
     if (fd < 0) return 0;
 
-    uint32_t value = 0;
-    vfs_read(fd, &value, sizeof(value));
+    tet_high_record_t rec;
+    ssize_t n = vfs_read(fd, &rec, sizeof(rec));
     vfs_close(fd);
-    return value;
+
+    if (n != (ssize_t)sizeof(rec)) {
+        return 0;
+    }
+    if (rec.magic != TET_HIGH_MAGIC || rec.version != TET_HIGH_VERSION) {
+        return 0;
+    }
+    if ((rec.magic ^ rec.version ^ rec.score) != rec.checksum) {
+        return 0;
+    }
+    return rec.score;
 }
 
 static void tet_save_high_score(uint32_t value)
@@ -177,7 +208,13 @@ static void tet_save_high_score(uint32_t value)
                       O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) return;
 
-    vfs_write(fd, &value, sizeof(value));
+    tet_high_record_t rec = {
+        .magic    = TET_HIGH_MAGIC,
+        .version  = TET_HIGH_VERSION,
+        .score    = value,
+        .checksum = TET_HIGH_MAGIC ^ TET_HIGH_VERSION ^ value,
+    };
+    vfs_write(fd, &rec, sizeof(rec));
     vfs_close(fd);
 }
 
