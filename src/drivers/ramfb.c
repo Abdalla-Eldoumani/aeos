@@ -91,7 +91,7 @@ static inline uint32_t cpu_to_be32(uint32_t val)
 //      * with -device ramfb. If accessing fw_cfg causes an exception,
 //      * the exception handler will catch it.
 //      *
-//      * A more robust implementation would check the device tree or
+//      * A complete implementation would check the device tree or
 //      * try a test read with exception handling.
 //      */
 //     return true;  /* Optimistically assume it's available */
