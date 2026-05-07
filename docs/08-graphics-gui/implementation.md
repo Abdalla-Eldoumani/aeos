@@ -579,36 +579,26 @@ The taskbar shows a Start button, buttons for each visible window, and a clock.
 ```c
 int gui_init(void)
 {
-    /* Initialize event system first */
     event_init();
-
-    /* Initialize VirtIO input devices */
-    if (virtio_input_init() == 0) {
-        klog_info("VirtIO input devices initialized");
-    } else {
-        klog_warn("VirtIO input devices not available, using UART fallback");
-    }
-
-    /* Initialize window manager */
+    virtio_input_init();          /* falls back to UART if not available */
     wm_init();
-
-    /* Initialize desktop */
+    notify_init();                /* before any subsystem can post a toast */
     desktop_init();
-
-    /* Set desktop as the background paint callback */
     wm_set_desktop_paint(desktop_paint);
 
-    /* Add desktop icons */
-    desktop_add_icon("Terminal", 0xFF00AA00, launch_terminal_icon);
-    desktop_add_icon("Files", 0xFFDDAA00, launch_filemanager_icon);
-    desktop_add_icon("Settings", 0xFF6666AA, launch_settings_icon);
-    desktop_add_icon("About", 0xFF0088CC, launch_about_icon);
+    desktop_add_icon("Terminal", THEME_SUCCESS,    launch_terminal_icon);
+    desktop_add_icon("Files",    THEME_WARNING,    launch_filemanager_icon);
+    desktop_add_icon("Settings", THEME_ACCENT_DIM, launch_settings_icon);
+    desktop_add_icon("About",    THEME_ACCENT,     launch_about_icon);
+    desktop_add_icon("Calc",     THEME_ACCENT,     launch_calculator_icon);
+    desktop_add_icon("SysMon",   THEME_SUCCESS,    launch_sysmon_icon);
+    desktop_add_icon("Notes",    THEME_WARNING,    launch_notes_icon);
 
     return 0;
 }
 ```
 
-GUI initialization follows a specific order: events, input, window manager, desktop, then icons.
+Order matters: events, input, window manager, then notify (so any later init can post a startup toast), desktop, finally icons.
 
 ### Application Launching
 
