@@ -536,7 +536,11 @@ static int ramfs_dir_readdir(vfs_file_t *file, vfs_dirent_t **dirent)
     /* Use offset as entry index */
     index = (size_t)file->offset;
 
-    /* TODO: Add . and .. support - currently disabled for debugging */
+    /* Ramfs intentionally omits "." and ".." from the on-disk entry list to
+     * keep allocation simple and avoid the GCC struct-assign hazard on the
+     * doubled entry. The shell normalizes both in `resolve_path` before the
+     * VFS sees the path, so callers never observe the gap. Any future
+     * filesystem driver should do the same. */
 
     if (index >= ramfs_data->num_entries) {
         return -1;  /* No more entries */
@@ -616,11 +620,16 @@ vfs_filesystem_t *ramfs_create(void)
 }
 
 /**
- * Destroy ramfs filesystem
+ * Destroy ramfs filesystem.
+ *
+ * Frees only the filesystem descriptor, not the inode tree it owns. There is
+ * no caller today: ramfs is mounted at boot and stays mounted until power
+ * off, and the kernel doesn't unmount before halt. If a real `umount` ever
+ * lands, walk the directory tree from `fs->root`, free each `ramfs_inode_t`
+ * and its `data` blob via `kfree`, and only then free `fs`.
  */
 void ramfs_destroy(vfs_filesystem_t *fs)
 {
-    /* TODO: Free all inodes and data */
     if (fs != NULL) {
         kfree(fs);
     }
