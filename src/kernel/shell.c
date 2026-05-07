@@ -1,7 +1,7 @@
 /* ============================================================================
  * AEOS - Abdalla's Educational Operating System
  * File: src/kernel/shell.c
- * Description: Interactive shell implementation with history and tab completion
+ * Description: Interactive shell implementation with history
  * ============================================================================ */
 
 #include <aeos/shell.h>
@@ -439,7 +439,7 @@ void shell_init(void)
     history_count = 0;
     history_start = 0;
 
-    klog_info("Shell subsystem initialized (with history and tab completion)");
+    klog_info("Shell subsystem initialized (with history)");
 }
 
 /**
