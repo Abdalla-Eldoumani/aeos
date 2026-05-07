@@ -315,6 +315,9 @@ void gui_launch_terminal(void);
 void gui_launch_filemanager(void);
 void gui_launch_settings(void);
 void gui_launch_about(void);
+void gui_launch_calculator(void);
+void gui_launch_sysmon(void);
+void gui_launch_notes(void);
 ```
 
 ## Boot Stages
@@ -384,8 +387,5 @@ During boot, press 'T' to skip GUI and enter text shell.
 
 - No window resizing (fixed size at creation)
 - No window minimization
-- Start menu items not all functional
 - Double-click timing fixed at 500ms
-- No keyboard shortcuts for window management
 - Maximum 16 desktop icons
-- Maximum ~4-5 windows before memory pressure
