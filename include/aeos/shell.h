@@ -51,6 +51,34 @@ int shell_parse(char *line, int *argc, char **argv);
  */
 int shell_execute(int argc, char **argv);
 
+/**
+ * Run a single command line, splitting it on `|` into pipe stages.
+ *
+ * Each non-final stage's stdout (kprintf) is captured into a small ring
+ * buffer that the next stage reads from via shell_pipe_readline. The final
+ * stage writes through the kprintf hook that was active on entry, so this
+ * is safe to call from both the text-mode shell loop and the GUI terminal
+ * (which redirects kprintf to its own cell buffer).
+ *
+ * The line is mutated in place during tokenization.
+ */
+void shell_run_line(char *line);
+
+/**
+ * Read one line from the active input pipe (set by shell_run_line for
+ * non-first pipe stages). Built-ins that want to support being on the
+ * read side of a pipe call this when their argv lacks a filename.
+ *
+ * Returns line length, 0 for an empty line, -1 if no more input.
+ */
+int shell_pipe_readline(char *buf, int max);
+
+/**
+ * Whether a pipe input source is currently active. Built-ins use this to
+ * decide whether to drop into pipe-read mode or print a usage message.
+ */
+bool shell_has_pipe_input(void);
+
 #endif /* AEOS_SHELL_H */
 
 /* ============================================================================
