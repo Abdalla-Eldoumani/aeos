@@ -8,6 +8,7 @@
 #include <aeos/gic.h>
 #include <aeos/timer.h>
 #include <aeos/kprintf.h>
+#include <aeos/symbols.h>
 #include <aeos/types.h>
 
 /* IRQ handler table */
@@ -131,6 +132,14 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
     kprintf("ESR:    %p\n", (void *)esr);
     kprintf("FAR:    %p\n", (void *)far);
     kprintf("PSTATE: %p\n", (void *)context->pstate);
+
+    /* Resolve the faulting PC as a symbol for at-a-glance triage. The
+     * frame-pointer chain rooted at x29 then walks the call stack. */
+    char pc_name[96];
+    symbol_lookup(context->pc, pc_name, sizeof(pc_name));
+    kprintf("PC sym: %s\n", pc_name);
+
+    backtrace(context->x[29]);
 
     kprintf("===========================\n");
 
