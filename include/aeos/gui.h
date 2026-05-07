@@ -52,4 +52,19 @@ void gui_launch_settings(void);
  */
 void gui_launch_about(void);
 
+/**
+ * Launch Calculator app
+ */
+void gui_launch_calculator(void);
+
+/**
+ * Launch System Monitor app
+ */
+void gui_launch_sysmon(void);
+
+/**
+ * Launch Notes app
+ */
+void gui_launch_notes(void);
+
 #endif /* AEOS_GUI_H */

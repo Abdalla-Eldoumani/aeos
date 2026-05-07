@@ -15,6 +15,9 @@
 #include <aeos/apps/filemanager.h>
 #include <aeos/apps/settings.h>
 #include <aeos/apps/about.h>
+#include <aeos/apps/calculator.h>
+#include <aeos/apps/sysmon.h>
+#include <aeos/apps/notes.h>
 #include <aeos/notify.h>
 #include <aeos/kprintf.h>
 #include <aeos/theme.h>
@@ -41,6 +44,21 @@ static void launch_settings_icon(void)
 static void launch_about_icon(void)
 {
     gui_launch_about();
+}
+
+static void launch_calculator_icon(void)
+{
+    gui_launch_calculator();
+}
+
+static void launch_sysmon_icon(void)
+{
+    gui_launch_sysmon();
+}
+
+static void launch_notes_icon(void)
+{
+    gui_launch_notes();
 }
 
 /**
@@ -78,6 +96,9 @@ int gui_init(void)
     desktop_add_icon("Files", THEME_WARNING, launch_filemanager_icon);
     desktop_add_icon("Settings", THEME_ACCENT_DIM, launch_settings_icon);
     desktop_add_icon("About", THEME_ACCENT, launch_about_icon);
+    desktop_add_icon("Calc", THEME_ACCENT, launch_calculator_icon);
+    desktop_add_icon("SysMon", THEME_SUCCESS, launch_sysmon_icon);
+    desktop_add_icon("Notes", THEME_WARNING, launch_notes_icon);
 
     klog_info("GUI subsystem initialized");
 
@@ -158,6 +179,39 @@ void gui_launch_about(void)
     about_t *about = about_create();
     if (!about) {
         klog_error("Failed to launch About");
+    }
+}
+
+/**
+ * Launch Calculator app
+ */
+void gui_launch_calculator(void)
+{
+    calculator_t *c = calculator_create();
+    if (!c) {
+        klog_error("Failed to launch Calculator");
+    }
+}
+
+/**
+ * Launch System Monitor app
+ */
+void gui_launch_sysmon(void)
+{
+    sysmon_t *sm = sysmon_create();
+    if (!sm) {
+        klog_error("Failed to launch System Monitor");
+    }
+}
+
+/**
+ * Launch Notes app
+ */
+void gui_launch_notes(void)
+{
+    notes_t *n = notes_create();
+    if (!n) {
+        klog_error("Failed to launch Notes");
     }
 }
 
