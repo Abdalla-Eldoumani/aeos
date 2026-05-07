@@ -32,6 +32,16 @@ ifeq ($(DEBUG),1)
 CFLAGS += -DDEBUG_ENABLED
 endif
 
+# TEST mode: link the in-kernel test runner (src/kernel/test_runner.c) as the
+# kernel_main entry point instead of the normal main.c, so `make test` boots
+# straight into the scenarios and exits via semihosting.
+ifeq ($(TEST),1)
+CFLAGS += -DTEST_BUILD
+KERNEL_ENTRY_C = src/kernel/test_runner.c
+else
+KERNEL_ENTRY_C = src/kernel/main.c
+endif
+
 # Assembler flags
 ASFLAGS = -mcpu=cortex-a57 -g
 
@@ -42,7 +52,7 @@ LDFLAGS = -T linker.ld -nostdlib
 ASM_SOURCES = src/boot/boot.asm \
               src/interrupts/vectors.asm \
               src/proc/context.asm
-C_SOURCES   = src/kernel/main.c \
+C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/kernel/kprintf.c \
               src/kernel/shell.c \
               src/kernel/editor.c \
