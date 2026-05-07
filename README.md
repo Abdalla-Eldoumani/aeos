@@ -95,6 +95,11 @@ When running in graphical mode (`make run-ramfb`), AEOS displays:
 - **Drag**: Click and drag window title bar to move
 - **Close**: Click red X button on window
 
+### Keyboard Shortcuts
+- **Alt + Tab**: Cycle focus through visible windows in z-order. Hold Alt and press Tab repeatedly to keep stepping; releasing Alt commits the selection and raises the focused window to the top.
+- **Alt + F4**: Close the focused window. Same fade-out path as the window's close button — the app's `on_close` runs after the close animation completes.
+- **Esc**: Dismiss UI overlays without sending the key to the focused app. Closes the start menu and starts the fade-out for any active toast notifications. If nothing's open to dismiss, Esc falls through to the focused window like any other key.
+
 ## Shell Commands
 
 Available in text mode or via the Terminal application:
