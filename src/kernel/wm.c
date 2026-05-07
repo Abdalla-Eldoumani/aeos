@@ -585,6 +585,17 @@ static void handle_key(key_event_t *key, bool pressed)
         return;
     }
 
+    /* Alt+F4 — request close on the focused window. Reuses the close-button
+     * path: the window goes into the close fade and gets reaped a bit later. */
+    if (key->keycode == KEY_F4 && (key->modifiers & MOD_ALT)) {
+        if (wm.focused && !(wm.focused->flags & WINDOW_FLAG_CLOSING)) {
+            wm.focused->flags |= WINDOW_FLAG_CLOSING;
+            wm.focused->close_anim_start_ms = timer_get_uptime_ms();
+            wm.needs_redraw = true;
+        }
+        return;
+    }
+
     /* Skip closing windows so the fade-out can't be interrupted */
     if (wm.focused && (wm.focused->flags & WINDOW_FLAG_CLOSING)) {
         return;
