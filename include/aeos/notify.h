@@ -48,6 +48,13 @@ void notify_render(void);
  */
 bool notify_active(void);
 
+/**
+ * Move every active toast straight into its fade-out phase. Used by the
+ * Esc-dismiss shortcut so the user can hide a notification without waiting
+ * out its TTL.
+ */
+void notify_dismiss_all(void);
+
 #endif /* AEOS_NOTIFY_H */
 
 /* ============================================================================

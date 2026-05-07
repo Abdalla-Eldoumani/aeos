@@ -99,6 +99,23 @@ void notify_info(const char *msg)  { notify_post(NOTIFY_INFO,  msg); }
 void notify_warn(const char *msg)  { notify_post(NOTIFY_WARN,  msg); }
 void notify_error(const char *msg) { notify_post(NOTIFY_ERROR, msg); }
 
+void notify_dismiss_all(void)
+{
+    int      i;
+    uint64_t now = timer_get_uptime_ms();
+    /* Backdate each toast so it's already at the start of its fade-out
+     * window. The render loop's eased alpha takes it the rest of the way
+     * over NOTIFY_FADE_MS. */
+    for (i = 0; i < NOTIFY_MAX; i++) {
+        if (!toasts[i].in_use) continue;
+        uint64_t fade_start = now;
+        uint64_t when = (fade_start > NOTIFY_SLIDE_MS + NOTIFY_VISIBLE_MS)
+                      ? fade_start - NOTIFY_SLIDE_MS - NOTIFY_VISIBLE_MS
+                      : 0;
+        toasts[i].created_ms = when;
+    }
+}
+
 bool notify_active(void)
 {
     int i;
