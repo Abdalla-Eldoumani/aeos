@@ -23,6 +23,7 @@
 #include <aeos/semihosting.h>
 #include <aeos/shell.h>
 #include <aeos/symbols.h>
+#include <aeos/framebuffer.h>
 #include <aeos/string.h>
 
 static uint32_t test_pass_count = 0;
@@ -353,6 +354,53 @@ static void test_symbol_lookup_below_first(void)
 }
 
 /* ============================================================================
+ * Framebuffer scenarios — exercise the graphics path (init, fill, getpixel)
+ * end-to-end without booting the full GUI. The test runner doesn't have a
+ * VirtIO GPU attached, but `fb_init` allocates an in-memory framebuffer and
+ * the primitives operate on it directly, so we can read back what we wrote.
+ * ============================================================================ */
+
+static void test_fb_init_and_fill(void)
+{
+    if (fb_init() < 0) {
+        test_fail("fb_init", "fb_init returned <0");
+        return;
+    }
+
+    fb_info_t *fb = fb_get_info();
+    if (fb == NULL || fb->base == NULL || fb->width == 0 || fb->height == 0) {
+        test_fail("fb_init", "fb_get_info returned an unusable framebuffer");
+        return;
+    }
+    test_pass("fb_init");
+
+    /* Fill a known rectangle and read back a pixel inside it and one outside.
+     * The clipping logic in fb_fill_rect protects against out-of-bounds, and
+     * fb_getpixel returns 0 for OOB reads — combined, this exercises both
+     * the write path and the bounds check. */
+    const uint32_t color   = 0xFF112233u;
+    const int32_t  rect_x  = 10;
+    const int32_t  rect_y  = 10;
+    const int32_t  rect_w  = 20;
+    const int32_t  rect_h  = 20;
+
+    fb_fill_rect(rect_x, rect_y, rect_w, rect_h, color);
+
+    uint32_t inside  = fb_getpixel(rect_x + 5, rect_y + 5);
+    uint32_t outside = fb_getpixel(rect_x + rect_w + 5, rect_y);
+
+    if (inside != color) {
+        test_fail("fb_fill_rect", "pixel inside the filled rect did not match");
+        return;
+    }
+    if (outside == color) {
+        test_fail("fb_fill_rect", "pixel outside the rect was overwritten");
+        return;
+    }
+    test_pass("fb_fill_rect");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -402,6 +450,8 @@ void kernel_main(void *dtb_addr)
 
     test_symbol_lookup_known();
     test_symbol_lookup_below_first();
+
+    test_fb_init_and_fill();
 
     kprintf("\n");
     klog_info("==== TEST RESULTS: %u PASSED, %u FAILED ====",
