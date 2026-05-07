@@ -14,6 +14,27 @@
 #include <aeos/notify.h>
 
 /* ============================================================================
+ * Editor-internal key codes (file-local; collide with event.h's keycode_t
+ * if exposed publicly, see Phase 7.3 commit history).
+ * ============================================================================ */
+
+#define KEY_ESCAPE      27
+#define KEY_ENTER       '\r'
+#define KEY_BACKSPACE   127
+#define KEY_TAB         '\t'
+
+#define KEY_UP          1000
+#define KEY_DOWN        1001
+#define KEY_RIGHT       1002
+#define KEY_LEFT        1003
+#define KEY_HOME        1004
+#define KEY_END         1005
+#define KEY_PAGE_UP     1006
+#define KEY_PAGE_DOWN   1007
+#define KEY_DELETE      1008
+#define KEY_INSERT      1009
+
+/* ============================================================================
  * ANSI Escape Codes for Terminal Control
  * ============================================================================ */
 
@@ -622,7 +643,7 @@ static void editor_scroll(editor_t *ed)
 /**
  * Insert a character at cursor
  */
-static void editor_insert_char(editor_t *ed, char c)
+void editor_insert_char(editor_t *ed, char c)
 {
     editor_line_t *line = &ed->lines[ed->cursor_row];
 
@@ -635,7 +656,7 @@ static void editor_insert_char(editor_t *ed, char c)
 /**
  * Insert a new line at cursor (split line)
  */
-static void editor_insert_newline(editor_t *ed)
+void editor_insert_newline(editor_t *ed)
 {
     editor_line_t *line = &ed->lines[ed->cursor_row];
 
@@ -661,7 +682,7 @@ static void editor_insert_newline(editor_t *ed)
 /**
  * Delete character at cursor
  */
-static void editor_delete_char(editor_t *ed)
+void editor_delete_char(editor_t *ed)
 {
     editor_line_t *line = &ed->lines[ed->cursor_row];
 
@@ -683,7 +704,7 @@ static void editor_delete_char(editor_t *ed)
 /**
  * Delete character before cursor (backspace)
  */
-static void editor_backspace(editor_t *ed)
+void editor_backspace(editor_t *ed)
 {
     if (ed->cursor_col > 0) {
         ed->cursor_col--;

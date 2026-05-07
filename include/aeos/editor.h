@@ -21,23 +21,10 @@
 #define EDITOR_MAX_SEARCH   64
 #define EDITOR_MAX_EX_CMD   64
 
-/* Special key codes (returned by editor_read_key) */
-#define KEY_ESCAPE      27
-#define KEY_ENTER       '\r'
-#define KEY_BACKSPACE   127
-#define KEY_TAB         '\t'
-
-/* Extended key codes (escape sequences) */
-#define KEY_UP          1000
-#define KEY_DOWN        1001
-#define KEY_RIGHT       1002
-#define KEY_LEFT        1003
-#define KEY_HOME        1004
-#define KEY_END         1005
-#define KEY_PAGE_UP     1006
-#define KEY_PAGE_DOWN   1007
-#define KEY_DELETE      1008
-#define KEY_INSERT      1009
+/* Editor-internal key codes were here until Phase 7.3. They collided with
+ * the GUI keycode_t enum in event.h, so they moved into editor.c as
+ * file-local EDIT_KEY_* defines. The shared GUI keycodes in event.h are
+ * what apps (Notes etc.) should use. */
 
 /* Editor modes */
 typedef enum {
@@ -175,6 +162,14 @@ int editor_open(editor_t *ed, const char *filename);
  * @return 0 on success, -1 on failure
  */
 int editor_save(editor_t *ed);
+
+/* Buffer-mutation helpers — exposed so the GUI Notes app can wrap the same
+ * underlying line storage without re-implementing it. They all act on the
+ * editor's current cursor_row / cursor_col. */
+void editor_insert_char(editor_t *ed, char c);
+void editor_insert_newline(editor_t *ed);
+void editor_delete_char(editor_t *ed);
+void editor_backspace(editor_t *ed);
 
 /**
  * Set status message
