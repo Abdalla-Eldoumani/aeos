@@ -29,12 +29,14 @@ This section implements physical and virtual memory management for AEOS. It prov
 ## Memory Layout
 
 ```
-Physical Memory (256 MB total)
-├── 0x40000000 - 0x40010000: Kernel code/data (~64KB)
-├── 0x40010000 - 0x4001a000: Kernel stack (128KB, grows down)
-├── 0x4001a000 - 0x4041a000: Kernel heap (4MB)
-└── 0x4041a000 - 0x50000000: Free physical pages (~251MB)
+Physical Memory (256 MB total, QEMU virt -m 256M)
+├── 0x40000000 - _kernel_end:       Kernel image (text + rodata + data + BSS, currently ~2.16 MB)
+├── __heap_start - __heap_end:      Kernel heap (4 MB, currently 0x40229000 - 0x40629000)
+├── __heap_end  - __stack_top:      Kernel stack (128 KB, grows downward from __stack_top)
+└── __stack_top - 0x50000000:       PMM-managed pages (the rest of RAM)
 ```
+
+The linker (`linker.ld`) lays sections in the order kernel image -> heap -> stack, so the heap and stack addresses shift if the kernel grows. `mm_init` reads `__heap_start` / `__heap_end` symbols and hands the post-stack range to the PMM.
 
 ## Buddy Allocator
 
