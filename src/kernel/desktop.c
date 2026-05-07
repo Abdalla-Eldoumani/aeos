@@ -246,47 +246,68 @@ void desktop_draw_taskbar(void)
 /**
  * Draw start menu
  */
+/* Start-menu app entries (in display order). Index in this array also feeds
+ * the click dispatch in handle_start_menu_click. */
+static const struct {
+    const char *label;
+    uint32_t    swatch;
+} START_MENU_APPS[] = {
+    { "Terminal", THEME_SUCCESS     },
+    { "Files",    THEME_WARNING     },
+    { "Settings", THEME_ACCENT_DIM  },
+    { "About",    THEME_ACCENT      },
+    { "Calc",     THEME_ACCENT      },
+    { "SysMon",   THEME_SUCCESS     },
+    { "Notes",    THEME_WARNING     },
+};
+#define START_MENU_APP_COUNT \
+    (int)(sizeof(START_MENU_APPS) / sizeof(START_MENU_APPS[0]))
+
+#define START_MENU_ITEM_H    24
+#define START_MENU_SEP_H     12
+#define START_MENU_PAD       8
+#define START_MENU_WIDTH    150
+
+static int start_menu_height(void)
+{
+    /* main apps + separator + 2 system rows + padding top/bottom */
+    return START_MENU_PAD
+         + START_MENU_APP_COUNT * START_MENU_ITEM_H
+         + START_MENU_SEP_H
+         + 2 * START_MENU_ITEM_H
+         + START_MENU_PAD;
+}
+
 static void draw_start_menu(void)
 {
     int32_t menu_x = 4;
-    int32_t menu_y = FB_HEIGHT - TASKBAR_HEIGHT - 160;
-    int32_t menu_width = 150;
-    int32_t menu_height = 156;
+    int32_t menu_height = start_menu_height();
+    int32_t menu_y = FB_HEIGHT - TASKBAR_HEIGHT - menu_height - 4;
+    int32_t menu_width = START_MENU_WIDTH;
     int32_t item_y;
+    int     i;
 
     if (!desktop.start_menu_visible) {
         return;
     }
 
-    /* Menu background */
     fb_fill_rect(menu_x, menu_y, menu_width, menu_height, TASKBAR_BG);
     fb_draw_rect(menu_x, menu_y, menu_width, menu_height, TASKBAR_BORDER);
 
-    /* Menu items with color indicators */
-    item_y = menu_y + 8;
-
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_SUCCESS);
-    fb_puts(menu_x + 26, item_y, "Terminal", THEME_TEXT_PRIMARY, TASKBAR_BG);
-    item_y += 24;
-
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_WARNING);
-    fb_puts(menu_x + 26, item_y, "Files", THEME_TEXT_PRIMARY, TASKBAR_BG);
-    item_y += 24;
-
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_ACCENT_DIM);
-    fb_puts(menu_x + 26, item_y, "Settings", THEME_TEXT_PRIMARY, TASKBAR_BG);
-    item_y += 24;
-
-    fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_ACCENT);
-    fb_puts(menu_x + 26, item_y, "About", THEME_TEXT_PRIMARY, TASKBAR_BG);
-    item_y += 24;
+    item_y = menu_y + START_MENU_PAD;
+    for (i = 0; i < START_MENU_APP_COUNT; i++) {
+        fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, START_MENU_APPS[i].swatch);
+        fb_puts(menu_x + 26, item_y, START_MENU_APPS[i].label,
+                THEME_TEXT_PRIMARY, TASKBAR_BG);
+        item_y += START_MENU_ITEM_H;
+    }
 
     /* Separator */
     fb_fill_rect(menu_x + 8, item_y, menu_width - 16, 1, TASKBAR_BORDER);
-    item_y += 12;
+    item_y += START_MENU_SEP_H;
 
     fb_puts(menu_x + 26, item_y, "Text Mode", THEME_TEXT_SECONDARY, TASKBAR_BG);
-    item_y += 24;
+    item_y += START_MENU_ITEM_H;
 
     fb_fill_rect(menu_x + 12, item_y + 2, 8, 8, THEME_DANGER);
     fb_puts(menu_x + 26, item_y, "Shutdown", THEME_DANGER, TASKBAR_BG);
@@ -328,62 +349,53 @@ static int find_icon_at(int32_t x, int32_t y)
 static bool handle_start_menu_click(int32_t x, int32_t y)
 {
     int32_t menu_x = 4;
-    int32_t menu_y = FB_HEIGHT - TASKBAR_HEIGHT - 160;
-    int32_t menu_width = 150;
-    int32_t menu_height = 156;
-    int32_t item_y;
-    int32_t item_idx;
+    int32_t menu_height = start_menu_height();
+    int32_t menu_y = FB_HEIGHT - TASKBAR_HEIGHT - menu_height - 4;
+    int32_t menu_width = START_MENU_WIDTH;
+    int32_t item_y, apps_block_h;
+    int     item_idx;
 
-    /* Check if click is inside menu bounds */
     if (x < menu_x || x >= menu_x + menu_width ||
         y < menu_y || y >= menu_y + menu_height) {
-        return false;  /* Outside menu */
+        return false;
     }
 
-    /* Determine which item was clicked.
-     * Layout from draw_start_menu (offsets from menu_y+8):
-     *   Items 0-3: at offsets 0, 24, 48, 72 (24px each)
-     *   Separator: at offset 96 (12px gap)
-     *   Items 4-5: at offsets 108, 132 (24px each)
-     */
-    item_y = y - (menu_y + 8);
+    item_y = y - (menu_y + START_MENU_PAD);
     if (item_y < 0) {
-        return true;  /* Click in menu padding */
+        return true;
     }
 
-    if (item_y < 96) {
-        item_idx = item_y / 24;          /* 0-3: Terminal, Files, Settings, About */
-    } else if (item_y < 108) {
-        /* Close menu before returning */
+    apps_block_h = START_MENU_APP_COUNT * START_MENU_ITEM_H;
+
+    if (item_y < apps_block_h) {
+        item_idx = item_y / START_MENU_ITEM_H;
+    } else if (item_y < apps_block_h + START_MENU_SEP_H) {
         desktop.start_menu_visible = false;
-        return true;                      /* Separator area — ignore */
+        return true;
     } else {
-        item_idx = 4 + (item_y - 108) / 24;  /* 4=Text Mode, 5=Shutdown */
+        item_idx = START_MENU_APP_COUNT
+                 + (item_y - apps_block_h - START_MENU_SEP_H) / START_MENU_ITEM_H;
     }
 
-    /* Close menu before launching */
     desktop.start_menu_visible = false;
 
-    switch (item_idx) {
-        case 0:  /* Terminal */
-            gui_launch_terminal();
-            break;
-        case 1:  /* Files */
-            gui_launch_filemanager();
-            break;
-        case 2:  /* Settings */
-            gui_launch_settings();
-            break;
-        case 3:  /* About */
-            gui_launch_about();
-            break;
-        case 4:  /* Text Mode — not supported from GUI */
-            break;
-        case 5:  /* Shutdown */
-            wm_request_exit();
-            break;
-        default:
-            break;
+    if (item_idx < START_MENU_APP_COUNT) {
+        switch (item_idx) {
+        case 0: gui_launch_terminal();    break;
+        case 1: gui_launch_filemanager(); break;
+        case 2: gui_launch_settings();    break;
+        case 3: gui_launch_about();       break;
+        case 4: gui_launch_calculator();  break;
+        case 5: gui_launch_sysmon();      break;
+        case 6: gui_launch_notes();       break;
+        default: break;
+        }
+    } else {
+        switch (item_idx - START_MENU_APP_COUNT) {
+        case 0: /* Text Mode — not supported from GUI */ break;
+        case 1: wm_request_exit(); break;
+        default: break;
+        }
     }
 
     return true;
