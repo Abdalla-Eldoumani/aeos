@@ -4,7 +4,19 @@ A 64-bit ARM kernel with a graphical desktop environment, built from scratch for
 
 ## Overview
 
-AEOS is a bare-metal operating system kernel that runs on QEMU's ARM virt machine. It features a full graphical desktop environment with mouse support, draggable windows, and multiple applications. The project demonstrates core OS concepts including memory management, process scheduling, interrupt handling, filesystem implementation, device drivers, and GUI programming.
+AEOS is a bare-metal AArch64 kernel that runs in QEMU's `virt` machine. It boots from EL2 to EL1, brings up its own buddy allocator and first-fit heap, services GICv2 interrupts and the ARM Generic Timer, mounts an in-RAM filesystem with semihosting persistence, and renders a windowed desktop with eight built-in apps over a VirtIO GPU.
+
+### Scope
+
+AEOS is **deliberately small**. It is meant to be readable end-to-end in a few sittings, not to be a Unix clone. To keep that promise, several things you might expect from a "real" OS are intentionally absent:
+
+- **No MMU.** All addresses are physical. There is no virtual memory, no page tables, no copy-on-write, no `mmap`.
+- **No userspace.** Everything runs at EL1. There are no EL0 processes, no per-process address spaces, no privilege boundary between the shell and the kernel. System calls are direct C function calls, not `SVC` traps.
+- **No SMP.** Secondary CPUs are parked at `_start`; only CPU 0 ever runs.
+- **No networking.** There is no IP stack, no socket layer, no network driver.
+- **No real clock.** Timestamps are 0 because there is no RTC driver.
+
+If you want any of those, AEOS is not the right starting point. If you want a small, hackable system you can read top-to-bottom and modify in an afternoon, it is.
 
 ## Features
 
