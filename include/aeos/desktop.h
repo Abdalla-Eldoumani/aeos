@@ -108,4 +108,9 @@ void desktop_toggle_start_menu(void);
  */
 bool desktop_start_menu_visible(void);
 
+/**
+ * Force the start menu closed. No-op if it's already hidden.
+ */
+void desktop_dismiss_start_menu(void);
+
 #endif /* AEOS_DESKTOP_H */

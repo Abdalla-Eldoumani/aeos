@@ -596,6 +596,25 @@ static void handle_key(key_event_t *key, bool pressed)
         return;
     }
 
+    /* Esc — dismiss UI overlays (start menu, notifications) before the key
+     * reaches the focused window. Apps that care about Esc still see it on
+     * subsequent presses once nothing's left to dismiss. */
+    if (key->keycode == KEY_ESCAPE) {
+        bool consumed = false;
+        if (desktop_start_menu_visible()) {
+            desktop_dismiss_start_menu();
+            consumed = true;
+        }
+        if (notify_active()) {
+            notify_dismiss_all();
+            consumed = true;
+        }
+        if (consumed) {
+            wm.needs_redraw = true;
+            return;
+        }
+    }
+
     /* Skip closing windows so the fade-out can't be interrupted */
     if (wm.focused && (wm.focused->flags & WINDOW_FLAG_CLOSING)) {
         return;

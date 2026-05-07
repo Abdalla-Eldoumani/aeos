@@ -562,6 +562,11 @@ bool desktop_start_menu_visible(void)
     return desktop.start_menu_visible;
 }
 
+void desktop_dismiss_start_menu(void)
+{
+    desktop.start_menu_visible = false;
+}
+
 /* ============================================================================
  * End of desktop.c
  * ============================================================================ */
