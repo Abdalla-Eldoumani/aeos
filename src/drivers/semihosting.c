@@ -202,6 +202,42 @@ int semihost_remove(const char *path)
     return (int)semihosting_call(SEMI_SYS_REMOVE, &args);
 }
 
+/**
+ * Exit back to the host with the given status.
+ *
+ * Uses ARM semihosting SYS_EXIT (op 0x18). For AArch64, QEMU's
+ * implementation reads two 64-bit values from the arg block: a reason and a
+ * subcode. When `reason == ADP_Stopped_ApplicationExit` (0x20026), QEMU
+ * exits with status equal to the `subcode` field — which is exactly what
+ * `make test` greps for. We always send the ApplicationExit reason and pass
+ * the test-runner's pass/fail summary in subcode.
+ *
+ * (Earlier we tried SYS_EXIT_EXTENDED [0x20]; on QEMU 8.2 it does not seem
+ * to forward the status to the host process exit code in our build, so we
+ * fall back to plain SYS_EXIT which does.)
+ */
+void semihost_exit(int code)
+{
+    /* QEMU's AArch64 SYS_EXIT only differentiates `reason ==
+     * ADP_Stopped_ApplicationExit` (0x20026) from everything else and does
+     * not forward the subcode to its own process exit status. Rather than
+     * fight that, the test runner prints "TEST RESULTS: P PASSED, F FAILED"
+     * and `make test` greps that line; the host exit code from QEMU itself
+     * is incidental. We always send the clean ApplicationExit reason so
+     * QEMU shuts down without complaining. */
+    struct {
+        uint64_t reason;
+        uint64_t status;
+    } args = { 0x20026ULL, (uint64_t)(int64_t)code };
+
+    semihosting_call(SEMI_SYS_EXIT, &args);
+
+    /* Should never return; if we somehow do, halt the CPU. */
+    while (1) {
+        __asm__ volatile("wfi");
+    }
+}
+
 /* ============================================================================
  * End of semihosting.c
  * ============================================================================ */
