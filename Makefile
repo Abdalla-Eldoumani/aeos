@@ -92,6 +92,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/apps/calculator.c \
               src/apps/sysmon.c \
               src/apps/notes.c \
+              src/apps/tetris.c \
               src/kernel/backtrace.c
 
 # Object files
