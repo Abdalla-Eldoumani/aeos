@@ -264,7 +264,11 @@ void pmm_get_stats(pmm_stats_t *stats)
     stats->total_pages = pmm.total_pages;
     stats->free_pages = pmm.free_pages;
     stats->used_pages = pmm.total_pages - pmm.free_pages;
-    stats->reserved_pages = 0;  /* TODO: track reserved pages */
+    /* Always 0: there is no concept of "reserved" pages in the buddy
+     * allocator yet. The kernel image, heap, and stack are excluded from the
+     * PMM's range up front (see `mm_init`), so anything inside the PMM is
+     * free or in-flight. The struct field exists for future bookkeeping. */
+    stats->reserved_pages = 0;
 }
 
 /**
