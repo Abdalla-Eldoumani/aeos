@@ -1,5 +1,9 @@
 # GUI Applications - Implementation Details
 
+> The snippets below are simplified illustrations. `include/aeos/apps/*.h`
+> and `src/apps/*.c` are the source of truth — newer additions (ANSI parser
+> state, scrollback ring, calculator/sysmon/notes) live there.
+
 ## Terminal Implementation
 
 ### Terminal Structure
@@ -7,7 +11,7 @@
 ```c
 typedef struct {
     window_t *window;
-    terminal_cell_t cells[TERMINAL_ROWS][TERMINAL_COLS];  /* 24x80 grid */
+    terminal_cell_t cells[TERMINAL_ROWS][TERMINAL_COLS];  /* 78x22 grid, 8x16 cells */
     uint32_t cursor_x;
     uint32_t cursor_y;
     uint8_t current_fg;
@@ -18,6 +22,9 @@ typedef struct {
     char input_buffer[256];
     uint32_t input_pos;
     bool input_ready;
+
+    /* ANSI CSI parser state, scrollback ring — see header for full layout. */
+    /* ... */
 } terminal_t;
 
 typedef struct {

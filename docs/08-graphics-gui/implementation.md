@@ -385,13 +385,13 @@ typedef struct window {
     struct window *next;
     struct window *prev;
 
-    /* Optional backbuffer */
-    uint32_t *backbuffer;
-    uint32_t backbuffer_size;
+    /* Animation timestamps (set by wm_register_window / close-button click) */
+    uint64_t open_anim_start_ms;
+    uint64_t close_anim_start_ms;
 } window_t;
 ```
 
-Windows have both total dimensions (including decorations) and client area dimensions. Callbacks allow custom behavior.
+Windows have both total dimensions (including decorations) and client area dimensions. Callbacks allow custom behavior. Painting goes directly to the main framebuffer in z-order from `wm_redraw` — there is no per-window backbuffer.
 
 ### Client Area Calculation
 
