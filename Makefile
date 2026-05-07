@@ -114,7 +114,7 @@ KERNEL_IMG = kernel.img
 PFLASH_IMG = persist.bin
 
 # Phony targets
-.PHONY: all clean run debug dump directories pflash
+.PHONY: all clean run debug dump directories pflash test
 
 # Default target
 all: directories $(KERNEL_ELF) $(KERNEL_BIN) pflash
@@ -313,6 +313,42 @@ debug: all
 	@echo "Connect with: aarch64-linux-gnu-gdb kernel.elf -ex 'target remote :1234'"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
 		-nographic -kernel $(KERNEL_ELF) -S -s
+
+# ----------------------------------------------------------------------------
+# Test runner
+#
+# `make test` rebuilds the kernel with TEST=1 (which links src/kernel/test_runner.c
+# instead of main.c), boots it under QEMU with semihosting, captures stdout
+# to build/test.log, and greps the test runner's "TEST RESULTS: P PASSED, F
+# FAILED" line. Exit code is 0 only when the runner reports zero failures.
+# ----------------------------------------------------------------------------
+test:
+	@echo "Building test kernel..."
+	@$(MAKE) --no-print-directory clean >/dev/null
+	@$(MAKE) --no-print-directory TEST=1 >/dev/null
+	@mkdir -p $(BUILD_DIR)
+	@echo "Running test kernel under QEMU..."
+	@timeout 30 qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+		-nographic -kernel $(KERNEL_ELF) \
+		-semihosting-config enable=on,target=native \
+		> $(BUILD_DIR)/test.log 2>&1 || true
+	@echo "----- test output -----"
+	@cat $(BUILD_DIR)/test.log
+	@echo "----- summary -----"
+	@if grep -q 'TEST RESULTS:' $(BUILD_DIR)/test.log; then \
+		PASS=$$(grep -oE '[0-9]+ PASSED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
+		FAIL=$$(grep -oE '[0-9]+ FAILED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
+		echo "Passed: $$PASS"; \
+		echo "Failed: $$FAIL"; \
+		if [ "$$FAIL" = "0" ]; then \
+			echo "OK"; exit 0; \
+		else \
+			echo "FAIL"; exit 1; \
+		fi; \
+	else \
+		echo "Test runner did not finish (no TEST RESULTS line)"; \
+		exit 1; \
+	fi
 
 # Disassemble kernel
 dump: $(KERNEL_ELF)
