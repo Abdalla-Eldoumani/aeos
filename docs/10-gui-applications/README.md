@@ -75,6 +75,16 @@ This section implements the built-in graphical applications for AEOS. These appl
   - Wraps the `editor_t` storage from `src/kernel/editor.c` so the buffer + save logic stays in one place; `editor_init`, `editor_open`, `editor_save`, plus the now-public `editor_insert_char` / `editor_insert_newline` / `editor_delete_char` / `editor_backspace` helpers do all the buffer mutation
   - Saves to `/notes.txt` by default; Ctrl+S saves and posts a `notify_info("Saved")` toast; close also saves if dirty
 
+### Tetris (tetris.c)
+- **Location**: `src/apps/tetris.c`
+- **Purpose**: Tetris game; exercises the framebuffer, the keyboard event path, the timer, and the VFS in one app
+- **Features**:
+  - 10x20 board at 16 px per cell, all seven tetrominoes encoded as four rotations of a 16-bit grid each
+  - Wall-clock gravity driven from inside `on_paint`: `timer_get_uptime_ms()` decides when the active piece falls, and `wm_request_redraw()` keeps the WM scheduler ticking when no input arrives
+  - Standard Nintendo line-clear scoring (100/300/500/800 points scaled by level), level rises every 10 lines, drop interval shaves 50 ms per level down to a 100 ms floor
+  - Arrow keys move/rotate, Down soft-drops, Space hard-drops with +2 per row, P pauses, R restarts on game over
+  - High score persisted to `/tetris_high.bin` via the VFS: loaded on app create, saved on app close. The on-disk format is a single `uint32_t` little-endian
+
 ## Application Architecture
 
 All applications follow a common pattern:
