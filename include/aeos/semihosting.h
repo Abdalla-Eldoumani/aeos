@@ -123,4 +123,12 @@ ssize_t semihost_flen(int fd);
  */
 int semihost_remove(const char *path);
 
+/**
+ * Exit the program back to the host. QEMU returns `code` as its process exit
+ * status. Does not return.
+ *
+ * @param code Exit code (0 = success, non-zero = failure)
+ */
+void semihost_exit(int code) __attribute__((noreturn));
+
 #endif /* AEOS_SEMIHOSTING_H */
