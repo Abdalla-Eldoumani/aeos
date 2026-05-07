@@ -17,6 +17,18 @@ typedef __builtin_va_list va_list;
 /* Output hook for redirecting kprintf output (e.g., to GUI terminal) */
 kprintf_hook_fn kprintf_output_hook = NULL;
 
+/* Crash log ring buffer.
+ *
+ * Every char emitted through kprintf/klog (regardless of whether the GUI
+ * terminal hook is intercepting it) also lands here. On panic, the
+ * exception handler dumps the ring to /crash.log via semihosting so post
+ * mortems include the boot log, the EXCEPTION block, and the backtrace
+ * even when the framebuffer is gone. */
+#define KPRINTF_RING_SIZE 4096
+static char     kprintf_ring[KPRINTF_RING_SIZE];
+static uint32_t kprintf_ring_pos = 0;
+static bool     kprintf_ring_wrapped = false;
+
 /* Helper function to print a single character */
 static void putchar(char c)
 {
@@ -24,6 +36,29 @@ static void putchar(char c)
         kprintf_output_hook(c);
     } else {
         uart_putc(c);
+    }
+
+    kprintf_ring[kprintf_ring_pos++] = c;
+    if (kprintf_ring_pos >= KPRINTF_RING_SIZE) {
+        kprintf_ring_pos = 0;
+        kprintf_ring_wrapped = true;
+    }
+}
+
+void kprintf_ring_walk(kprintf_ring_sink_fn sink)
+{
+    if (sink == NULL) {
+        return;
+    }
+
+    if (kprintf_ring_wrapped) {
+        /* Older half: from current write position to end of buffer. */
+        sink(kprintf_ring + kprintf_ring_pos,
+             KPRINTF_RING_SIZE - kprintf_ring_pos);
+    }
+    if (kprintf_ring_pos > 0) {
+        /* Newest half: from start of buffer to current write position. */
+        sink(kprintf_ring, kprintf_ring_pos);
     }
 }
 
