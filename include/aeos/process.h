@@ -84,14 +84,6 @@ void process_exit(void) __attribute__((noreturn));
 process_t *process_current(void);
 
 /**
- * Get process by PID
- *
- * @param pid Process ID
- * @return Pointer to PCB, or NULL if not found
- */
-process_t *process_get_by_pid(uint64_t pid);
-
-/**
  * Initialize process subsystem
  * Creates the kernel idle process
  */
