@@ -57,6 +57,71 @@ static int history_start = 0;      /* Oldest entry index */
 /* Current working directory */
 static char cwd[256] = "/";
 
+/* ============================================================================
+ * Shell pipes
+ *
+ * Built-ins always print via kprintf, so the cheapest way to capture one
+ * stage's output for the next is to install a kprintf_output_hook that
+ * appends each character to a small ring. The next stage reads back through
+ * shell_pipe_readline and writes to its own (or the original) sink. Stages
+ * run serially: there are no real pipes / processes here.
+ * ============================================================================ */
+#define SHELL_PIPE_SIZE        256
+#define SHELL_MAX_PIPE_STAGES  4
+
+typedef struct shell_pipe {
+    char     buf[SHELL_PIPE_SIZE];
+    uint32_t write_pos;
+    uint32_t read_pos;
+} shell_pipe_t;
+
+static shell_pipe_t *shell_active_input  = NULL;
+static shell_pipe_t *shell_active_output = NULL;
+
+static void shell_pipe_putc(char c)
+{
+    shell_pipe_t *p = shell_active_output;
+    if (p != NULL && p->write_pos < SHELL_PIPE_SIZE) {
+        p->buf[p->write_pos++] = c;
+    }
+}
+
+/**
+ * Read one line from the active input pipe (set up by shell_run_line for
+ * non-first pipe stages). Returns line length excluding terminator, 0 for
+ * an empty line, -1 if the pipe has no more data.
+ *
+ * Built-ins that want pipe-input support call this when their argv has no
+ * filename — see cmd_grep.
+ */
+int shell_pipe_readline(char *buf, int max)
+{
+    shell_pipe_t *p = shell_active_input;
+
+    if (p == NULL || buf == NULL || max <= 0 || p->read_pos >= p->write_pos) {
+        return -1;
+    }
+
+    int i = 0;
+    while (p->read_pos < p->write_pos && i < max - 1) {
+        char c = p->buf[p->read_pos++];
+        if (c == '\n') {
+            break;
+        }
+        if (c == '\r') {
+            continue;
+        }
+        buf[i++] = c;
+    }
+    buf[i] = '\0';
+    return i;
+}
+
+bool shell_has_pipe_input(void)
+{
+    return shell_active_input != NULL;
+}
+
 /* Forward declarations for built-in commands */
 static int cmd_help(int argc, char **argv);
 static int cmd_clear(int argc, char **argv);
@@ -605,13 +670,105 @@ int shell_execute(int argc, char **argv)
 }
 
 /**
+ * Run a single command line. Splits on `|` so `ls | grep foo` chains the
+ * stages through ring-buffer pipes; without a `|` the line takes the same
+ * tokenize-then-shell_execute path as before.
+ */
+void shell_run_line(char *line)
+{
+    char *stages[SHELL_MAX_PIPE_STAGES];
+    int n_stages = 0;
+    char *p = line;
+
+    if (p == NULL) {
+        return;
+    }
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    if (*p == '\0') {
+        return;
+    }
+
+    stages[n_stages++] = p;
+    while (*p != '\0') {
+        if (*p == '|') {
+            *p++ = '\0';
+            while (*p == ' ' || *p == '\t') {
+                p++;
+            }
+            if (n_stages >= SHELL_MAX_PIPE_STAGES) {
+                kprintf("shell: too many pipe stages (max %d)\n",
+                        SHELL_MAX_PIPE_STAGES);
+                return;
+            }
+            stages[n_stages++] = p;
+        } else {
+            p++;
+        }
+    }
+
+    /* Single command path: avoid the hook-juggling overhead. */
+    if (n_stages == 1) {
+        char *argv[SHELL_MAX_ARGS];
+        int argc;
+        shell_parse(stages[0], &argc, argv);
+        if (argc > 0) {
+            shell_execute(argc, argv);
+        }
+        return;
+    }
+
+    /* Pipe path: ping-pong between two ring buffers. */
+    shell_pipe_t pipes[2];
+    pipes[0].write_pos = pipes[0].read_pos = 0;
+    pipes[1].write_pos = pipes[1].read_pos = 0;
+
+    kprintf_hook_fn outer_hook = kprintf_output_hook;
+    shell_pipe_t *prev_output = NULL;
+
+    for (int s = 0; s < n_stages; s++) {
+        bool is_last = (s == n_stages - 1);
+
+        shell_active_input = prev_output;
+
+        if (is_last) {
+            /* Final stage writes wherever the caller's kprintf was already
+             * pointing — UART for shell_run, GUI cell buffer for the
+             * terminal app. */
+            shell_active_output = NULL;
+            kprintf_output_hook = outer_hook;
+        } else {
+            shell_pipe_t *out = &pipes[s & 1];
+            out->write_pos = 0;
+            out->read_pos = 0;
+            shell_active_output = out;
+            kprintf_output_hook = shell_pipe_putc;
+        }
+
+        char *argv[SHELL_MAX_ARGS];
+        int argc;
+        shell_parse(stages[s], &argc, argv);
+        if (argc > 0) {
+            shell_execute(argc, argv);
+        }
+
+        if (!is_last) {
+            prev_output = shell_active_output;
+        }
+    }
+
+    shell_active_input = NULL;
+    shell_active_output = NULL;
+    kprintf_output_hook = outer_hook;
+}
+
+/**
  * Main shell loop
  */
 void shell_run(void)
 {
     char line[SHELL_MAX_LINE];
-    char *argv[SHELL_MAX_ARGS];
-    int argc;
 
     print_banner();
 
@@ -622,13 +779,8 @@ void shell_run(void)
         /* Read command */
         shell_readline(line, SHELL_MAX_LINE);
 
-        /* Parse command */
-        shell_parse(line, &argc, argv);
-
-        /* Execute command */
-        if (argc > 0) {
-            shell_execute(argc, argv);
-        }
+        /* Execute (with pipe support). */
+        shell_run_line(line);
     }
 }
 
@@ -1504,7 +1656,12 @@ static int cmd_grep(int argc, char **argv)
     int line_pos = 0;
     int i;
 
-    if (argc < 3) {
+    if (argc < 2) {
+        kprintf("Usage: grep <pattern> <filename>\n");
+        kprintf("       grep <pattern>            (read from pipe)\n");
+        return -1;
+    }
+    if (argc < 3 && !shell_has_pipe_input()) {
         kprintf("Usage: grep <pattern> <filename>\n");
         return -1;
     }
@@ -1528,6 +1685,21 @@ static int cmd_grep(int argc, char **argv)
                 pattern = unquoted;
             }
         }
+    }
+
+    /* Pipe-input mode: argv has no filename, read lines from the upstream
+     * stage and emit any that contain `pattern`. */
+    if (argc < 3) {
+        char pipe_line[256];
+        int n;
+        while ((n = shell_pipe_readline(pipe_line, sizeof(pipe_line))) >= 0) {
+            line_num++;
+            if (n > 0 && strstr(pipe_line, pattern) != NULL) {
+                kprintf("%s\n", pipe_line);
+                matches++;
+            }
+        }
+        return matches > 0 ? 0 : 1;
     }
 
     path = resolve_path(argv[2]);
