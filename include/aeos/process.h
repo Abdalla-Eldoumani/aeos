@@ -15,6 +15,10 @@ struct vfs_fd_table;
 /* Process stack size (4KB per process) */
 #define PROCESS_STACK_SIZE  4096
 
+/* Maximum length of a process name including the NUL terminator. The PCB owns
+ * a fixed copy of the name, so a caller may pass a transient string. */
+#define PROCESS_NAME_MAX    32
+
 /**
  * Process states
  */
@@ -33,7 +37,7 @@ typedef struct process {
     /* Process identification */
     uint64_t pid;                   /* Process ID */
     process_state_t state;          /* Current state */
-    const char *name;               /* Process name (for debugging) */
+    char name[PROCESS_NAME_MAX];    /* Process name (for debugging) */
 
     /* CPU context (callee-saved registers per ARM64 ABI) */
     uint64_t x19, x20, x21, x22;    /* Callee-saved GPRs */

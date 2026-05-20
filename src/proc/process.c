@@ -11,6 +11,7 @@
 #include <aeos/uart.h>
 #include <aeos/types.h>
 #include <aeos/vfs.h>
+#include <aeos/string.h>
 
 /* Process ID counter */
 static uint64_t next_pid = 1;
@@ -58,7 +59,13 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     /* Initialize PCB */
     proc->pid = next_pid++;
     proc->state = PROCESS_READY;
-    proc->name = name;
+
+    /* Copy the caller name into the PCB so the PCB owns the storage and ps
+     * never dereferences a freed or out-of-scope caller pointer. A NULL name
+     * becomes "(unnamed)" rather than being passed to strncpy. */
+    strncpy(proc->name, (name != NULL) ? name : "(unnamed)", PROCESS_NAME_MAX - 1);
+    proc->name[PROCESS_NAME_MAX - 1] = '\0';
+
     proc->stack_size = PROCESS_STACK_SIZE;
     proc->time_slice = 0;
     proc->total_time = 0;
@@ -89,7 +96,7 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     scheduler_add_process(proc);
 
     klog_debug("Created process PID=%u '%s' at %p, stack=%p",
-               (uint32_t)proc->pid, name, proc, proc->stack_base);
+               (uint32_t)proc->pid, proc->name, proc, proc->stack_base);
 
     return proc;
 }
