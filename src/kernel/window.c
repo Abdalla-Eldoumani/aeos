@@ -174,6 +174,10 @@ void window_invalidate(window_t *win)
     if (win) {
         win->flags |= WINDOW_FLAG_DIRTY;
         wm_request_redraw();
+        /* BUG-20 trace: an app asked for a frame after mutating its state.
+         * This must fire on every file-manager click; if it does not, the
+         * click never reached the app's on_mouse handler. */
+        klog_debug("invalidate win=%u -> request_redraw", win->id);
     }
 }
 
