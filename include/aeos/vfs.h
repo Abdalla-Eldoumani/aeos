@@ -15,6 +15,11 @@
 /* Maximum path length */
 #define MAX_PATH_LEN       256
 
+/* Upper bound on a path string handed to the path resolver. split_path rejects
+ * a longer path before copying it, so attacker-influenced shell input cannot
+ * drive an unbounded kmalloc(strlen(path)+1). Distinct from MAX_PATH_LEN. */
+#define VFS_PATH_MAX       1024
+
 /* Maximum filename length */
 #define MAX_FILENAME_LEN   64
 
