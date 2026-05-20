@@ -116,8 +116,17 @@ static int line_grow(editor_line_t *line, size_t needed)
         return 0;
     }
 
-    size_t new_cap = line->capacity * 2;
+    /* Double the capacity until it covers `needed`, but reject a doubling that
+     * would wrap. line buffers are bytes (element size 1), so the only overflow
+     * is the *2 wrap: once new_cap exceeds ((size_t)-1)/2 the next double wraps
+     * to a small value, kmalloc hands back an undersized block, and the len+1
+     * memcpy below overruns it. Same ((size_t)-1) idiom as kcalloc (heap.c).
+     * On overflow leave line->chars and line->capacity untouched and return -1. */
+    size_t new_cap = line->capacity;
     while (new_cap < needed) {
+        if (new_cap > ((size_t)-1) / 2) {
+            return -1;
+        }
         new_cap *= 2;
     }
 
