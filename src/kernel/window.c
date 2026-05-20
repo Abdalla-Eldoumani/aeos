@@ -11,6 +11,7 @@
 #include <aeos/kprintf.h>
 #include <aeos/timer.h>
 #include <aeos/anim.h>
+#include <aeos/wm.h>
 
 /* Window ID counter */
 static uint32_t next_window_id = 1;
@@ -158,12 +159,21 @@ void window_resize(window_t *win, uint32_t width, uint32_t height)
 }
 
 /**
- * Mark window as needing redraw
+ * Mark window as needing redraw.
+ *
+ * Sets the per-window dirty flag AND signals the window manager that a
+ * frame is needed. Apps call this from on_mouse / on_key / on_paint after
+ * mutating their internal state. Without the wm_request_redraw the next
+ * compositor tick would skip the redraw branch and the framebuffer would
+ * stay stale until something else (drag, focus change, new window) flipped
+ * needs_redraw. That was the cause of the "have to drag the window to see
+ * the click I just made" bug.
  */
 void window_invalidate(window_t *win)
 {
     if (win) {
         win->flags |= WINDOW_FLAG_DIRTY;
+        wm_request_redraw();
     }
 }
 
