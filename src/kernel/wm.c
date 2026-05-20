@@ -321,6 +321,13 @@ void wm_redraw(void)
 {
     window_t *win;
 
+    /* BUG-20 trace: confirms a full content redraw (on_paint for every visible
+     * window) actually ran. If the click trace fires but this does not, the
+     * redraw branch was skipped. If both fire but the screen is stale, the
+     * problem is past the framebuffer (GPU transfer/flush or host display). */
+    klog_debug("wm_redraw: %u windows, focused=%u", wm.window_count,
+               wm.focused ? wm.focused->id : 0);
+
     /* Draw desktop background */
     if (wm.desktop_paint) {
         wm.desktop_paint();
@@ -419,6 +426,12 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
         /* Left click */
         win = wm_window_at(mouse->x, mouse->y);
 
+        /* BUG-20 trace: where did the click land and which window caught it.
+         * If the reported (x,y) is not where the user aimed, the relative
+         * virtio-mouse cursor has desynced from the host pointer. */
+        klog_debug("click @ (%d,%d) -> win=%u", mouse->x, mouse->y,
+                   win ? win->id : 0);
+
         if (win) {
             /* Ignore events on a window that's already running its close animation */
             if (win->flags & WINDOW_FLAG_CLOSING) {
@@ -455,6 +468,8 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
                 local.y = mouse->y - win->client_y;
                 local.buttons = mouse->buttons;
                 local.scroll = mouse->scroll;
+                klog_debug("  dispatch on_mouse win=%u client-local=(%d,%d)",
+                           win->id, local.x, local.y);
                 win->on_mouse(win, &local);
             }
         } else {
