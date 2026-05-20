@@ -194,15 +194,27 @@ static int editor_add_line(editor_t *ed, int pos, const char *text, size_t len)
 {
     /* Grow lines array if needed */
     if (ed->num_lines >= ed->lines_capacity) {
-        int new_cap = ed->lines_capacity * 2;
-        editor_line_t *new_lines = (editor_line_t *)kmalloc(new_cap * sizeof(editor_line_t));
+        size_t new_cap = (size_t)ed->lines_capacity * 2;
+
+        /* Reject a growth whose byte size would overflow before allocating.
+         * Without the guard the multiply wraps to a small value, kmalloc hands
+         * back an undersized block, and the memcpy below walks off its end.
+         * Same idiom as kcalloc (heap.c). On overflow OR kmalloc failure leave
+         * ed->lines and ed->lines_capacity untouched so the buffer stays usable,
+         * and surface a controlled out-of-memory path instead of a short buffer. */
+        editor_line_t *new_lines = NULL;
+        if (new_cap <= ((size_t)-1) / sizeof(editor_line_t)) {
+            new_lines = (editor_line_t *)kmalloc(new_cap * sizeof(editor_line_t));
+        }
         if (new_lines == NULL) {
+            notify_error("Out of memory");
+            editor_set_status(ed, "Out of memory");
             return -1;
         }
         memcpy(new_lines, ed->lines, ed->num_lines * sizeof(editor_line_t));
         kfree(ed->lines);
         ed->lines = new_lines;
-        ed->lines_capacity = new_cap;
+        ed->lines_capacity = (int)new_cap;
     }
 
     /* Shift lines down */
