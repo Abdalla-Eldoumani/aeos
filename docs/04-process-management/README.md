@@ -53,7 +53,7 @@ This section implements preemptive multitasking for AEOS with a round-robin sche
 typedef struct process {
     uint64_t pid;               /* Process ID */
     uint32_t state;             /* READY, RUNNING, ZOMBIE */
-    const char *name;           /* Process name */
+    char name[PROCESS_NAME_MAX]; /* Process name (copied, N = 32) */
 
     /* Saved context (callee-saved registers) */
     uint64_t x19, x20, x21, x22, x23, x24, x25, x26, x27, x28;
