@@ -469,6 +469,11 @@ static void filemanager_mouse(window_t *win, mouse_event_t *mouse)
     /* Calculate clicked entry */
     if (mouse->y > FM_PATH_HEIGHT + 4) {
         clicked_index = fm->scroll_offset + (mouse->y - FM_PATH_HEIGHT - 4) / FM_ENTRY_HEIGHT;
+        /* BUG-20 trace: which row the click resolved to vs the current
+         * selection. If clicked_index is not the row the user aimed at, the
+         * mouse position is wrong (relative-cursor desync), not the redraw. */
+        klog_debug("fm_mouse: local-y=%d clicked_index=%d sel=%d entries=%u",
+                   mouse->y, clicked_index, fm->selected_index, fm->entry_count);
         if (clicked_index >= 0 && clicked_index < (int32_t)fm->entry_count) {
             if (fm->selected_index == clicked_index) {
                 /* Double click simulation - navigate/view if same entry */
