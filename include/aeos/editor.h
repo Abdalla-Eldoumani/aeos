@@ -179,4 +179,17 @@ void editor_backspace(editor_t *ed);
  */
 void editor_set_status(editor_t *ed, const char *fmt, ...);
 
+#ifdef TEST_BUILD
+/**
+ * Drive the line-array growth overflow guard directly (SEC-02 test seam).
+ *
+ * The public editor path doubles from a small int capacity and never reaches
+ * the integer-overflow branch, so this seam forces an overflowing new_cap
+ * through the guarded growth. Compiled only into the TEST_BUILD kernel.
+ *
+ * @return nonzero iff the overflowing growth was refused with the buffer intact
+ */
+int editor_test_growth_overflow_refused(void);
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_EDITOR_H */

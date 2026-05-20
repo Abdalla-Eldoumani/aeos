@@ -197,33 +197,43 @@ static int line_set(editor_line_t *line, const char *str, size_t len)
  * ============================================================================ */
 
 /**
+ * Grow the line array to new_cap entries.
+ *
+ * Rejects a growth whose byte size would overflow before allocating. Without
+ * the guard the multiply wraps to a small value, kmalloc hands back an
+ * undersized block, and the memcpy below walks off its end. Same idiom as
+ * kcalloc (heap.c). On overflow OR kmalloc failure leave ed->lines and
+ * ed->lines_capacity untouched so the buffer stays usable, surface a controlled
+ * out-of-memory path instead of a short buffer, and return -1.
+ */
+static int editor_grow_lines(editor_t *ed, size_t new_cap)
+{
+    editor_line_t *new_lines = NULL;
+    if (new_cap <= ((size_t)-1) / sizeof(editor_line_t)) {
+        new_lines = (editor_line_t *)kmalloc(new_cap * sizeof(editor_line_t));
+    }
+    if (new_lines == NULL) {
+        notify_error("Out of memory");
+        editor_set_status(ed, "Out of memory");
+        return -1;
+    }
+    memcpy(new_lines, ed->lines, ed->num_lines * sizeof(editor_line_t));
+    kfree(ed->lines);
+    ed->lines = new_lines;
+    ed->lines_capacity = (int)new_cap;
+    return 0;
+}
+
+/**
  * Add a new line to the editor
  */
 static int editor_add_line(editor_t *ed, int pos, const char *text, size_t len)
 {
     /* Grow lines array if needed */
     if (ed->num_lines >= ed->lines_capacity) {
-        size_t new_cap = (size_t)ed->lines_capacity * 2;
-
-        /* Reject a growth whose byte size would overflow before allocating.
-         * Without the guard the multiply wraps to a small value, kmalloc hands
-         * back an undersized block, and the memcpy below walks off its end.
-         * Same idiom as kcalloc (heap.c). On overflow OR kmalloc failure leave
-         * ed->lines and ed->lines_capacity untouched so the buffer stays usable,
-         * and surface a controlled out-of-memory path instead of a short buffer. */
-        editor_line_t *new_lines = NULL;
-        if (new_cap <= ((size_t)-1) / sizeof(editor_line_t)) {
-            new_lines = (editor_line_t *)kmalloc(new_cap * sizeof(editor_line_t));
-        }
-        if (new_lines == NULL) {
-            notify_error("Out of memory");
-            editor_set_status(ed, "Out of memory");
+        if (editor_grow_lines(ed, (size_t)ed->lines_capacity * 2) < 0) {
             return -1;
         }
-        memcpy(new_lines, ed->lines, ed->num_lines * sizeof(editor_line_t));
-        kfree(ed->lines);
-        ed->lines = new_lines;
-        ed->lines_capacity = (int)new_cap;
     }
 
     /* Shift lines down */
@@ -1510,6 +1520,49 @@ void editor_run(const char *filename)
     /* Restore screen */
     kprintf(ESC_CLEAR_SCREEN ESC_CURSOR_HOME);
 }
+
+#ifdef TEST_BUILD
+/* ============================================================================
+ * Test seams (compiled only into the TEST_BUILD kernel, see Makefile TEST=1).
+ * ============================================================================ */
+
+/**
+ * Drive the line-array overflow guard directly and report whether it refused.
+ *
+ * editor_grow_lines and editor_add_line are static, and lines_capacity is an
+ * int, so (size_t)lines_capacity * 2 can never exceed ((size_t)-1)/sizeof, the
+ * overflow bound. The public editor_init/editor_open path therefore reaches
+ * only the kmalloc-NULL branch, never the integer-overflow branch. This seam
+ * passes the guard a new_cap that genuinely overflows the byte-size bound and
+ * asserts the growth is refused with the buffer left intact, so the SEC-02
+ * smoke test proves the overflow branch and not only the OOM branch.
+ *
+ * @return nonzero iff the overflowing growth was refused (returned -1) and
+ *         ed->lines / ed->lines_capacity were left unchanged.
+ */
+int editor_test_growth_overflow_refused(void)
+{
+    editor_t ed;
+    memset(&ed, 0, sizeof(ed));
+
+    /* A distinct sentinel that must survive a refused growth untouched. The
+     * guard rejects before any memcpy/kfree, so this pointer is never read or
+     * freed; num_lines stays 0 to make that explicit. */
+    editor_line_t *sentinel = (editor_line_t *)0xA5A5A5A5A5A5A5A5ull;
+    ed.lines = sentinel;
+    ed.num_lines = 0;
+    ed.lines_capacity = 64;
+
+    /* new_cap just past the overflow bound: the smallest count whose
+     * count * sizeof(editor_line_t) wraps. The int-capacity public path can
+     * never produce this value. */
+    size_t overflow_cap = ((size_t)-1) / sizeof(editor_line_t) + 1;
+
+    int rc = editor_grow_lines(&ed, overflow_cap);
+
+    return (rc == -1 && ed.lines == sentinel && ed.lines_capacity == 64) ? 1 : 0;
+}
+#endif /* TEST_BUILD */
 
 /* ============================================================================
  * End of editor.c
