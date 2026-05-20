@@ -191,7 +191,15 @@ void kfree(void *ptr)
         return;
     }
 
-    heap_check_magic(block, "kfree");
+    /* A caller-supplied pointer that no longer lands on a valid header (the
+     * merge-then-free case where the old sub-header is now mid-block) is a
+     * caller error: refuse it and return. heap_check_magic stays a hard halt
+     * for internal traversal (find_free_block, merge_free_blocks), where a bad
+     * magic means the free list itself is corrupt. */
+    if (block->magic != HEAP_MAGIC) {
+        klog_error("kfree: Bad block magic at %p", ptr);
+        return;
+    }
 
     /* Check if already free (double-free detection) */
     if (block->is_free) {
