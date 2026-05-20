@@ -19,7 +19,11 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     /* Initialize PCB fields */
     proc->pid = next_pid++;
     proc->state = PROCESS_READY;
-    proc->name = name;
+
+    /* Copy the name so the PCB owns it; a NULL name becomes "(unnamed)". */
+    strncpy(proc->name, (name != NULL) ? name : "(unnamed)", PROCESS_NAME_MAX - 1);
+    proc->name[PROCESS_NAME_MAX - 1] = '\0';
+
     proc->stack_size = PROCESS_STACK_SIZE;
 
     /* Set up initial context */
