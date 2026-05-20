@@ -488,6 +488,13 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
     /* Pin the inode while this open file references it */
     inode->refcount++;
 
+    /* Publish the refcount store before the inode becomes reachable through
+     * the fd table. This release barrier orders the increment ahead of the
+     * handoff so no consumer can observe the handle with a stale count. It
+     * matters under -O2 reordering today and on SMP later; a full atomic
+     * refcount is deferred to the SMP phase. */
+    __asm__ volatile("dmb ish" ::: "memory");
+
     /* Allocate file descriptor */
     fd = vfs_fd_alloc(file, 0);
     if (fd < 0) {
