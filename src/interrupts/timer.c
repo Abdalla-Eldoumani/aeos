@@ -10,6 +10,7 @@
 #include <aeos/kprintf.h>
 #include <aeos/types.h>
 #include <aeos/scheduler.h>
+#include <aeos/stack_guard.h>
 
 /* Timer state */
 static struct {
@@ -172,6 +173,10 @@ bool timer_handle_fiq(void)
         /* No timer interrupt pending */
         return false;
     }
+
+    /* Cheap per-tick stack-overflow check on the live FIQ path. One load and
+     * compare; pass 0 because a tick has no faulting instruction to name. */
+    stack_guard_check(0);
 
     /* Increment tick count */
     timer.ticks++;
