@@ -23,7 +23,25 @@ kprintf_hook_fn kprintf_output_hook = NULL;
  * terminal hook is intercepting it) also lands here. On panic, the
  * exception handler dumps the ring to /crash.log via semihosting so post
  * mortems include the boot log, the EXCEPTION block, and the backtrace
- * even when the framebuffer is gone. */
+ * even when the framebuffer is gone.
+ *
+ * Normal-vs-exception interleave invariant.
+ *
+ * The ring is written from exactly one place, putchar, which runs in normal
+ * (non-exception) context. It is read from exactly one place, the panic path,
+ * which reaches kprintf_ring_walk from handle_exception. The two contexts must
+ * not touch the ring at the same time, because a write that interrupts the dump
+ * (or a dump that interrupts a write) would splice a half-updated index into the
+ * crash log.
+ *
+ * Mutual exclusion is not provided by any lock inside kprintf. It comes from
+ * handle_exception masking DAIF on entry (exceptions.c, the BUG-15 fix), which
+ * stops a timer FIQ from preempting a normal-mode ring write while the panic
+ * path is reading the same buffer. That guarantee holds because the kernel is
+ * single-CPU today: with one core and FIQs masked, no other agent can run.
+ * A real lock on the ring is deferred to the SMP phase (Phase 7), where masking
+ * one core's interrupts no longer excludes the others; the SMP work replaces
+ * this DAIF-mask invariant with a proper lock. */
 #define KPRINTF_RING_SIZE 4096
 static char     kprintf_ring[KPRINTF_RING_SIZE];
 static uint32_t kprintf_ring_pos = 0;
@@ -38,11 +56,17 @@ static void putchar(char c)
         uart_putc(c);
     }
 
+    /* Order the byte store and the index/wrap update as one unit so the
+     * compiler and core cannot float them apart from the surrounding output.
+     * A panic dump observing the ring through kprintf_ring_walk then sees a
+     * coherent (pos, wrapped) pair, never a byte written under an index that
+     * has not advanced yet. Mirrors the dmb ish idiom in virtio_input.c. */
     kprintf_ring[kprintf_ring_pos++] = c;
     if (kprintf_ring_pos >= KPRINTF_RING_SIZE) {
         kprintf_ring_pos = 0;
         kprintf_ring_wrapped = true;
     }
+    __asm__ volatile("dmb ish" ::: "memory");
 }
 
 void kprintf_ring_walk(kprintf_ring_sink_fn sink)
