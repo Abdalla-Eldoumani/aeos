@@ -242,6 +242,9 @@ void *krealloc(void *ptr, size_t new_size)
         }
         if (block->size >= needed + MIN_BLOCK_SIZE) {
             split_block(block, needed);
+            /* split_block stamps the new tail's magic; re-stamp the shrunk head
+             * so the surviving `block` still carries a valid magic. */
+            block->magic = HEAP_MAGIC;
             /* Tail came back free; coalesce it with anything free past it */
             merge_free_blocks(block->next);
         }
@@ -419,6 +422,10 @@ static void merge_free_blocks(heap_block_t *block)
         if (block->next != NULL) {
             block->next->prev = block;
         }
+        /* The absorbed `next` header now sits mid-block; re-stamp the survivor
+         * so a later kfree of the merged region sees a valid magic, while a
+         * stale pointer into the old `next` no longer reads HEAP_MAGIC. */
+        block->magic = HEAP_MAGIC;
     }
 
     /* Absorb the previous block by folding ourselves into it */
@@ -430,6 +437,9 @@ static void merge_free_blocks(heap_block_t *block)
         if (prev->next != NULL) {
             prev->next->prev = prev;
         }
+        /* `prev` is now the survivor and `block`'s header is interior; re-stamp
+         * the survivor so the merged block carries a fresh valid magic. */
+        prev->magic = HEAP_MAGIC;
     }
 }
 
