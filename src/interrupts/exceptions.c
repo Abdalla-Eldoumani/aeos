@@ -9,6 +9,7 @@
 #include <aeos/timer.h>
 #include <aeos/kprintf.h>
 #include <aeos/symbols.h>
+#include <aeos/stack_guard.h>
 #include <aeos/types.h>
 
 /* IRQ handler table */
@@ -83,6 +84,12 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
     /* Mask debug, SError, IRQ, and FIQ before touching kprintf. The print path
      * is not reentrant, so a timer FIQ landing here would corrupt the trace. */
     __asm__ volatile("msr DAIFSet, #0xF" ::: "memory");
+
+    /* If a stack overflow brought us here, the boot-stack sentinel is clobbered.
+     * Check it before the first kprintf so the panic names the offending PC
+     * (context->pc = saved ELR_EL1) deterministically instead of printing a
+     * misleading trace off a corrupt stack. */
+    stack_guard_check(context->pc);
 
     uint64_t esr, far, ec;
 
