@@ -63,6 +63,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/kernel/wm.c \
               src/kernel/desktop.c \
               src/kernel/gui.c \
+              src/kernel/stack_guard.c \
               src/drivers/uart.c \
               src/drivers/virtio_input.c \
               src/drivers/framebuffer.c \
