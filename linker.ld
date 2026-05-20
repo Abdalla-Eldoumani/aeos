@@ -67,6 +67,7 @@ SECTIONS
 
     /* Stack section AFTER heap (grows downward from top) */
     .stack (NOLOAD) : ALIGN(4096) {
+        __stack_limit = .;      /* bottom of stack (lowest address); boot stamps a guard sentinel here */
         . = . + 0x20000;        /* 128KB stack (doubled to prevent overflow) */
         __stack_top = .;
     } > RAM
