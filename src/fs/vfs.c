@@ -313,6 +313,14 @@ static int split_path(const char *path, char **components, int max_components)
         return -1;
     }
 
+    /* Reject an over-long path before allocating. The path comes from shell
+     * input; without this bound a pathological path drives an arbitrarily
+     * large kmalloc and pressures the kernel heap. */
+    if (strlen(path) > VFS_PATH_MAX) {
+        klog_warn("Path too long (over %d bytes), rejected", VFS_PATH_MAX);
+        return -1;
+    }
+
     /* Make a copy since strtok modifies the string */
     path_copy = kmalloc(strlen(path) + 1);
     if (path_copy == NULL) {
@@ -323,6 +331,21 @@ static int split_path(const char *path, char **components, int max_components)
     /* Tokenize by '/' */
     token = strtok_r(path_copy, "/", &saveptr);
     while (token != NULL && count < max_components) {
+        /* Reject a component that does not fit the name field before
+         * allocating. The bound is MAX_FILENAME_LEN - 1 because ramfs stores
+         * names in a char[MAX_FILENAME_LEN] and truncates to that many bytes;
+         * rejecting (rather than silently truncating) avoids a create-vs-lookup
+         * name mismatch on an over-long component. */
+        if (strlen(token) >= MAX_FILENAME_LEN) {
+            int i;
+            klog_warn("Path component too long (over %d bytes), rejected",
+                      MAX_FILENAME_LEN - 1);
+            for (i = 0; i < count; i++) {
+                kfree(components[i]);
+            }
+            kfree(path_copy);
+            return -1;
+        }
         components[count] = kmalloc(strlen(token) + 1);
         if (components[count] == NULL) {
             /* Cleanup on error */
