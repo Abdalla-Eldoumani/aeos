@@ -9,6 +9,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### Terminal (terminal.c)
 - **Location**: `src/apps/terminal.c`
 - **Purpose**: GUI terminal emulator with shell access
+- **Subsystem**: the shell (`src/kernel/shell.c`) plus `kprintf` output capture; the terminal hooks `kprintf` output into its cell buffer and runs commands through the shell
 - **Features**:
   - 78x22 character text buffer using 8x16 cells (computed from window client area)
   - 16-color ANSI palette
@@ -21,6 +22,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### File Manager (filemanager.c)
 - **Location**: `src/apps/filemanager.c`
 - **Purpose**: Graphical file browser
+- **Subsystem**: the VFS; lists directory contents via `vfs_open` / `vfs_readdir`, opens files via `vfs_read`, and surfaces open failures with `notify_error`
 - **Features**:
   - Directory listing
   - File and folder icons
@@ -34,6 +36,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### Settings (settings.c)
 - **Location**: `src/apps/settings.c`
 - **Purpose**: System information display
+- **Subsystem**: the heap allocator statistics (`heap_get_stats` returns used/free) plus the uptime timer; read-only
 - **Features**:
   - Memory usage (used/free/total)
   - System architecture info
@@ -44,6 +47,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### About (about.c)
 - **Location**: `src/apps/about.c`
 - **Purpose**: About dialog
+- **Subsystem**: static system and architecture strings; no live kernel data source
 - **Features**:
   - AEOS logo display
   - Version information
@@ -53,6 +57,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### Calculator (calculator.c)
 - **Location**: `src/apps/calculator.c`
 - **Purpose**: Standard four-function calculator
+- **Subsystem**: the int64 fixed-point arithmetic in `src/lib` (10^6 scale), chosen because `-mgeneral-regs-only` forbids floating point at EL1
 - **Features**:
   - 200x260 window, 8x16 right-aligned display, 4x5 button grid (`C ± % ÷` row, then 7-9, 4-6, 1-3, then 0/./=)
   - Buttons rendered as `THEME_SURFACE_2` rects with `THEME_BORDER_SUBTLE`; operator labels use `THEME_ACCENT`
@@ -62,6 +67,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### System Monitor (sysmon.c)
 - **Location**: `src/apps/sysmon.c`
 - **Purpose**: Live heap usage graph
+- **Subsystem**: the heap allocator statistics, sampled once per wall second into a 60-bar ring buffer; the paint hook calls `wm_request_redraw` each frame to keep the graph alive
 - **Features**:
   - 280x180 window, header reads `Heap: USED / TOTAL`
   - 60-bar ring buffer, one bar per wall second, newest on the right
@@ -70,6 +76,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### Notes (notes.c)
 - **Location**: `src/apps/notes.c`
 - **Purpose**: Flat (non-modal) text editor
+- **Subsystem**: the `editor_t` buffer engine (`src/kernel/editor.c`) plus the VFS; saves to `/notes.txt`
 - **Features**:
   - 360x300 window, 8x16 cells, blinking caret driven from the WM clock
   - Wraps the `editor_t` storage from `src/kernel/editor.c` so the buffer + save logic stays in one place; `editor_init`, `editor_open`, `editor_save`, plus the now-public `editor_insert_char` / `editor_insert_newline` / `editor_delete_char` / `editor_backspace` helpers do all the buffer mutation
@@ -78,6 +85,7 @@ This section implements the built-in graphical applications for AEOS. These appl
 ### Tetris (tetris.c)
 - **Location**: `src/apps/tetris.c`
 - **Purpose**: Tetris game; exercises the framebuffer, the keyboard event path, the timer, and the VFS in one app
+- **Subsystem**: the uptime timer for gravity pacing and the VFS for the high-score file `/tetris_high.bin`
 - **Features**:
   - 10x20 board at 16 px per cell, all seven tetrominoes encoded as four rotations of a 16-bit grid each
   - Wall-clock gravity driven from inside `on_paint`: `timer_get_uptime_ms()` decides when the active piece falls, and `wm_request_redraw()` keeps the WM scheduler ticking when no input arrives
@@ -343,7 +351,7 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 ### Terminal
 - No command history navigation inside the GUI terminal
 - No tab completion
-- `edit` and `vi` are blocked from the GUI terminal — the editor's input loop reads UART directly and would freeze `wm_run`. The block message points users to text mode
+- `edit` and `vi` are blocked from the GUI terminal because the editor's input loop reads UART directly and would freeze `wm_run`. The block message points users to text mode
 
 ### File Manager
 - No file creation/deletion UI
@@ -360,13 +368,13 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 - Static content only
 
 ### Calculator
-- 16-character display ceiling — long results truncate
+- 16-character display ceiling, so long results truncate
 - No memory keys (M+, MR), no scientific functions
 
 ### System Monitor
-- Heap is the only sampled metric (no CPU%, no per-process info — no userspace yet)
+- Heap is the only sampled metric (no CPU%, no per-process info, no userspace yet)
 - Sampling is driven from the paint hook, so closing the window stops sampling
 
 ### Notes
-- Single-file editor — cannot pick a different filename without changing `NOTES_DEFAULT_PATH`
+- Single-file editor; cannot pick a different filename without changing `NOTES_DEFAULT_PATH`
 - Plain text only; no syntax highlighting or selection
