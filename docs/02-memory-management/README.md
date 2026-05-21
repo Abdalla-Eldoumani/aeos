@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements physical and virtual memory management for AEOS. It provides a buddy allocator for page-level physical memory allocation and a first-fit allocator for kernel heap management.
+This section implements physical memory management for AEOS. It provides a buddy allocator for page-level physical memory allocation and a first-fit allocator for kernel heap management. There is no MMU yet, so all addresses are physical; virtual memory lands in a later phase.
 
 ## Components
 
@@ -22,8 +22,9 @@ This section implements physical and virtual memory management for AEOS. It prov
 - **Purpose**: Dynamic memory allocation for kernel data structures
 - **Features**:
   - kmalloc/kfree/kcalloc/krealloc
-  - Automatic adjacent block merging
-  - Double-free detection
+  - Automatic adjacent block merging (O(1) per kfree)
+  - Header magic validation; kfree refuses a wrong-magic caller pointer
+  - kcalloc rejects an `nmemb * size` multiplication overflow
   - Heap usage statistics
 
 ## Memory Layout
@@ -37,6 +38,8 @@ Physical Memory (256 MB total, QEMU virt -m 256M)
 ```
 
 The linker (`linker.ld`) lays sections in the order kernel image -> heap -> stack, so the heap and stack addresses shift if the kernel grows. `mm_init` reads `__heap_start` / `__heap_end` symbols and hands the post-stack range to the PMM.
+
+`mm_init` starts the PMM at `__stack_top`, not `heap_end`. The region `[heap_end, __stack_top)` holds the live boot stack and the SEC-01 stack-guard sentinel at `__stack_limit` (which equals `heap_end`). The buddy allocator writes a free-list node at the start of its first managed block, so starting at `heap_end` would clobber the sentinel and the in-use stack on the first allocation. Reserving the stack from the PMM is what "PMM-managed pages (the rest of RAM)" above means.
 
 ## Buddy Allocator
 
@@ -57,9 +60,15 @@ The allocator maintains an array of 11 free lists (one per order). Each list con
 
 ### Block Structure
 Each heap block has a header containing:
+- A magic field (`0xAEDA110C`) used to validate the header
 - Size (including header)
 - Free flag
 - Next/previous pointers for linked list
+
+### Block Magic
+Every header carries the magic value `0xAEDA110C`. It is stamped at `heap_init` and re-stamped on every operation that touches a header: `split_block` stamps the new tail, `merge_free_blocks` re-stamps the surviving block after both the absorb-next and absorb-prev folds, and the `krealloc` in-place shrink re-stamps the shrunk head. An absorbed sub-header no longer reads a valid magic, so a pointer that lands mid-block of a merged allocation is detectable.
+
+`kfree` uses the magic to tell a bad caller pointer from internal corruption. If the caller's header magic is wrong, `kfree` logs a `klog_error` and returns rather than halting, so a stale or mid-block free is refused without taking the kernel down. Internal traversals (`find_free_block`, `merge_free_blocks`) use the halting `heap_check_magic` validator instead, because a bad magic encountered while walking the free list means the list itself is corrupt and a `klog_fatal` at the fault site is the right answer.
 
 ### Allocation Strategy
 **First-fit**: Scans the free list from the beginning and uses the first block large enough to satisfy the request.
