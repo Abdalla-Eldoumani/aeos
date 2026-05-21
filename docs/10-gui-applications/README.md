@@ -91,7 +91,7 @@ This section implements the built-in graphical applications for AEOS. These appl
   - Wall-clock gravity driven from inside `on_paint`: `timer_get_uptime_ms()` decides when the active piece falls, and `wm_request_redraw()` keeps the WM scheduler ticking when no input arrives
   - Standard Nintendo line-clear scoring (100/300/500/800 points scaled by level), level rises every 10 lines, drop interval shaves 50 ms per level down to a 100 ms floor
   - Arrow keys move/rotate, Down soft-drops, Space hard-drops with +2 per row, P pauses, R restarts on game over
-  - High score persisted to `/tetris_high.bin` via the VFS: loaded on app create, saved on app close. The on-disk format is a single `uint32_t` little-endian
+  - High score persisted to `/tetris_high.bin` via the VFS: loaded on app create, saved on app close. The on-disk format is a 16-byte little-endian record (magic `AETT`, version, the `uint32_t` score, and a checksum); a truncated, wrong-magic, wrong-version, or bad-checksum file is treated as no saved score
 
 ## Application Architecture
 
