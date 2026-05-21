@@ -360,13 +360,15 @@ static void process_input_events(virtio_input_t *dev, input_virtqueue_t *vq, boo
                     break;
             }
         } else {
-            /* Keyboard event */
-            if (ev->type == EV_KEY) {
+            /* Keyboard event. Bound the code against the table before lookup. */
+            if (ev->type == EV_KEY && ev->code < sizeof(scancode_to_keycode)) {
                 kc = scancode_to_keycode[ev->code];
-                if (ev->value == 1) {
-                    event_generate_key(kc, true);   /* Press */
-                } else if (ev->value == 0) {
-                    event_generate_key(kc, false);  /* Release */
+                if (kc != KEY_NONE) {
+                    if (ev->value == 1) {
+                        event_generate_key(kc, true);   /* Press */
+                    } else if (ev->value == 0) {
+                        event_generate_key(kc, false);  /* Release */
+                    }
                 }
             }
         }
@@ -383,6 +385,22 @@ static void process_input_events(virtio_input_t *dev, input_virtqueue_t *vq, boo
     virtio_mmio_write32(mmio, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
 }
 ```
+
+The polling loop drains the device event queue and hands each decoded event to
+the `kernel/event.c` queue: `event_generate_mouse_move` and
+`event_generate_mouse_button` for the mouse, `event_generate_key` for the
+keyboard. Those helpers build an `event_t` and call `event_push`, which is the
+only way input reaches the rest of the kernel. The loop logs nothing on the
+normal path; the per-event mouse-button log was removed in the BUG-10 cleanup.
+
+The keyboard `scancode_to_keycode` table is sized 128 and maps two families:
+the legacy AT-style positions (for example position 72 to `KEY_UP`) and the
+Linux input-event-codes navigation cluster, codes 102 through 111
+(`KEY_HOME`, `KEY_UP`, `KEY_PAGE_UP`, `KEY_LEFT`, `KEY_RIGHT`, `KEY_END`,
+`KEY_DOWN`, `KEY_PAGE_DOWN`, `KEY_INSERT`, `KEY_DELETE`). The second family is
+what QEMU's virtio-keyboard emits for the navigation keys, so it backs the
+terminal scrollback paging and the editor arrow movement. Codes at or past the
+table size, and codes that map to `KEY_NONE`, are dropped.
 
 ## Framebuffer Implementation
 
@@ -430,6 +448,18 @@ void fb_fill_rect(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color)
     }
 }
 ```
+
+### Signed-Coordinate Clipping
+
+Every framebuffer primitive takes signed (`int32_t`) coordinates and clips
+internally: `fb_putpixel`, `fb_getpixel`, `fb_fill_rect`, `fb_draw_rect`,
+`fb_draw_line`, `fb_putchar`, and `fb_puts` (and their 8x16 large variants).
+A coordinate that goes negative is rejected (point primitives) or has the
+negative span trimmed against the origin (rect primitives) before any pixel is
+written. Because the parameters are signed, window-relative math that produces a
+negative coordinate clips to the edge instead of wrapping into a huge unsigned
+value and scribbling across the framebuffer. `fb_putpixel` was made signed in
+the BUG-18 fix; the rect and line primitives clip the same way.
 
 ### Character Rendering
 
