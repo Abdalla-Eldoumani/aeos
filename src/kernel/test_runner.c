@@ -28,6 +28,8 @@
 #include <aeos/string.h>
 #include <aeos/stack_guard.h>
 #include <aeos/editor.h>
+#include <aeos/usermode.h>
+#include <aeos/syscall.h>
 
 static uint32_t test_pass_count = 0;
 static uint32_t test_fail_count = 0;
@@ -415,6 +417,71 @@ static void test_mmu_ttbr1_alias(void)
 }
 
 /* ============================================================================
+ * EL0 scenarios — the headless proof of FEAT-02. The TEST kernel_main does NOT
+ * init the GIC/timer, so an EL0 run with a DAIF-masked SPSR (0x3C0) has no
+ * preemption to fight: the one-shot is fully deterministic. scheduler_init ran
+ * above, so process_current() is non-NULL and the user-page mapper is ready.
+ * ============================================================================ */
+
+static void test_el0_roundtrip(void)
+{
+    /* FEAT-02 criteria 2 + 3. The payload runs at EL0, issues svc #0 for
+     * SYS_GETPID (the observable side effect) then svc #0 for SYS_EXIT, whose
+     * one-shot branch calls usermode_return - restoring the kernel context and
+     * ret'ing back HERE, into the line after usermode_run_payload. If the exit
+     * had instead eret'd back to EL0 (RESEARCH Pitfall 4), control would never
+     * return and the runner would hang to the 30s timeout = a detected failure. */
+    volatile int returned = 0;
+    uint64_t expected_pid = process_current()->pid;
+
+    usermode_run_payload(USERMODE_PAYLOAD_ROUNDTRIP);
+
+    /* Control returned via usermode_return -> the kernel regained control. */
+    returned = 1;
+
+    if (returned != 1) {
+        test_fail("el0_roundtrip", "kernel did not regain control after exit svc");
+        return;
+    }
+
+    /* The getpid svc must have reached syscall_handler -> sys_getpid_impl. */
+    if (syscall_test_last_getpid() != expected_pid) {
+        test_fail("el0_roundtrip", "getpid svc side effect not observed");
+        return;
+    }
+
+    test_pass("el0_roundtrip");
+}
+
+static void test_el0_priv_trap(void)
+{
+    /* FEAT-02 criterion 1. The payload executes msr daifset, #2 at EL0. With
+     * SCTLR_EL1.UMA=0 (the reset value the kernel never changes) that traps to
+     * EL1 with ESR EC=0x18 (RESEARCH Pitfall 3), landing in el0_aarch64_sync's
+     * non-SVC branch -> handle_el0_sync. With the capture armed, the seam records
+     * the EC and usermode_returns instead of halting, so control comes back here. */
+    usermode_arm_trap_capture();
+
+    usermode_run_payload(USERMODE_PAYLOAD_PRIV_TRAP);
+
+    /* If the capture flag is clear the trap did not occur (UMA set, or the wrong
+     * instruction): the payload's fail-path exit svc returned instead. */
+    if (!usermode_trap_was_captured()) {
+        test_fail("el0_priv_trap", "no trap captured (privileged msr did not fault)");
+        return;
+    }
+
+    uint32_t ec = usermode_captured_ec();
+    if (ec != 0x18) {
+        /* A different EC means a different fault than the expected DAIF trap. */
+        test_fail("el0_priv_trap", "captured EC was not 0x18");
+        return;
+    }
+
+    test_pass("el0_priv_trap");
+}
+
+/* ============================================================================
  * Framebuffer scenarios — exercise the graphics path (init, fill, getpixel)
  * end-to-end without booting the full GUI. The test runner doesn't have a
  * VirtIO GPU attached, but `fb_init` allocates an in-memory framebuffer and
@@ -670,6 +737,13 @@ void kernel_main(void *dtb_addr)
      * suites so a mapping failure surfaces early. */
     test_mmu_enabled();
     test_mmu_ttbr1_alias();
+
+    /* EL0 round trip + privileged-instruction trap (FEAT-02). vmm_init and
+     * scheduler_init ran above, so the user-page mapper and process_current()
+     * are available; no GIC/timer here means the DAIF-masked one-shot is
+     * deterministic. */
+    test_el0_roundtrip();
+    test_el0_priv_trap();
 
     /* VFS tests need a mounted ramfs. If setup fails, skip the VFS suite
      * outright and record one failure so the run is correctly marked bad. */
