@@ -76,6 +76,10 @@ typedef struct process {
 } process_t;
 ```
 
+### Name Ownership
+
+The PCB owns its name. `process_create` copies the caller's `name` into the fixed `char name[PROCESS_NAME_MAX]` buffer (N = 32) with `strncpy` plus an explicit terminating NUL, rather than storing the caller's `const char *`. A caller may therefore pass a transient string; a name of 31 characters or more is truncated to fit, and a NULL name is stored as `(unnamed)`. Because the bytes live in the PCB, `ps` reads PCB-owned memory and never dereferences a freed or out-of-scope caller pointer. This closed the SEC-07 audit item.
+
 ## Process States
 
 - **READY**: In ready queue, waiting to run
@@ -252,8 +256,8 @@ There's no mechanism to clean up zombie processes. They remain in memory forever
 ### Single-Threaded Initialization
 The current implementation assumes single-threaded execution during initialization. Race conditions could occur if multiple CPUs were active.
 
-### Verbose Debug Output
-Process creation prints extensive debug output (lettered progress indicators). This was left in for debugging stuck situations.
+### No PID Lookup
+`process_get_by_pid` was removed. There is no global PCB table, only the run queue and `current_process`, and nothing called the lookup. A future command that needs PID lookup (for example `kill`) should add a parallel list with its own field on `process_t` rather than reusing the run queue's `next` pointer.
 
 ## Testing
 
