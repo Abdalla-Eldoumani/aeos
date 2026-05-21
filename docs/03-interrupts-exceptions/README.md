@@ -51,7 +51,7 @@ On a clobbered sentinel `stack_guard_check` reports a `klog_fatal` naming the PC
   - IRQ/FIQ routing
   - Exception counters for debugging
 
-The synchronous-exception vector exists and decodes the SVC class, but the kernel's own syscalls do not trap through it. The syscall dispatcher is a direct C function-call table lookup (see Section 05). The SVC path is reserved for future EL0 userspace work and is not the current syscall mechanism.
+The kernel's own syscalls do not trap through the synchronous vector - they are direct C function-call table lookups (see Section 05). But the EL0 synchronous vector entry (`el0_aarch64_sync`, VBAR+0x400) DOES decode `svc` from EL0 and route it through the same dispatcher: this is the Phase 5 privilege boundary. Its non-SVC branch handles trapped privileged instructions from EL0 (for example `msr daifset`, which faults with EC=0x18) via a seam that records the fault for tests and otherwise reports it through the normal halting path.
 
 ### Exception Handlers (exceptions.c)
 - **Location**: `src/interrupts/exceptions.c`

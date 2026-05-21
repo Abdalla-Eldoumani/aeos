@@ -47,9 +47,9 @@ uint64_t syscall_handler(uint64_t syscall_num,
 }
 ```
 
-**Called From**: Kernel code directly, with the syscall number passed as the first argument. There is no SVC trap and no exception-vector entry on this path. Everything runs at EL1, so the handler is reached as a plain C call.
+**Called From**: Two places. (1) EL1 kernel code directly, with the syscall number as the first argument - a plain C call, no trap. (2) The EL0 svc path: `el0_aarch64_sync` (VBAR+0x400) decodes `svc` from EL0, pulls the number (x8) and arguments (x0-x5) from the saved register frame, and calls this same handler. The two paths share the dispatcher; the EL0 path was added in Phase 5 alongside the direct-call path.
 
-**Arguments**: Passed straight through as C function arguments. The dispatcher does not read a saved register frame because nothing trapped to get here. A bad number (out of range or an unimplemented slot whose table entry is NULL) returns -1.
+**Arguments**: On the EL1 direct-call path they are passed straight through as C function arguments. On the EL0 path the vector reads them from the saved register frame before the call. Either way a bad number (out of range or an unimplemented slot whose table entry is NULL) returns -1.
 
 ### Kernel-Side Wrappers
 
@@ -198,9 +198,9 @@ svc #0                  /* Trigger SVC exception */
 
 **SVC Immediate**: The `#0` is ignored on ARMv8. The syscall number would come from x8.
 
-### Exception Vector Handling (future)
+### Exception Vector Handling (the EL0 svc path)
 
-A future EL0 path would add SVC decoding to the synchronous vector in `vectors.asm`: recognize the SVC class in ESR_EL1, pull the syscall number and arguments from the saved register frame, call `syscall_handler`, and store the return value back into the saved x0 before `eret`. The current synchronous vector decodes the exception class for diagnostics only and does not run any of this; the kernel reaches `syscall_handler` by a direct call instead.
+The EL0 svc path is live as of Phase 5. `el0_aarch64_sync` in `vectors.asm` recognizes the SVC class in ESR_EL1, pulls the syscall number (x8) and arguments (x0-x5) from the saved register frame, calls `syscall_handler`, and stores the return value back into the saved x0 before `eret`. The `eret` returns to EL0 because the saved SPSR is EL0t. The EL1 direct-call path still reaches `syscall_handler` without a trap; the two coexist.
 
 ## Error Handling
 

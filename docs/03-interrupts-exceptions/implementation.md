@@ -81,7 +81,7 @@ SP+0:   x0-x29 (pairs)
 
 ### Synchronous Exceptions and the SVC Class
 
-The synchronous vector decodes the exception class from ESR_EL1 to triage faults (data abort, instruction abort, SP alignment, SVC). The SVC class (0x15) is recognized for diagnostics, but the kernel's syscalls do not trap through this vector. `syscall(num, args...)` is a direct C function-call table lookup; there is no privilege boundary at EL1 to cross, so there is no SVC trap on the live path. See Section 05 for the dispatcher.
+The synchronous vector decodes the exception class from ESR_EL1 to triage faults (data abort, instruction abort, SP alignment, SVC). The kernel's own EL1 syscalls do not trap through this vector: `syscall(num, args...)` is a direct C function-call table lookup, since there is no EL1->EL1 privilege boundary to cross. The EL0 entry is different - see "SVC from EL0" below.
 
 ```assembly
 el1_spx_sync:
@@ -98,7 +98,9 @@ el1_spx_sync:
     eret
 ```
 
-A future EL0 userspace would add SVC-trap handling here: extract the syscall number and arguments from the saved register frame and call into the dispatcher. That is forward work, not current behavior.
+### SVC from EL0
+
+`el0_aarch64_sync` (VBAR+0x400, lower-EL AArch64 synchronous) carries the svc-decode block, a verbatim copy of the proven `el1_spx_sync` decode: check ESR_EL1 EC=0x15, pull the syscall number (x8) and arguments (x0-x5) from the saved register frame, `bl syscall_handler`, store the return value back into the frame's x0 slot, then `RESTORE_CONTEXT; eret`. The `eret` returns to EL0 because the saved SPSR is EL0t, not because of anything in the handler. The non-SVC branch routes through `handle_el0_sync` (in `src/proc/usermode.c`): a trapped privileged instruction from EL0 (such as `msr daifset`, EC=0x18) is recorded for the test seam when armed, and otherwise reported through the halting `handle_exception`. This is the Phase 5 EL0/EL1 boundary; see Section 05.
 
 ### Exception Counters
 

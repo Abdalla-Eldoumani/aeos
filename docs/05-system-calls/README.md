@@ -2,29 +2,29 @@
 
 ## Overview
 
-This section implements the system call interface for AEOS. It uses direct function calls, not SVC instructions, because all code runs at EL1 (kernel mode) and there is no privilege boundary to cross.
+This section implements the system call interface for AEOS. There are two entry paths into one dispatcher. Kernel code at EL1 makes a syscall as a direct C call (no privilege boundary to cross). An EL0 payload makes a syscall the architected way, with an `svc` trap into the EL1 vector table; that path was added in Phase 5 (FEAT-02) and is exercised and tested, though by a one-shot in-kernel payload rather than a scheduled process.
 
 ## Implementation Approach
 
-### Direct Function Calls
+### Direct Function Calls (the EL1 path)
 A syscall is a table lookup followed by a direct C call. `syscall(num, args...)` validates `num` against the table size, fetches `syscall_table[num]`, and calls the handler as an ordinary function. The kernel-side wrappers (`sys_write`, `sys_getpid`, and so on) call the implementations directly:
 ```c
 sys_write(STDOUT_FILENO, "Hello\n", 6);
 ```
 
-There is no SVC trap on the live path. The exception vectors decode the SVC class for diagnostics, but no syscall flows through them today.
+The GUI and shell use this path. It stays because the kernel proper runs at EL1.
 
-### Future: SVC for EL0
-If userspace at EL0 is added later, the dispatcher would move into the synchronous exception handler in `src/interrupts/exceptions.c` and pull arguments from the saved register frame:
+### SVC from EL0 (the trapped path)
+An EL0 payload sets the syscall number in x8 and arguments in x0-x5 and executes `svc #0`:
 ```assembly
-mov x8, #SYS_WRITE
-mov x0, #1          /* STDOUT_FILENO */
-ldr x1, =message
-mov x2, #6
+mov x8, #SYS_GETPID
 svc #0
 ```
+The instruction traps to `el0_aarch64_sync` (`src/interrupts/vectors.asm`, VBAR+0x400), which decodes ESR_EL1 EC=0x15, pulls x8/x0-x5 out of the saved register frame, and calls the SAME `syscall_handler`. The return value is written back into the frame's x0 slot and the handler `eret`s to EL0. The dispatcher is shared: the EL0 svc path was added alongside the direct-call path, not as a replacement.
 
-That is future work, not the current mechanism.
+The privilege boundary is real. The EL0 code page is mapped EL0-accessible (AP=01) while kernel pages stay AP=00 (EL0 no-access), so EL0 faults on any kernel address; a privileged instruction from EL0 (`msr daifset`) traps to EL1 with ESR EC=0x18 rather than executing. `make test` proves both directions: `test_el0_roundtrip` (the getpid+exit round trip returns control to the kernel and the getpid svc is observed) and `test_el0_priv_trap` (the privileged-instruction trap is EC=0x18).
+
+What is NOT done yet: a scheduled EL0 process loaded from a file, per-section W^X, and user-pointer validation in syscalls (the one-shot payload passes no user pointers). Those are Phase 6.
 
 ## Components
 
@@ -99,17 +99,20 @@ uint64_t syscall_handler(uint64_t syscall_num,
 static uint64_t sys_exit_impl(uint64_t arg0, ...)
 {
     int status = (int)arg0;
-    process_t *proc = process_current();
 
-    klog_info("sys_exit: PID %u exiting with status %d",
-              (uint32_t)proc->pid, status);
+    /* EL0 one-shot: hand control back to the kernel instead of the vector
+     * tail's eret (which would return to EL0). Never returns. */
+    if (el0_oneshot_active()) {
+        usermode_return();
+    }
 
+    /* Kernel-thread path, unchanged. */
     process_exit();  /* Never returns */
     return 0;
 }
 ```
 
-Terminates the calling process with given exit status.
+Terminates the caller. For the EL0 one-shot it returns control to the kernel via `usermode_return` (restoring the saved kernel context and abandoning the svc exception frame); for a kernel thread it calls `process_exit`.
 
 ### sys_write
 ```c
@@ -219,11 +222,11 @@ Tracks:
 
 ## Known Issues
 
-### No SVC Dispatch
-There is no SVC trap on the live path; syscalls are direct function calls. The synchronous vector decodes the SVC class for diagnostics, but no syscall flows through it. SVC-based dispatch is reserved for the future EL0 work described above.
+### No user-pointer validation
+Syscalls do not range-check user-supplied pointers before dereferencing them at EL1. The EL0 one-shot payload passes no pointers (getpid, exit, daifset take none), so this is not exercised yet, but any future syscall that takes a user buffer must validate it with `IS_USER_ADDR` first. Phase 6.
 
-### No User Space
-Without user space (EL0), a trap-based syscall boundary is not needed. The numeric dispatcher and table exist so that adding EL0 later is a smaller change.
+### No scheduled EL0 process
+EL0 execution today is a one-shot in-kernel payload entered from `kernel_main`, not a process loaded from a file and scheduled. The mechanism (entry trampoline, svc dispatch, user-page mapping) is in place; loading an ELF and running it under the scheduler is Phase 6.
 
 ### Limited Error Codes
 System calls return -1 or 0 for errors, not errno codes. No global errno variable.
@@ -266,7 +269,8 @@ assert(pid1 != pid2);
 
 ## Future Enhancements
 
-- User space (EL0) with proper SVC dispatch
+- A scheduled EL0 process loaded from a file (the svc dispatch and entry path already exist; the ELF loader and per-process scheduling are next)
+- User-pointer validation and per-section W^X for the EL0 path
 - More syscalls: open, close, read, fork, exec, wait
 - errno-style error reporting
 - Syscall tracing and auditing

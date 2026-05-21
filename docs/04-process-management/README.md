@@ -36,10 +36,9 @@ This section implements preemptive multitasking for AEOS with a round-robin sche
 ## Process Model
 
 ### Kernel Threads
-- All processes run at EL1 (kernel mode)
-- No user space (EL0) support
-- No memory protection between processes
-- All code shares the same address space
+- Scheduled processes run at EL1 (kernel mode); there is no scheduled EL0 process yet
+- EL0 IS reachable as a one-shot in-kernel payload (the Phase 5 privilege boundary): it runs at EL0, reaches the kernel only via trapped `svc`, and a privileged instruction from EL0 faults to EL1. Running an EL0 process loaded from a file under the scheduler is Phase 6
+- No memory protection between EL1 kernel threads; they share one address space
 
 ### Preemptive Scheduling
 - Timer tick at 100 Hz triggers `scheduler_tick()`

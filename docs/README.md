@@ -43,7 +43,7 @@ System call interface and implementation.
 - **Location**: `src/syscall/`
 - **What it does**: Provides system call dispatcher and implementations for exit, write, read, getpid, and yield
 - **Key concepts**: System call table, argument passing, direct function calls
-- **Note**: Uses direct function calls instead of SVC exceptions (appropriate for EL1 kernel threads)
+- **Note**: EL1 kernel threads use direct function calls; an EL0 payload reaches the same dispatcher through a trapped `svc` (the Phase 5 privilege boundary, tested)
 
 ### 6. [Virtual Filesystem](./06-virtual-filesystem/)
 File system abstraction and ramfs implementation.
@@ -112,9 +112,9 @@ Each section directory contains:
 
 1. **Preemptive Scheduling**: Round-robin scheduling with 100 Hz timer tick for time slicing
 2. **FIQ-Based Timer**: Timer interrupts route as FIQ on QEMU virt; handled via direct timer status checking
-3. **Direct System Calls**: System calls use function calls instead of SVC exceptions
+3. **Two syscall paths**: EL1 kernel code uses direct function calls; an EL0 payload traps in via `svc` to the same dispatcher (Phase 5)
 4. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
-5. **Kernel Mode Only**: All code runs at EL1, no user space (EL0)
+5. **EL1 kernel with a tested EL0 boundary**: the kernel runs at EL1; a one-shot in-kernel payload runs at EL0 reachable only via trapped `svc`, with a privileged instruction from EL0 faulting to EL1 (Phase 5). No scheduled-from-file userspace or W^X yet
 6. **VirtIO Legacy Mode**: GPU and input use VirtIO MMIO with legacy (v1) protocol
 7. **Event-Driven GUI**: Mouse/keyboard events queued and processed in main loop
 8. **Direct-Compositing Window Manager**: Windows draw straight into the main framebuffer in z-order from `wm_redraw`; no per-window backbuffers
