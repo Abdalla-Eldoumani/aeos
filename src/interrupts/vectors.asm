@@ -80,8 +80,13 @@ include(`src/boot/macros.m4')
 /* ============================================================================
  * Exception vector table
  * Must be aligned to 2KB (0x800)
- * Each entry is 128 bytes (0x80)
- * Total size: 16 entries * 128 bytes = 2KB
+ * Each entry is 128 bytes (0x80) and holds a single branch to its handler
+ * body, which lives below the table. Keeping the slots to one instruction is
+ * what guarantees the architectural layout: VBAR+0x000/0x080/.../0x780 each
+ * map to exactly one of the 16 entries. (A previous version inlined the full
+ * handler bodies here; they exceeded 0x80, misaligning the table so that e.g.
+ * VBAR+0x280, the EL1h IRQ slot, fell mid-body in the SP0 FIQ handler.)
+ * Total size: 16 entries * 128 bytes = 2KB.
  * ============================================================================ */
 
     .section .text.vectors
@@ -93,6 +98,74 @@ exception_vector_table:
  * Current EL with SP0
  * ---------------------------------------------------------------------------- */
     .balign 128
+    b el1_sp0_sync          /* VBAR + 0x000 */
+
+    .balign 128
+    b el1_sp0_irq           /* VBAR + 0x080 */
+
+    .balign 128
+    b el1_sp0_fiq           /* VBAR + 0x100 */
+
+    .balign 128
+    b el1_sp0_serror        /* VBAR + 0x180 */
+
+/* ----------------------------------------------------------------------------
+ * Current EL with SPx
+ * ---------------------------------------------------------------------------- */
+    .balign 128
+    b el1_spx_sync          /* VBAR + 0x200 */
+
+    .balign 128
+    b el1_spx_irq           /* VBAR + 0x280 */
+
+    .balign 128
+    b el1_spx_fiq           /* VBAR + 0x300 */
+
+    .balign 128
+    b el1_spx_serror        /* VBAR + 0x380 */
+
+/* ----------------------------------------------------------------------------
+ * Lower EL using AArch64
+ * ---------------------------------------------------------------------------- */
+    .balign 128
+    b el0_aarch64_sync      /* VBAR + 0x400 */
+
+    .balign 128
+    b el0_aarch64_irq       /* VBAR + 0x480 */
+
+    .balign 128
+    b el0_aarch64_fiq       /* VBAR + 0x500 */
+
+    .balign 128
+    b el0_aarch64_serror    /* VBAR + 0x580 */
+
+/* ----------------------------------------------------------------------------
+ * Lower EL using AArch32
+ * ---------------------------------------------------------------------------- */
+    .balign 128
+    b el0_aarch32_sync      /* VBAR + 0x600 */
+
+    .balign 128
+    b el0_aarch32_irq       /* VBAR + 0x680 */
+
+    .balign 128
+    b el0_aarch32_fiq       /* VBAR + 0x700 */
+
+    .balign 128
+    b el0_aarch32_serror    /* VBAR + 0x780 */
+
+/* ============================================================================
+ * Exception handler bodies
+ *
+ * Relocated below the 2KB table so the table stays exactly 16 * 0x80. The
+ * .balign 2048 closes the table at exactly base+0x800, so no handler-body code
+ * sits inside the architectural 2KB vector window. Each body is reached by the
+ * matching branch stub above. The logic is unchanged from when it lived inline
+ * in the table slots: same SAVE_CONTEXT/RESTORE_CONTEXT frame, same ESR SVC
+ * decode, same handle_* dispatch and exception_counters bookkeeping.
+ * ============================================================================ */
+
+    .balign 2048
 el1_sp0_sync:
     SAVE_CONTEXT
 
@@ -134,7 +207,7 @@ el1_sp0_sync:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_sp0_irq:
     SAVE_CONTEXT
 
@@ -153,7 +226,7 @@ el1_sp0_irq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_sp0_fiq:
     SAVE_CONTEXT
 
@@ -165,7 +238,7 @@ el1_sp0_fiq:
     str x1, [x0, #16]       /* Store back */
     ldp x0, x1, [sp], #16
 
-    /* Handle FIQ (timer interrupt on QEMU virt) */
+    /* Handle FIQ */
     mov x0, #0
     mov x1, #2          /* exception_type = FIQ */
     mov x2, sp
@@ -173,7 +246,7 @@ el1_sp0_fiq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_sp0_serror:
     SAVE_CONTEXT
     mov x0, #0
@@ -183,10 +256,7 @@ el1_sp0_serror:
     RESTORE_CONTEXT
     eret
 
-/* ----------------------------------------------------------------------------
- * Current EL with SPx
- * ---------------------------------------------------------------------------- */
-    .balign 128
+    .balign 4
 el1_spx_sync:
     SAVE_CONTEXT
 
@@ -231,7 +301,7 @@ el1_spx_sync:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_spx_irq:
     SAVE_CONTEXT
 
@@ -250,7 +320,7 @@ el1_spx_irq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_spx_fiq:
     SAVE_CONTEXT
 
@@ -262,7 +332,7 @@ el1_spx_fiq:
     str x1, [x0, #48]       /* Store back */
     ldp x0, x1, [sp], #16
 
-    /* Handle FIQ (timer interrupt on QEMU virt) */
+    /* Handle FIQ */
     mov x0, #1
     mov x1, #2          /* exception_type = FIQ */
     mov x2, sp
@@ -270,7 +340,7 @@ el1_spx_fiq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el1_spx_serror:
     SAVE_CONTEXT
     mov x0, #1
@@ -280,10 +350,7 @@ el1_spx_serror:
     RESTORE_CONTEXT
     eret
 
-/* ----------------------------------------------------------------------------
- * Lower EL using AArch64
- * ---------------------------------------------------------------------------- */
-    .balign 128
+    .balign 4
 el0_aarch64_sync:
     SAVE_CONTEXT
 
@@ -334,7 +401,7 @@ el0_aarch64_sync:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch64_irq:
     SAVE_CONTEXT
     mov x0, #2
@@ -344,7 +411,7 @@ el0_aarch64_irq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch64_fiq:
     SAVE_CONTEXT
     mov x0, #2
@@ -354,7 +421,7 @@ el0_aarch64_fiq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch64_serror:
     SAVE_CONTEXT
     mov x0, #2
@@ -364,10 +431,7 @@ el0_aarch64_serror:
     RESTORE_CONTEXT
     eret
 
-/* ----------------------------------------------------------------------------
- * Lower EL using AArch32
- * ---------------------------------------------------------------------------- */
-    .balign 128
+    .balign 4
 el0_aarch32_sync:
     SAVE_CONTEXT
     mov x0, #3          /* exception_source = 3 */
@@ -377,7 +441,7 @@ el0_aarch32_sync:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch32_irq:
     SAVE_CONTEXT
     mov x0, #3
@@ -387,7 +451,7 @@ el0_aarch32_irq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch32_fiq:
     SAVE_CONTEXT
     mov x0, #3
@@ -397,7 +461,7 @@ el0_aarch32_fiq:
     RESTORE_CONTEXT
     eret
 
-    .balign 128
+    .balign 4
 el0_aarch32_serror:
     SAVE_CONTEXT
     mov x0, #3
