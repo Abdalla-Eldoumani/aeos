@@ -45,6 +45,7 @@ extern char _kernel_start[];
 #define DESC_TYPE_TABLE 0x3ULL          /* bits[1:0]=0b11: L1/L2 table */
 #define DESC_TYPE_PAGE  0x3ULL          /* bits[1:0]=0b11: L3 page */
 #define DESC_AP_EL0RW   (1ULL << 6)     /* AP[2:1]=0b01: EL1 RW / EL0 RW */
+#define DESC_AP_EL0RO   (3ULL << 6)     /* AP[2:1]=0b11: EL1 RO / EL0 RO */
 
 /* 4KB-aligned next-table / page output-address mask (bits [47:12]). */
 #define TABLE_OA_MASK   0x0000FFFFFFFFF000ULL
@@ -166,10 +167,13 @@ void vmm_init(void)
 
 /**
  * Carve one 4KB EL0 page into the free L1 index for uva by building an
- * L1->L2->L3 chain. The leaf gets AP=01 (EL0 RW), AF, Inner-Shareable, Normal
- * memory, and PXN=1 always; UXN is set only for a data/stack page so a code
- * page (USER_EXEC) stays EL0-fetchable. Writes only ttbr0_l1[L1_INDEX(uva)]
- * (index 2 for 0x80000000) plus the user_l2/user_l3 leaves - never index 0/1.
+ * L1->L2->L3 chain. The leaf gets AF, Inner-Shareable, Normal memory, and
+ * PXN=1 always; the AP and UXN bits are chosen by class: USER_TEXT gets AP=11
+ * (EL0 read-only) so a loaded code page cannot be rewritten by EL0 (per-segment
+ * W^X), while USER_EXEC and USER_DATA keep AP=01 (EL0 RW). UXN is set only for
+ * a data/stack page (USER_DATA) so a code page (USER_EXEC/USER_TEXT) stays EL0-
+ * fetchable. Writes only ttbr0_l1[L1_INDEX(uva)] (index 2 for 0x80000000) plus
+ * the user_l2/user_l3 leaves - never index 0/1.
  */
 void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot)
 {
@@ -181,14 +185,16 @@ void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot)
     user_l2[l2i] = ((uint64_t)&user_l3 & TABLE_OA_MASK) | DESC_TYPE_TABLE;
 
     /* L3 page leaf: PA + permissions. PXN=1 always (EL1 never executes user
-     * memory); UXN=1 only for data/stack so a code page can be fetched at EL0. */
+     * memory). AP=11 (EL0 read-only) for USER_TEXT so a loaded code page is not
+     * EL0-writable (per-segment W^X); AP=01 (EL0 RW) for USER_EXEC/USER_DATA.
+     * UXN=1 only for data/stack so a code page can be fetched at EL0. */
     uint64_t l3i = (uva >> 12) & 0x1FFULL;
     uint64_t leaf = (pa & TABLE_OA_MASK)
                   | DESC_AF
                   | DESC_SH_INNER
-                  | DESC_AP_EL0RW
                   | ((uint64_t)ATTRIDX_NORMAL << 2)
                   | DESC_TYPE_PAGE;
+    leaf |= (prot == USER_TEXT) ? DESC_AP_EL0RO : DESC_AP_EL0RW;
     leaf |= DESC_PXN;
     if (prot == USER_DATA) {
         leaf |= DESC_UXN;
