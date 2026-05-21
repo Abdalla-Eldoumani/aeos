@@ -323,11 +323,14 @@ el0_aarch64_sync:
     RESTORE_CONTEXT
     eret
 
-1:  /* Not an SVC (e.g. a trapped privileged instruction) - report it. */
+1:  /* Not an SVC (e.g. a trapped privileged instruction). Route through
+     * handle_el0_sync: it records the EC and returns to the kernel when the
+     * TEST_BUILD trap-capture seam is armed, and forwards to the halting
+     * handle_exception otherwise (production fault behavior unchanged). */
     mov x0, #2          /* exception_source = 2 (EXC_FROM_LOWER_A64) */
     mov x1, #0          /* exception_type = SYNC */
     mov x2, sp
-    bl handle_exception
+    bl handle_el0_sync
     RESTORE_CONTEXT
     eret
 
