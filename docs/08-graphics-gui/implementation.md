@@ -2,7 +2,7 @@
 
 > The snippets below are simplified illustrations. The actual behavior in
 > `src/kernel/{wm,window,desktop,notify,bootscreen}.c` is the source of
-> truth — newer additions (deferred close animation, toast compositing,
+> truth. Newer additions (deferred close animation, toast compositing,
 > Alt+Tab focus cycle, `wm_request_redraw` for live-content apps) are
 > documented in the in-tree `CLAUDE.md` files.
 
@@ -242,7 +242,80 @@ void wm_run(void)
 }
 ```
 
-`wm_update_display` itself redraws when `wm.needs_redraw` is true OR `notify_active()` is true, then calls `notify_render` to composite toast notifications above the windows but below the cursor before pushing the framebuffer to the GPU.
+`wm_update_display` itself redraws when `wm.needs_redraw` is true OR `notify_active()` is true, then calls `notify_render` to composite toast notifications above the windows but below the cursor before pushing the framebuffer to the GPU. It calls `wm_update_display` at least every 33 ms regardless of `needs_redraw`, so animation and toast frames keep advancing.
+
+### Input to Repaint Path
+
+A single click travels through these steps inside one `wm_run` iteration:
+
+1. `event_poll` and `virtio_input_poll` drain the input devices into the
+   `event.c` queue.
+2. `event_pop` hands each queued event to `wm_handle_event`.
+3. A button-down event routes to `handle_mouse_button`, which finds the hit
+   window with `wm_window_at`, focuses it with `wm_focus_window`, and calls
+   `win->on_mouse` with window-relative coordinates (`mouse->x - win->client_x`,
+   `mouse->y - win->client_y`).
+4. The app updates its own state and calls `window_invalidate`, which sets the
+   window's `WINDOW_FLAG_DIRTY` and `wm.needs_redraw`.
+5. `wm_update_display` sees `needs_redraw`, calls `wm_redraw` to composite the
+   desktop and every visible window, draws toasts and the software cursor, and
+   flushes to the GPU.
+
+`wm_redraw` calls `window_draw` for every visible window, and `window_draw`
+calls each window's `on_paint` unconditionally. The paint pass is NOT gated on
+`WINDOW_FLAG_DIRTY`, so once a frame is requested every visible app repaints its
+client area from current state. The dirty flag is cleared at the end of
+`window_draw` but does not decide whether `on_paint` runs.
+
+### Open and Close Animation Internals
+
+```c
+/* In window_draw: slide-up + fade-in while the open animation runs. */
+open_t = anim_progress_q8(now, win->open_anim_start_ms, WINDOW_OPEN_ANIM_MS);
+if (win->open_anim_start_ms != 0 && open_t < ANIM_Q8_ONE) {
+    eased = ease_out_cubic_q8(open_t);
+    slide_offset = WINDOW_OPEN_SLIDE_PX - ((WINDOW_OPEN_SLIDE_PX * eased) >> 8);
+    fade_alpha = (uint32_t)(ANIM_Q8_ONE - eased);
+}
+```
+
+`wm_register_window` stamps `open_anim_start_ms`. `window_draw` slides the draw
+position down by `WINDOW_OPEN_SLIDE_PX` and eases it up over
+`WINDOW_OPEN_ANIM_MS`, blending a `THEME_BG_DEEP` overlay (`fb_blend_rect`) at
+`fade_alpha`. The original coordinates are restored before hit-testing so clicks
+still land on the settled position.
+
+Close is deferred. `handle_mouse_button` (close button) and `handle_key`
+(Alt+F4) set `WINDOW_FLAG_CLOSING` and stamp `close_anim_start_ms` instead of
+tearing the window down. `reap_closing_windows`, called each `wm_run` iteration,
+clears the flag and invokes `on_close` only once
+`now - close_anim_start_ms >= WINDOW_CLOSE_ANIM_MS`. Events on a closing window
+are ignored so the fade cannot be interrupted.
+
+### Global Shortcut Handling
+
+`handle_key` intercepts three shortcuts before dispatching to the focused
+window:
+
+```c
+if (key->keycode == KEY_TAB && (key->modifiers & MOD_ALT)) {
+    window_t *next = next_focus_candidate(wm.focused);
+    wm.alt_tab_active = true;
+    focus_no_raise(next);          /* raise happens on Alt release */
+    return;
+}
+if (key->keycode == KEY_F4 && (key->modifiers & MOD_ALT)) {
+    /* Route the focused window through the close fade-out. */
+}
+if (key->keycode == KEY_ESCAPE) {
+    /* Dismiss start menu, then notify_dismiss_all, then fall through. */
+}
+```
+
+Alt+Tab cycles focus through visible windows with `next_focus_candidate` /
+`focus_no_raise` and raises on Alt release; Alt+F4 reuses the deferred-close
+fade; Esc dismisses the start menu and force-fades active toasts before the key
+reaches the focused window.
 
 ### Focus Management
 
@@ -293,14 +366,11 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
         if (win) {
             wm_focus_window(win);
 
-            /* Check close button */
+            /* Check close button: defer the teardown, run the fade first. */
             if (window_in_close_button(win, mouse->x, mouse->y)) {
-                if (win->on_close) {
-                    win->on_close(win);
-                } else {
-                    wm_unregister_window(win);
-                    window_destroy(win);
-                }
+                win->flags |= WINDOW_FLAG_CLOSING;
+                win->close_anim_start_ms = timer_get_uptime_ms();
+                wm.needs_redraw = true;
                 return;
             }
 
@@ -333,7 +403,7 @@ static void handle_mouse_button(mouse_event_t *mouse, bool pressed)
 }
 ```
 
-Click handling checks windows from top to bottom. If no window is hit, the click goes to the desktop or taskbar.
+Click handling checks windows from top to bottom. A close-button hit marks the window `WINDOW_FLAG_CLOSING` and lets the fade-out run; `reap_closing_windows` invokes `on_close` later. A non-decoration hit forwards to `win->on_mouse` with window-relative coordinates. If no window is hit, the click goes to the desktop or taskbar. The real handler also ignores events on a window already flagged `WINDOW_FLAG_CLOSING`.
 
 ### Cursor Rendering
 
@@ -397,7 +467,7 @@ typedef struct window {
 } window_t;
 ```
 
-Windows have both total dimensions (including decorations) and client area dimensions. Callbacks allow custom behavior. Painting goes directly to the main framebuffer in z-order from `wm_redraw` — there is no per-window backbuffer.
+Windows have both total dimensions (including decorations) and client area dimensions. Callbacks allow custom behavior. Painting goes directly to the main framebuffer in z-order from `wm_redraw`; there is no per-window backbuffer.
 
 ### Client Area Calculation
 
@@ -621,9 +691,14 @@ Each icon has a launch callback that creates the corresponding application.
 
 ## Performance Considerations
 
-### Dirty Region Optimization
+### Redraw Gating
 
-The `needs_redraw` flag in the window manager prevents unnecessary full redraws. Only when events modify the display state is the flag set.
+The `needs_redraw` flag decides whether a `wm_run` tick repaints at all, not which
+windows repaint. When it is set (or `notify_active()` is true, or 33 ms have
+passed), `wm_redraw` runs `window_draw` for every visible window and each
+`on_paint` fires unconditionally. There is no per-window dirty-region clipping;
+the gate is whole-frame. `window_invalidate` and `wm_request_redraw` set the
+flag; live-content apps set it every tick to keep animating.
 
 ### Frame Rate Limiting
 
