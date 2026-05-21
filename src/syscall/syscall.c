@@ -10,6 +10,7 @@
 #include <aeos/kprintf.h>
 #include <aeos/uart.h>
 #include <aeos/usermode.h>
+#include <aeos/exec.h>
 #include <aeos/types.h>
 
 /* System call statistics */
@@ -105,6 +106,36 @@ uint64_t syscall_handler(uint64_t syscall_num,
     return syscall_table[syscall_num](arg0, arg1, arg2, arg3, arg4, arg5);
 }
 
+/**
+ * True iff [ptr, ptr+len) lies wholly inside the currently-mapped EL0 window
+ * [usermode_map_base(), usermode_map_end()). Checks the whole range, not just
+ * the start (RESEARCH Pitfall 4), and rejects the ptr+len unsigned overflow.
+ * len==0 is allowed (no dereference). Callers gate this on el0_oneshot_active()
+ * so the EL1 direct-call path (kernel pointers) is never range-checked.
+ */
+static bool is_user_range(uint64_t ptr, uint64_t len)
+{
+    uint64_t base = usermode_map_base();
+    uint64_t top  = usermode_map_end();
+
+    if (len == 0) {
+        return true;
+    }
+    if (ptr < base) {
+        return false;
+    }
+    if (ptr >= top) {
+        return false;
+    }
+    if (ptr + len < ptr) {   /* unsigned overflow of the end address */
+        return false;
+    }
+    if (ptr + len > top) {
+        return false;
+    }
+    return true;
+}
+
 /* ============================================================================
  * System Call Implementations
  * ============================================================================ */
@@ -173,6 +204,19 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
     if (fd != STDOUT_FILENO && fd != STDERR_FILENO) {
         klog_error("sys_write: Invalid fd %d", fd);
         return (uint64_t)-1;
+    }
+
+    /* EL0-origin write: the user buffer is attacker-controlled, so reject any
+     * [buf, buf+count) that is not wholly inside the mapped user window before
+     * the kernel dereferences a byte (T-06-07). Gated STRICTLY on the one-shot
+     * flag so the EL1 direct-call path (GUI/shell/test_runner) keeps passing
+     * trusted kernel pointers unchecked. */
+    if (el0_oneshot_active()) {
+        if (!is_user_range((uint64_t)buf, (uint64_t)count)) {
+            klog_error("sys_write: EL0 buffer %p +%u outside mapped user window",
+                       buf, (uint32_t)count);
+            return (uint64_t)-1;
+        }
     }
 
     /* Write each character */
