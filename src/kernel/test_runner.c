@@ -376,6 +376,45 @@ static void test_symbol_lookup_below_first(void)
 }
 
 /* ============================================================================
+ * MMU scenarios — the in-suite proof that the TEST kernel_main enabled the MMU
+ * (vmm_init runs before any scenario). test_mmu_enabled is FEAT-01 criterion 1
+ * (SCTLR_EL1.M readable and set); test_mmu_ttbr1_alias is criterion 3 (the high-
+ * half alias of the kernel image reads identically to the identity pointer).
+ * ============================================================================ */
+
+static void test_mmu_enabled(void)
+{
+    /* Criterion 1: read SCTLR_EL1 and assert the MMU enable bit (M, bit 0) is
+     * set. After vmm_init in kernel_main this is true; if the enable regresses
+     * or vmm_init is dropped from the TEST path, this fails. */
+    uint64_t sctlr;
+    __asm__ volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+    if ((sctlr & 1u) == 0) {
+        test_fail("mmu_enabled", "SCTLR_EL1.M not set");
+        return;
+    }
+    test_pass("mmu_enabled");
+}
+
+static void test_mmu_ttbr1_alias(void)
+{
+    /* Criterion 3: read the first word of the kernel image two ways and compare.
+     * The identity pointer is the TTBR0 view at the physical address; the alias
+     * is the TTBR1 high-half view (VMM_TTBR1_BASE + pa). A match proves the
+     * high-half kernel mapping is live. _kernel_start is declared as an unbounded
+     * array (not a scalar char) so the 4-byte read does not trip
+     * -Werror=array-bounds, the same idiom vmm.c uses. */
+    extern char _kernel_start[];
+    uint64_t pa = (uint64_t)_kernel_start;
+    uint32_t identity = *(volatile uint32_t *)pa;
+    if (identity != vmm_ttbr1_alias_read(pa)) {
+        test_fail("mmu_ttbr1_alias", "high-half read != identity read");
+        return;
+    }
+    test_pass("mmu_ttbr1_alias");
+}
+
+/* ============================================================================
  * Framebuffer scenarios — exercise the graphics path (init, fill, getpixel)
  * end-to-end without booting the full GUI. The test runner doesn't have a
  * VirtIO GPU attached, but `fb_init` allocates an in-memory framebuffer and
@@ -625,6 +664,12 @@ void kernel_main(void *dtb_addr)
     test_sec_stack_guard();
     test_sec_double_free_after_merge();
     test_sec_editor_growth_overflow();
+
+    /* MMU enable proof (vmm_init ran above): assert SCTLR_EL1.M=1 and that the
+     * TTBR1 high-half alias matches the identity read, before the heavier
+     * suites so a mapping failure surfaces early. */
+    test_mmu_enabled();
+    test_mmu_ttbr1_alias();
 
     /* VFS tests need a mounted ramfs. If setup fails, skip the VFS suite
      * outright and record one failure so the run is correctly marked bad. */
