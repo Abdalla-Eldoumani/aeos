@@ -7,11 +7,13 @@ in `docs/` go deeper.
 It describes the kernel as it stands today: a single-address-space AArch64 kernel.
 The MMU is enabled with an identity map plus a high-half alias (described below).
 There is no general userspace and no SMP or networking, and the kernel does not
-yet enforce per-section W^X. The EL0/EL1 privilege boundary itself, however, is
-now established and tested: a minimal in-kernel payload runs at EL0, reaches the
-kernel only through trapped `svc` syscalls, and a privileged instruction from EL0
-faults to EL1 (see the EL0/EL1 boundary section). A scheduled EL0 process loaded
-from a file, W^X, and user-pointer validation are the next milestones.
+yet enforce per-section W^X for its own image. The EL0/EL1 privilege boundary,
+however, is established, tested, and exercised by a real program: a static ELF64
+is loaded from a file, mapped with per-segment W^X, and run at EL0, reaching the
+kernel only through trapped `svc` syscalls; a privileged instruction from EL0
+faults to EL1; the loaded process appears in `ps` and is reaped by `kill` (see the
+EL0/EL1 boundary and ELF-loader sections). SMP/preemption - and with it interactive
+mid-run kill from a concurrent prompt - is the next milestone.
 
 ## Overview
 
@@ -96,11 +98,15 @@ are load-bearing.
 7. `init_graphics`, which runs `fb_init` then `virtio_gpu_init`. The framebuffer
    and GPU must be up before anything draws.
 8. `process_init` then `scheduler_init`.
-9. `syscall_init` to populate the syscall table, then a one-shot EL0 round trip
-   (`usermode_run_payload`) that drops to EL0, issues `svc #0` for getpid and
-   exit, and returns to the kernel - the serial shows "entered EL0", "svc N from
-   EL0", "returned to kernel". It runs once and boot continues; SPSR=0x3C0 masks
-   IRQ/FIQ so the running timer cannot preempt the brief EL0 lifetime.
+9. `syscall_init` to populate the syscall table, then two one-shot EL0 runs (both
+   before the shell, each run once, never looped). First a round trip
+   (`usermode_run_payload`) that drops to EL0, issues `svc #0` for getpid and exit,
+   and returns to the kernel - the serial shows "entered EL0", "svc N from EL0",
+   "returned to kernel"; SPSR=0x3C0 masks IRQ/FIQ so the running timer cannot
+   preempt the brief EL0 lifetime. Then the embedded test ELF is written to ramfs
+   `/hello` and `elf_exec_file("/hello")` loads and runs it at EL0 - the serial
+   shows the loader mapping it and the binary printing "hello, EL0!". A failed load
+   is logged and ignored so boot always continues.
 10. `shell_init`.
 11. `bootscreen_init`, stage updates, `gui_init`, then `gui_run` when graphical
     mode is available.
@@ -181,16 +187,15 @@ These follow from the properties above and are easy to violate by accident:
   wrong, but the rule is to never allocate in interrupt context in the first
   place. The scheduler tick guards against this with an early return before it is
   initialized.
-- **Identity mapping, no W^X, no demand paging.** The MMU is enabled but the
+- **Identity mapping, no demand paging.** The MMU is enabled but the
   kernel runs through an identity map, so virtual equals physical and there is no
-  copy-on-write and no `mmap`. The whole kernel (code, rodata, data, heap, stack)
-  lives in one RWX 1GB block, so there is no per-section W^X yet - a later
-  milestone once finer-grained kernel tables land. The EL0/EL1 boundary itself IS
-  established and tested (kernel pages are EL0-no-access, `svc` is the only EL0
-  gateway), but it is not yet full userspace memory safety: there is no
-  user-pointer validation in syscalls (the one-shot payload passes no user
-  pointers) and no W^X on the user page. The heap is 4 MB and its base moves with
-  the kernel image size.
+  copy-on-write and no `mmap`. The whole KERNEL (code, rodata, data, heap, stack)
+  lives in one RWX 1GB block, so there is no per-section W^X for the kernel yet - a
+  later milestone once finer-grained kernel tables land. LOADED EL0 code, by
+  contrast, does get per-segment W^X (executable segments are mapped read-only).
+  User-pointer validation now exists for `sys_write` (the EL0 buffer is range-checked
+  against the mapped window), but it is not yet a general `copy_from_user` covering
+  every syscall. The heap is 4 MB and its base moves with the kernel image size.
 - **File-scope state, no loose globals.** The window manager, event queue,
   scheduler, and VFS each keep their state in file-scope `static` variables rather
   than exported globals.
@@ -228,12 +233,38 @@ trap is EC=0x18. The production boot runs the round trip once and the serial sho
 the full cycle (entered EL0 / svc N from EL0 / returned to kernel) before the
 window manager loop starts.
 
-**Honest scope.** This establishes and tests the EL0/EL1 boundary; it is NOT full
-userspace memory safety. There is no per-section W^X (the kernel still runs from
-one coarse RWX 1GB block, and that block is UXN=0 because `.text` shares it), and
-no user-pointer validation in syscalls (the one-shot payload passes no user
-pointers, so no `IS_USER_ADDR` range-check exists yet). A scheduled EL0 process
-loaded from a file, W^X, and user-pointer validation are follow-on work.
+## Loading a real ELF at EL0
+
+The same EL0 mechanism now runs a real program loaded from a file. `elf_exec_file`
+(`src/proc/exec.c`) parses a static ELF64 off the VFS, validates the header
+(`elf_validate`, the reject-never-fault gate), and maps each `PT_LOAD` segment
+into the `0x80000000` user window with **per-segment W^X**: an executable segment
+(`PF_X`) is mapped read-only-executable (USER_TEXT, AP=11, so EL0 cannot rewrite
+its own code), data read-write-no-execute (USER_DATA). The BSS tail is zero-filled,
+a fresh EL0 stack is mapped above the top segment, and the program is entered at
+`e_entry` via the same proven one-shot. `sys_write` from EL0 bound-checks the user
+buffer against the mapped window before the kernel touches a byte.
+
+The loaded program is **registered** in a scheduler-independent process registry,
+so `ps` lists its pid, name, and state alongside the kernel threads. The `kill`
+command calls `process_kill(pid)`, which sets a flag on the registered process; the
+syscall handler honors that flag at the program's next `svc` boundary and reaps it
+(returns to the kernel) instead of resuming EL0. The production boot writes the
+embedded test binary to `/hello` and runs it once: the serial shows the loader
+mapping it, the binary printing "hello, EL0!" through `sys_write`, and control
+returning to the kernel before the window manager loop starts.
+
+**Honest scope.** Static ELF only - no dynamic linking, no relocations (locked: the
+loader rejects `ET_DYN`/PIE). One EL0 program runs at a time, in a single static
+user window. Because the loader runs the program SYNCHRONOUSLY to completion, the
+`kill` command reaps a REGISTERED process by pid (the flag is honored at the next
+`svc`, proven headlessly), but INTERACTIVE mid-run kill from a second live prompt
+while a program is executing is NOT yet delivered - there is no concurrent prompt,
+and that needs the SMP/preemption work of a later phase. So "a real userspace ELF
+runs at EL0, is visible in `ps`, and is reaped by `kill`" is accurate today;
+"interactive mid-run kill from a second prompt" is not. Per-section W^X for the
+KERNEL (it still runs from one coarse RWX 1GB block) and a general `copy_from_user`
+for every future syscall (only `sys_write` is covered) remain follow-on work.
 
 ## Where to read next
 
