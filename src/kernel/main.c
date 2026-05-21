@@ -10,6 +10,7 @@
 #include <aeos/mm.h>
 #include <aeos/pmm.h>
 #include <aeos/heap.h>
+#include <aeos/vmm.h>
 #include <aeos/interrupts.h>
 #include <aeos/gic.h>
 #include <aeos/timer.h>
@@ -333,6 +334,13 @@ void kernel_main(void *dtb_addr)
     /* Initialize memory management */
     kprintf("\n");
     mm_init();
+
+    /* Enable the MMU and caches right after the heap is up and before any
+     * driver, the GIC, or the first timer FIQ, so every later MMIO and DMA
+     * access runs under the final mapping. The kernel is identity-mapped, so
+     * the PC is unchanged across the enable. */
+    vmm_init();
+    vmm_report();
 
     /* Initialize exception vector table */
     kprintf("\n");
