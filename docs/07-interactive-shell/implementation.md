@@ -164,6 +164,38 @@ int shell_execute(int argc, char **argv)
 
 Commands are looked up in a table of function pointers.
 
+## Pipes
+
+A command line containing `|` is split into stages and the stages run serially. Built-ins print through `kprintf`, so a stage captures the previous stage's output by installing a `kprintf` output hook that appends bytes into a small fixed ring; the next stage reads that ring instead of a file.
+
+```c
+#define SHELL_PIPE_SIZE        256
+#define SHELL_MAX_PIPE_STAGES  4
+
+typedef struct shell_pipe {
+    char     buf[SHELL_PIPE_SIZE];
+    uint32_t write_pos;
+    uint32_t read_pos;
+} shell_pipe_t;
+
+static shell_pipe_t *shell_active_input  = NULL;
+static shell_pipe_t *shell_active_output = NULL;
+
+/* The output hook for the current stage: append each byte to its ring */
+static void shell_pipe_putc(char c)
+{
+    shell_pipe_t *p = shell_active_output;
+    if (p != NULL && p->write_pos < SHELL_PIPE_SIZE) {
+        p->buf[p->write_pos++] = c;
+    }
+}
+
+/* A built-in with no filename in argv reads its input from the pipe instead */
+int shell_pipe_readline(char *buf, int max);
+```
+
+**Serial, not concurrent**: there are no real processes or kernel pipes here. Each stage runs to completion writing into its ring, then the next stage runs reading from it, up to `SHELL_MAX_PIPE_STAGES`. The ring is fixed at `SHELL_PIPE_SIZE` (256 bytes), so a stage that produces more output than that is truncated at the boundary. `cmd_grep` is the worked example: with no filename argument it pulls lines from `shell_pipe_readline`.
+
 ## Path Resolution
 
 ### resolve_path()
@@ -324,6 +356,53 @@ typedef struct {
     int ex_pos;             /* Position in EX buffer */
 } editor_state_t;
 ```
+
+Each line is an `editor_line_t` with its own growable character buffer (the `char **lines` view above is a simplification), and the line array itself grows as lines are added.
+
+### Buffer Growth Overflow Guards
+
+Both growth sites are guarded so a size computation cannot wrap into a short allocation (SEC-02). The line array grows through `editor_grow_lines`:
+
+```c
+static int editor_grow_lines(editor_t *ed, size_t new_cap)
+{
+    editor_line_t *new_lines = NULL;
+    /* Reject a byte size that would overflow before allocating */
+    if (new_cap <= ((size_t)-1) / sizeof(editor_line_t)) {
+        new_lines = (editor_line_t *)kmalloc(new_cap * sizeof(editor_line_t));
+    }
+    if (new_lines == NULL) {
+        notify_error("Out of memory");      /* controlled OOM path */
+        editor_set_status(ed, "Out of memory");
+        return -1;                          /* ed->lines left intact */
+    }
+    memcpy(new_lines, ed->lines, ed->num_lines * sizeof(editor_line_t));
+    kfree(ed->lines);
+    ed->lines = new_lines;
+    ed->lines_capacity = (int)new_cap;
+    return 0;
+}
+```
+
+A single line's character buffer grows through `line_grow`, which guards the `*2` doubling against a wrap:
+
+```c
+static int line_grow(editor_line_t *line, size_t needed)
+{
+    size_t new_cap = line->capacity ? line->capacity : 16;
+    while (new_cap < needed) {
+        if (new_cap > ((size_t)-1) / 2) {   /* the next double would wrap */
+            return -1;                      /* leave line->chars intact */
+        }
+        new_cap *= 2;
+    }
+    /* ... kmalloc(new_cap), copy, free old, on kmalloc failure return -1 ... */
+}
+```
+
+**Idiom**: both use `((size_t)-1) / elem` from `kcalloc`; `SIZE_MAX` is not defined in this tree. **On failure**: the existing buffer is left untouched and the function returns -1, so the following `memcpy`/`memmove` never runs against an undersized block. `editor_add_line` calls `editor_grow_lines` and propagates the -1, having surfaced the out-of-memory path through `notify_error`.
+
+**editor_set_status is copy-only**: it `strncpy`s the format string and ignores varargs, so callers pass a literal. Any `%` left in the string prints verbatim rather than consuming an argument.
 
 ### Main Editor Loop
 
