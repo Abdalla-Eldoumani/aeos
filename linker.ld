@@ -11,8 +11,8 @@ ENTRY(_start)
 /* Memory layout for QEMU virt board */
 MEMORY
 {
-    /* RAM starts at 0x40000000 (1GB offset) */
-    RAM (rwx) : ORIGIN = 0x40000000, LENGTH = 128M
+    /* RAM starts at 0x40000000 (1GB offset); 256M matches QEMU -m 256M */
+    RAM (rwx) : ORIGIN = 0x40000000, LENGTH = 256M
 }
 
 /* Section definitions */
