@@ -162,6 +162,7 @@ uint64_t pmm_alloc_pages(uint32_t order)
 void pmm_free_pages(uint64_t addr, uint32_t order)
 {
     uint64_t buddy_addr;
+    uint32_t freed_order = order;  /* size the caller is returning, before coalescing mutates order */
 
     if (!pmm.initialized) {
         klog_error("PMM not initialized");
@@ -209,8 +210,16 @@ void pmm_free_pages(uint64_t addr, uint32_t order)
     /* Add merged block to free list */
     add_to_free_list(addr, order);
 
-    /* Update statistics */
-    pmm.free_pages += (1 << order);
+    /*
+     * Account only the pages the caller actually returned. pmm_alloc_pages
+     * decrements free_pages by the requested order and leaves any split-off
+     * buddies on the free lists without counting them as used. Those buddies
+     * therefore stay counted as free the whole time. Coalescing above merges
+     * such an already-free buddy into the returned block, so adding the merged
+     * (1 << order) here would count the buddy a second time. Add the originally
+     * allocated size to keep alloc and free symmetric.
+     */
+    pmm.free_pages += (1 << freed_order);
 }
 
 /**
