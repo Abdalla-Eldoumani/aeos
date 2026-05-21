@@ -18,6 +18,7 @@
 #include <aeos/timer.h>
 #include <aeos/editor.h>
 #include <aeos/gui.h>
+#include <aeos/exec.h>
 
 /* External symbols from vectors.asm */
 extern uint64_t exception_counters[16];
@@ -149,6 +150,8 @@ static int cmd_write(int argc, char **argv);
 static int cmd_grep(int argc, char **argv);
 static int cmd_exit(int argc, char **argv);
 static int cmd_startx(int argc, char **argv);
+static int cmd_run_elf(int argc, char **argv);
+static int cmd_kill(int argc, char **argv);
 
 /* Built-in command table */
 typedef struct {
@@ -185,6 +188,8 @@ static const shell_cmd_t builtin_commands[] = {
     {"grep",    cmd_grep,    "Search for pattern in file"},
     {"exit",    cmd_exit,    "Exit the shell"},
     {"startx",  cmd_startx,  "Start graphical desktop environment"},
+    {"exec",    cmd_run_elf, "Load and run a static ELF64 at EL0"},
+    {"kill",    cmd_kill,    "Kill a process by PID"},
     {NULL,      NULL,        NULL}
 };
 
@@ -626,6 +631,22 @@ static int cmd_ps(int argc, char **argv)
     kprintf("  Total processes:   %u\n", stats.total_processes);
     kprintf("  Running processes: %u\n", stats.running_processes);
     kprintf("  Context switches:  %llu\n", stats.context_switches);
+
+    /* Per-process listing from the SCHEDULER-INDEPENDENT registry (reg_next),
+     * so it shows kernel threads/idle and any loaded EL0 process without
+     * touching the run queue. */
+    kprintf("\n  PID  STATE      NAME\n");
+    for (process_t *p = process_registry_head(); p != NULL; p = p->reg_next) {
+        const char *st;
+        switch (p->state) {
+            case PROCESS_READY:   st = "READY";   break;
+            case PROCESS_RUNNING: st = "RUNNING"; break;
+            case PROCESS_BLOCKED: st = "BLOCKED"; break;
+            case PROCESS_ZOMBIE:  st = "ZOMBIE";  break;
+            default:              st = "?";        break;
+        }
+        kprintf("  %-4u %-10s %s\n", (uint32_t)p->pid, st, p->name);
+    }
     kprintf("\n");
 
     return 0;
@@ -1589,6 +1610,66 @@ static int cmd_startx(int argc, char **argv)
     }
 
     return 0;
+}
+
+/**
+ * exec - Load and run a static ELF64 at EL0.
+ *
+ * Resolves the path argument and hands it to elf_exec_file (the same loader the
+ * boot path uses). The loader logs "exec: loaded ..." / "exec: ... returned"
+ * itself, so on success this prints nothing extra; on a negative return it
+ * reports the failure (the loader already logged the specific reason). The EL0
+ * program runs synchronously to completion, then the prompt returns.
+ */
+static int cmd_run_elf(int argc, char **argv)
+{
+    if (argc < 2) {
+        kprintf("Usage: exec <path>\n");
+        return -1;
+    }
+
+    const char *path = resolve_path(argv[1]);
+    int ret = elf_exec_file(path);
+    if (ret < 0) {
+        kprintf("exec: %s: failed to load (%d)\n", argv[1], ret);
+        return -1;
+    }
+
+    return 0;
+}
+
+/**
+ * kill - Set the kill flag on a registered process by PID.
+ *
+ * Parses a decimal PID (no libc strtoull; rejects non-digit input) and calls
+ * process_kill, which sets kill_requested on the matching registry PCB. The flag
+ * is honored at the target's next EL0 syscall boundary (Scope B: a registered
+ * process is reaped at its next svc, not preemptively from a second prompt).
+ */
+static int cmd_kill(int argc, char **argv)
+{
+    if (argc < 2) {
+        kprintf("Usage: kill <pid>\n");
+        return -1;
+    }
+
+    uint64_t pid = 0;
+    for (const char *c = argv[1]; *c != '\0'; c++) {
+        if (*c < '0' || *c > '9') {
+            kprintf("kill: invalid pid '%s'\n", argv[1]);
+            return -1;
+        }
+        pid = pid * 10 + (uint64_t)(*c - '0');
+    }
+
+    int ret = process_kill(pid);
+    if (ret == 0) {
+        kprintf("kill: signaled pid %u\n", (uint32_t)pid);
+        return 0;
+    }
+
+    kprintf("kill: no process with pid %u\n", (uint32_t)pid);
+    return -1;
 }
 
 /* ============================================================================
