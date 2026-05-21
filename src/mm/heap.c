@@ -430,9 +430,12 @@ static void merge_free_blocks(heap_block_t *block)
         if (block->next != NULL) {
             block->next->prev = block;
         }
-        /* The absorbed `next` header now sits mid-block; re-stamp the survivor
-         * so a later kfree of the merged region sees a valid magic, while a
-         * stale pointer into the old `next` no longer reads HEAP_MAGIC. */
+        /* Invalidate the absorbed `next` header, which now sits interior to the
+         * survivor, so a stale kfree into the old `next` payload hits the
+         * bad-magic refuse path instead of reading a valid HEAP_MAGIC. */
+        next->magic = 0;
+        /* Re-stamp the survivor so a later kfree of the merged region still
+         * sees a valid magic. */
         block->magic = HEAP_MAGIC;
     }
 
@@ -445,8 +448,12 @@ static void merge_free_blocks(heap_block_t *block)
         if (prev->next != NULL) {
             prev->next->prev = prev;
         }
-        /* `prev` is now the survivor and `block`'s header is interior; re-stamp
-         * the survivor so the merged block carries a fresh valid magic. */
+        /* `block`'s header is now interior to `prev`; invalidate it after the
+         * structural reads above so a stale kfree into `block`'s old payload
+         * hits the bad-magic refuse path instead of a valid HEAP_MAGIC. */
+        block->magic = 0;
+        /* `prev` is the survivor; re-stamp it so the merged block carries a
+         * fresh valid magic. */
         prev->magic = HEAP_MAGIC;
     }
 }
