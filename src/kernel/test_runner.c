@@ -25,6 +25,8 @@
 #include <aeos/symbols.h>
 #include <aeos/framebuffer.h>
 #include <aeos/string.h>
+#include <aeos/stack_guard.h>
+#include <aeos/editor.h>
 
 static uint32_t test_pass_count = 0;
 static uint32_t test_fail_count = 0;
@@ -236,13 +238,32 @@ static void test_process_create_remove(void)
 {
     /* process_init / scheduler_init are already done in kernel_main so the
      * earlier VFS tests have a current process; nothing extra to set up. */
-    process_t *p = process_create(test_process_dummy_entry, "test_proc");
+
+    /* SEC-07: pass the name in a mutable local buffer, then mutate that buffer
+     * after the create. The PCB owns a fixed-size copy, so proc->name must
+     * still read the original; a stored caller pointer would read the mutated
+     * bytes (a use-after-scope read in ps). */
+    char name_buf[PROCESS_NAME_MAX];
+    strncpy(name_buf, "test_proc", sizeof(name_buf) - 1);
+    name_buf[sizeof(name_buf) - 1] = '\0';
+
+    process_t *p = process_create(test_process_dummy_entry, name_buf);
     if (p == NULL) {
         test_fail("process_create_remove", "process_create returned NULL");
         return;
     }
     if (p->pid == 0) {
         test_fail("process_create_remove", "PID 0 returned");
+        return;
+    }
+
+    /* Clobber the caller's buffer; the PCB copy must be unaffected. */
+    memset(name_buf, 'Z', sizeof(name_buf) - 1);
+    name_buf[sizeof(name_buf) - 1] = '\0';
+
+    if (strcmp(p->name, "test_proc") != 0) {
+        test_fail("process_create_remove", "PCB name aliased the caller buffer");
+        scheduler_remove_process(p);
         return;
     }
 
@@ -401,6 +422,143 @@ static void test_fb_init_and_fill(void)
 }
 
 /* ============================================================================
+ * Security smoke scenarios
+ *
+ * One scenario per testable invariant the SECURITY_AUDIT closed in 13.B. Each
+ * follows the guard-and-early-return shape above. `make audit` asserts these
+ * PASS lines are present so a future change that drops one fails the gate.
+ * The scenarios are non-destructive: the stack-guard one restores the sentinel
+ * it corrupts, and the double-free one relies on kfree refusing (not halting)
+ * a bad pointer so the runner never times out.
+ * ============================================================================ */
+
+static void test_sec_kcalloc_overflow(void)
+{
+    /* SEC-06 idiom shared with the editor guard: a count*size that overflows
+     * must be rejected, not turned into an undersized buffer. There is no
+     * SIZE_MAX in this tree, so the bound is ((size_t)-1). */
+    void *p = kcalloc(((size_t)-1) / 2 + 2, 2);
+    if (p != NULL) {
+        test_fail("sec_kcalloc_overflow", "kcalloc did not reject overflow");
+        kfree(p);
+        return;
+    }
+    test_pass("sec_kcalloc_overflow");
+}
+
+static void test_sec_stack_guard(void)
+{
+    /* SEC-01: corrupt the sentinel, assert the non-halting predicate reports
+     * overflow, then restore it before anything else reads it. Calling
+     * stack_guard_check here would halt the kernel; the test uses the
+     * read-only stack_guard_intact seam instead. */
+    volatile uint64_t *limit = (volatile uint64_t *)&__stack_limit;
+    uint64_t saved = *limit;
+
+    *limit = 0;
+    bool detected = !stack_guard_intact();
+    *limit = saved;
+
+    if (!detected) {
+        test_fail("sec_stack_guard", "guard did not detect corrupted sentinel");
+        return;
+    }
+    if (!stack_guard_intact()) {
+        test_fail("sec_stack_guard", "sentinel not restored after the check");
+        return;
+    }
+    test_pass("sec_stack_guard");
+}
+
+static void test_sec_double_free_after_merge(void)
+{
+    /* SEC-06 worst case from the audit: free two adjacent blocks so they merge,
+     * reuse the merged region, then free the first pointer again. Its old
+     * header is now mid-block of the reused allocation, so kfree must refuse it
+     * (klog_error + return) rather than corrupt the free list. The refusal path
+     * must not halt or this scenario hangs the runner. */
+    heap_stats_t before, after;
+    heap_get_stats(&before);
+
+    char *a = kmalloc(64);
+    char *b = kmalloc(64);
+    if (a == NULL || b == NULL) {
+        test_fail("sec_double_free_after_merge", "kmalloc returned NULL during setup");
+        kfree(a);
+        kfree(b);
+        return;
+    }
+
+    kfree(a);
+    kfree(b);
+
+    char *c = kmalloc(128);
+    if (c == NULL) {
+        test_fail("sec_double_free_after_merge", "merged block not reusable");
+        return;
+    }
+
+    /* The stale free of `a` is refused; reaching the next line proves no halt. */
+    kfree(a);
+
+    kfree(c);
+
+    heap_get_stats(&after);
+    if (after.used_size != before.used_size) {
+        test_fail("sec_double_free_after_merge", "heap usage drifted after refused free");
+        return;
+    }
+    test_pass("sec_double_free_after_merge");
+}
+
+static void test_sec_vfs_path_too_long(void)
+{
+    /* SEC-03: split_path rejects a path over VFS_PATH_MAX and any component at
+     * or over MAX_FILENAME_LEN before the per-token kmalloc. Both forms must
+     * fail the open with a negative return. Reuses the ramfs mounted by
+     * test_vfs_setup. */
+    char long_path[VFS_PATH_MAX + 16];
+    long_path[0] = '/';
+    for (size_t i = 1; i < sizeof(long_path) - 1; i++) {
+        long_path[i] = 'a';
+    }
+    long_path[sizeof(long_path) - 1] = '\0';
+
+    if (vfs_open(long_path, O_RDONLY, 0) >= 0) {
+        test_fail("sec_vfs_path_too_long", "over-length path was not rejected");
+        return;
+    }
+
+    /* A single component longer than MAX_FILENAME_LEN - 1 within a short path. */
+    char long_component[MAX_FILENAME_LEN + 8];
+    long_component[0] = '/';
+    for (size_t i = 1; i < sizeof(long_component) - 1; i++) {
+        long_component[i] = 'b';
+    }
+    long_component[sizeof(long_component) - 1] = '\0';
+
+    if (vfs_open(long_component, O_RDONLY, 0) >= 0) {
+        test_fail("sec_vfs_path_too_long", "over-length component was not rejected");
+        return;
+    }
+    test_pass("sec_vfs_path_too_long");
+}
+
+static void test_sec_editor_growth_overflow(void)
+{
+    /* SEC-02: the public editor path only doubles from a small int capacity and
+     * reaches the kmalloc-NULL OOM branch, never the integer-overflow branch.
+     * The TEST_BUILD-gated seam forces an overflowing new_cap through the
+     * guarded line-array growth and returns nonzero only when the growth was
+     * refused with the buffer left intact. */
+    if (editor_test_growth_overflow_refused() == 0) {
+        test_fail("sec_editor_growth_overflow", "overflowing growth was not refused");
+        return;
+    }
+    test_pass("sec_editor_growth_overflow");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -433,11 +591,19 @@ void kernel_main(void *dtb_addr)
     test_heap_kfree_null();
     test_heap_balanced();
 
+    /* Security smoke scenarios that only need the heap, the stack-guard
+     * sentinel, and the editor seam run alongside the heap tests. */
+    test_sec_kcalloc_overflow();
+    test_sec_stack_guard();
+    test_sec_double_free_after_merge();
+    test_sec_editor_growth_overflow();
+
     /* VFS tests need a mounted ramfs. If setup fails, skip the VFS suite
      * outright and record one failure so the run is correctly marked bad. */
     if (test_vfs_setup() == 0) {
         test_vfs_create_read_write();
         test_vfs_unlink();
+        test_sec_vfs_path_too_long();
     } else {
         test_fail("vfs_setup", "could not register/mount ramfs");
     }
