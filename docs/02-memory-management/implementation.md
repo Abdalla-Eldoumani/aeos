@@ -177,29 +177,35 @@ static uint64_t remove_from_free_list(uint32_t order)
 ### Data Structures
 
 ```c
+#define HEAP_MAGIC          0xAEDA110C
+
 typedef struct heap_block {
+    uint32_t magic;             /* HEAP_MAGIC; validates the header */
     size_t size;                /* Size of block (including header) */
     bool is_free;               /* True if block is free */
     struct heap_block *next;    /* Next block in list */
     struct heap_block *prev;    /* Previous block in list */
 } heap_block_t;
 
-#define BLOCK_HEADER_SIZE   sizeof(heap_block_t)  /* 32 bytes */
+#define BLOCK_HEADER_SIZE   sizeof(heap_block_t)
 #define MIN_BLOCK_SIZE      (BLOCK_HEADER_SIZE + 16)
 ```
 
 **Block Layout**:
 ```
 +------------------+
-| heap_block_t     | 32 bytes
+| heap_block_t     | header
+| - magic          |
 | - size           |
 | - is_free        |
 | - next           |
 | - prev           |
 +------------------+
-| User data        | (size - 32) bytes
+| User data        | (size - header) bytes
 +------------------+
 ```
+
+**Magic field**: Every header is stamped with `0xAEDA110C` and re-stamped on any header-touching operation. It distinguishes a valid header from an absorbed sub-header (after a merge) or arbitrary user bytes (a stale pointer). See the kfree and merge sections below.
 
 ### Initialization
 
@@ -290,6 +296,7 @@ static void split_block(heap_block_t *block, size_t size)
 
     /* Create new block in remaining space */
     new_block = (heap_block_t *)((uint64_t)block + size);
+    new_block->magic = HEAP_MAGIC;   /* stamp the new tail */
     new_block->size = remaining_size;
     new_block->is_free = true;
     new_block->next = block->next;
@@ -325,6 +332,13 @@ void kfree(void *ptr)
     /* Get block header */
     block = (heap_block_t *)((uint64_t)ptr - BLOCK_HEADER_SIZE);
 
+    /* Refuse a bad caller pointer instead of halting. A wrong magic means
+     * the pointer is stale or lands mid-block of a merged allocation. */
+    if (block->magic != HEAP_MAGIC) {
+        klog_error("kfree: bad pointer %p (wrong magic)", ptr);
+        return;
+    }
+
     /* Check if already free (double-free detection) */
     if (block->is_free) {
         klog_error("kfree: Double free detected at %p", ptr);
@@ -335,41 +349,53 @@ void kfree(void *ptr)
     block->is_free = true;
 
     /* Merge adjacent free blocks */
-    merge_free_blocks();
+    merge_free_blocks(block);
 }
 ```
 
-**Double-Free Detection**: Checks `is_free` flag before freeing. This catches many use-after-free bugs.
+**Wrong-magic refusal**: A caller pointer whose header magic is not `0xAEDA110C` is refused with a `klog_error` and an early return; the kernel keeps running. This is the path a stale free or a mid-block free of a merged allocation hits.
+
+**Halting validator is internal-only**: Internal traversals (`find_free_block`, `merge_free_blocks`) call `heap_check_magic`, which halts with `klog_fatal` on a bad magic. A bad magic found while walking the free list means the list itself is corrupt, so failing fast at the fault site is correct. The non-halting check above is reserved for the caller-supplied pointer.
+
+**Double-Free Detection**: After the magic check, the `is_free` flag catches a second free of a still-valid header.
 
 ### Block Merging
 
 ```c
-static void merge_free_blocks(void)
+static void merge_free_blocks(heap_block_t *block)
 {
-    heap_block_t *block = heap.first_block;
-
-    while (block != NULL && block->next != NULL) {
-        if (block->is_free && block->next->is_free) {
-            /* Merge with next block */
-            block->size += block->next->size;
-            block->next = block->next->next;
-
-            if (block->next != NULL) {
-                block->next->prev = block;
-            }
-        } else {
-            block = block->next;
+    /* Absorb the next block if it is free */
+    if (block->next != NULL && block->next->is_free) {
+        heap_check_magic(block->next);   /* halts on a corrupt free list */
+        block->next->magic = 0;          /* absorbed sub-header is no longer valid */
+        block->size += block->next->size;
+        block->next = block->next->next;
+        if (block->next != NULL) {
+            block->next->prev = block;
         }
+        block->magic = HEAP_MAGIC;       /* re-stamp the survivor */
+    }
+
+    /* Absorb into the previous block if it is free */
+    if (block->prev != NULL && block->prev->is_free) {
+        heap_check_magic(block->prev);
+        block->magic = 0;                /* this block is now absorbed */
+        block->prev->size += block->size;
+        block->prev->next = block->next;
+        if (block->next != NULL) {
+            block->next->prev = block->prev;
+        }
+        block->prev->magic = HEAP_MAGIC; /* re-stamp the survivor */
     }
 }
 ```
 
-**Coalescing Strategy**: Single pass from start to end, merging each free block with its free successor.
+**Coalescing Strategy**: O(1) per kfree. Only the freed block's immediate prev and next are inspected, so there is no full-heap scan. The absorbed sub-header's magic is cleared to 0 and the surviving block is re-stamped, which closes the audit worst case where a pointer into a merged block would otherwise still read a valid magic.
 
 **Example**:
 ```
-Before: [F:32] -> [U:64] -> [F:32] -> [F:16]
-After:  [F:32] -> [U:64] -> [F:48]
+Before: [U:64] -> [F:32 freed] -> [F:16]
+After:  [U:64] -> [F:48]   (next absorbed, its magic cleared)
 ```
 
 ### Realloc Implementation
@@ -389,7 +415,16 @@ void *krealloc(void *ptr, size_t new_size)
     /* Get current block */
     block = (heap_block_t *)((uint64_t)ptr - BLOCK_HEADER_SIZE);
 
-    /* If block is large enough, just return it */
+    /* Shrinking in place: split the unused tail back to the free list and
+     * re-stamp the shrunk head so its magic stays valid. */
+    if (block->size >= new_size + BLOCK_HEADER_SIZE + MIN_BLOCK_SIZE) {
+        split_block(block, /* aligned new_size + header */);
+        block->magic = HEAP_MAGIC;
+        kfree((void *)((uint64_t)block->next + BLOCK_HEADER_SIZE));
+        return ptr;
+    }
+
+    /* If block is already large enough, just return it */
     if (block->size >= new_size + BLOCK_HEADER_SIZE) {
         return ptr;
     }
@@ -414,7 +449,28 @@ void *krealloc(void *ptr, size_t new_size)
 }
 ```
 
-**Optimization**: If existing block is large enough, no reallocation needed.
+**Optimization**: If the existing block is already large enough, no reallocation is needed. When shrinking by more than a minimum block, the tail is returned to the free list and the shrunk head is re-stamped.
+
+### kcalloc Overflow Check
+
+```c
+void *kcalloc(size_t nmemb, size_t size)
+{
+    /* Reject a multiplication overflow before allocating */
+    if (nmemb != 0 && size > ((size_t)-1) / nmemb) {
+        klog_error("kcalloc: size overflow (%zu * %zu)", nmemb, size);
+        return NULL;
+    }
+
+    void *p = kmalloc(nmemb * size);
+    if (p != NULL) {
+        memset(p, 0, nmemb * size);
+    }
+    return p;
+}
+```
+
+`kcalloc` checks `nmemb * size` for overflow with the `((size_t)-1) / nmemb` idiom before the multiply, so a crafted `nmemb`/`size` pair cannot wrap to a small allocation that the caller then overruns. `SIZE_MAX` is absent from this tree, hence `(size_t)-1`.
 
 ## Memory Alignment
 
