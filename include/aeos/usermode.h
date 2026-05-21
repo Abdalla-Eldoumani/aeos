@@ -19,11 +19,14 @@
  *
  * This is a ONE-SHOT, single-CPU, non-nesting transition: DAIF is masked across
  * the whole EL0 run (no preemption of the payload), and there is exactly one
- * saved kernel context. The function does NOT return by normal control flow -
- * control comes back through usermode_return (driven by the EL0 exit syscall).
- * user_sp must be a mapped, 16-byte-aligned EL0 stack top.
+ * saved kernel context. By normal control flow it does not come back here; the
+ * EL0 exit syscall drives usermode_return, which restores the saved context and
+ * ret's to usermode_enter's caller (so the caller DOES resume, just after a
+ * detour through EL0). It is therefore deliberately NOT marked noreturn: the
+ * caller must keep a live epilogue and return address for usermode_return's ret
+ * to land on. user_sp must be a mapped, 16-byte-aligned EL0 stack top.
  */
-void usermode_enter(uint64_t entry, uint64_t user_sp) __attribute__((noreturn));
+void usermode_enter(uint64_t entry, uint64_t user_sp);
 
 /**
  * Return control to the kernel from inside the EL0 svc handler. Clears the

@@ -15,78 +15,101 @@
 #include <aeos/interrupts.h>
 #include <aeos/types.h>
 
-/* Single-CPU one-shot save area. Layout matches the stp/ldp offsets below:
- * x19..x28 at bytes 0..72, x29(FP) at 80, x30(LR) at 88, SP at 96. There is no
- * nesting (one EL0 run at a time, DAIF masked across it), so one static is enough. */
-static struct {
+/* Single-CPU one-shot save area. Layout matches the stp/ldp offsets in the asm
+ * trampoline below: x19..x28 at bytes 0..72, x29(FP) at 80, x30(LR) at 88, SP at
+ * 96. There is no nesting (one EL0 run at a time, DAIF masked across it), so one
+ * static is enough. The struct is referenced by name from the top-level asm. */
+struct usermode_kctx {
     uint64_t x19_28[10];
     uint64_t fp;
     uint64_t lr;
     uint64_t sp;
-} kctx;
+};
+struct usermode_kctx usermode_kctx;
 
 /* Set true between the eret to EL0 and usermode_return. The EL0 exit syscall
  * reads it to decide between usermode_return (one-shot) and process_exit. */
 static bool el0_oneshot;
 
-void usermode_enter(uint64_t entry, uint64_t user_sp)
-{
-    /* Save callee-saved + FP/LR + SP so usermode_return can resume this CALLER. */
-    __asm__ volatile(
-        "stp x19, x20, [%0, #0]\n"
-        "stp x21, x22, [%0, #16]\n"
-        "stp x23, x24, [%0, #32]\n"
-        "stp x25, x26, [%0, #48]\n"
-        "stp x27, x28, [%0, #64]\n"
-        "stp x29, x30, [%0, #80]\n"
-        "mov x1, sp\n"
-        "str x1, [%0, #96]\n"
-        :: "r"(&kctx) : "x1", "memory");
-
-    el0_oneshot = true;
-    klog_info("entered EL0: entry=%p sp=%p", (void *)entry, (void *)user_sp);
-
-    /* Drop to EL0t with DAIF masked (0x3C0). The eret returns to EL0 because of
-     * this SPSR, not because of anything in the vector handler. */
-    __asm__ volatile(
-        "msr elr_el1, %0\n"
-        "msr sp_el0, %1\n"
-        "mov x2, #0x3C0\n"
-        "msr spsr_el1, x2\n"
-        "isb\n"
-        "eret\n"
-        :: "r"(entry), "r"(user_sp) : "x2", "memory");
-
-    __builtin_unreachable();
-}
-
-void usermode_return(void)
-{
-    klog_info("returned to kernel");
-    el0_oneshot = false;
-
-    /* Restore the saved kernel context and ret into usermode_enter's caller.
-     * The ret lands on the saved LR, so the EL1 svc exception frame still on the
-     * stack is simply abandoned - safe for a single one-shot on a single CPU. */
-    __asm__ volatile(
-        "ldp x19, x20, [%0, #0]\n"
-        "ldp x21, x22, [%0, #16]\n"
-        "ldp x23, x24, [%0, #32]\n"
-        "ldp x25, x26, [%0, #48]\n"
-        "ldp x27, x28, [%0, #64]\n"
-        "ldp x29, x30, [%0, #80]\n"
-        "ldr x1, [%0, #96]\n"
-        "mov sp, x1\n"
-        "ret\n"
-        :: "r"(&kctx) : "x1", "memory");
-
-    __builtin_unreachable();
-}
-
 bool el0_oneshot_active(void)
 {
     return el0_oneshot;
 }
+
+/* Small C helpers the asm trampoline calls so the flag-set and the klog markers
+ * stay in C. usermode_enter saves the caller's regs, then bl's the log helper,
+ * then erets; usermode_return bl's the log helper, then restores and ret's. */
+void usermode_enter_log(uint64_t entry, uint64_t user_sp)
+{
+    el0_oneshot = true;
+    klog_info("entered EL0: entry=%p sp=%p", (void *)entry, (void *)user_sp);
+}
+
+void usermode_return_log(void)
+{
+    klog_info("returned to kernel");
+    el0_oneshot = false;
+}
+
+/* usermode_enter / usermode_return as a top-level naked asm pair. A normal C
+ * function would emit a prologue that allocates a frame, so capturing "sp" inside
+ * it would record the function's OWN frame, not the caller's; usermode_return's
+ * "mov sp; ret" would then resume the caller with a stale sp and corrupt its
+ * epilogue (the bug the first cut had). With no compiler prologue, the saved sp/
+ * lr are exactly the caller's (usermode_run_payload's) call-boundary state, so
+ * usermode_return's ret unwinds cleanly back into the caller, frame intact.
+ *
+ * usermode_enter(x0=entry, x1=user_sp): save x19-x28/x29/x30/sp into
+ * usermode_kctx, log via usermode_enter_log (entry/sp preserved in x19/x20 across
+ * the call), then ELR_EL1=entry, SP_EL0=user_sp, SPSR_EL1=0x3C0 (EL0t, DAIF
+ * masked), eret. The eret returns to EL0 because of the SPSR, not the handler.
+ * usermode_return(): log, then restore x19-x28/x29/x30/sp and ret to the saved
+ * caller LR. The EL1 svc exception frame still on the stack is abandoned - safe
+ * for a single non-nesting one-shot on a single CPU. */
+__asm__(
+    ".section .text\n"
+    ".balign 4\n"
+    ".global usermode_enter\n"
+    ".type usermode_enter, %function\n"
+    "usermode_enter:\n"
+    "    adrp x9, usermode_kctx\n"
+    "    add  x9, x9, :lo12:usermode_kctx\n"
+    "    stp  x19, x20, [x9, #0]\n"
+    "    stp  x21, x22, [x9, #16]\n"
+    "    stp  x23, x24, [x9, #32]\n"
+    "    stp  x25, x26, [x9, #48]\n"
+    "    stp  x27, x28, [x9, #64]\n"
+    "    stp  x29, x30, [x9, #80]\n"   /* caller FP + caller return address */
+    "    mov  x10, sp\n"               /* no prologue ran, so sp == caller's sp */
+    "    str  x10, [x9, #96]\n"
+    "    mov  x19, x0\n"               /* preserve entry across the log call */
+    "    mov  x20, x1\n"               /* preserve user_sp */
+    "    bl   usermode_enter_log\n"
+    "    msr  elr_el1, x19\n"
+    "    msr  sp_el0, x20\n"
+    "    mov  x2, #0x3C0\n"            /* EL0t, DAIF masked */
+    "    msr  spsr_el1, x2\n"
+    "    isb\n"
+    "    eret\n"
+    ".size usermode_enter, .-usermode_enter\n"
+
+    ".balign 4\n"
+    ".global usermode_return\n"
+    ".type usermode_return, %function\n"
+    "usermode_return:\n"
+    "    bl   usermode_return_log\n"
+    "    adrp x9, usermode_kctx\n"
+    "    add  x9, x9, :lo12:usermode_kctx\n"
+    "    ldp  x19, x20, [x9, #0]\n"
+    "    ldp  x21, x22, [x9, #16]\n"
+    "    ldp  x23, x24, [x9, #32]\n"
+    "    ldp  x25, x26, [x9, #48]\n"
+    "    ldp  x27, x28, [x9, #64]\n"
+    "    ldp  x29, x30, [x9, #80]\n"   /* restore caller FP + caller return addr */
+    "    ldr  x10, [x9, #96]\n"
+    "    mov  sp, x10\n"               /* back to caller's call-boundary sp */
+    "    ret\n"                        /* unwind into usermode_run_payload */
+    ".size usermode_return, .-usermode_return\n");
 
 /* ============================================================================
  * EL0 payloads (RESEARCH Pattern 4 / Code Examples). Defined as module-level
@@ -95,7 +118,11 @@ bool el0_oneshot_active(void)
  * own .text block with no compiler-generated prologue. usermode_run_payload
  * maps the 4KB page holding the chosen one at VA 0x80000000 so EL0 can fetch it.
  * x8 carries the syscall number; svc #0 traps into el0_aarch64_sync. The symbols
- * are local (no .global); C takes their addresses via the externs below.
+ * are .global so the C extern references below resolve to their real linked
+ * addresses: when they were local, the compiler collapsed both &el0_roundtrip
+ * and &el0_priv_trap to a single literal-pool slot that pointed at the wrong
+ * symbol (the nearest preceding global), so usermode_run_payload mapped and
+ * eret'd to garbage and the EL0 payload took a data abort.
  * ============================================================================ */
 
 /* el0_roundtrip: SYS_GETPID (observable side effect) then SYS_EXIT (returns to
@@ -107,18 +134,24 @@ bool el0_oneshot_active(void)
 __asm__(
     ".section .text\n"
     ".balign 64\n"
+    ".global el0_roundtrip\n"
+    ".type el0_roundtrip, %function\n"
     "el0_roundtrip:\n"
     "    mov x8, #3\n"        /* SYS_GETPID */
     "    svc #0\n"
     "    mov x8, #0\n"        /* SYS_EXIT */
     "    svc #0\n"
     "0:  b 0b\n"
+    ".size el0_roundtrip, .-el0_roundtrip\n"
     ".balign 64\n"
+    ".global el0_priv_trap\n"
+    ".type el0_priv_trap, %function\n"
     "el0_priv_trap:\n"
     "    msr daifset, #2\n"   /* traps to EL1, EC=0x18 */
     "    mov x8, #0\n"        /* SYS_EXIT - only reached if the msr did NOT trap */
     "    svc #0\n"
-    "1:  b 1b\n");
+    "1:  b 1b\n"
+    ".size el0_priv_trap, .-el0_priv_trap\n");
 
 /* Symbols defined by the asm block above; declared as functions so C can take
  * their addresses. They are never called directly from C. */
