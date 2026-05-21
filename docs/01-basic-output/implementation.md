@@ -319,11 +319,12 @@ while (*fmt) {
             fmt++;
         }
 
-        /* Check for 'll' modifier */
-        if (*fmt == 'l') {
+        /* Parse '.N' precision (applies to %s) */
+        if (*fmt == '.') {
             fmt++;
-            if (*fmt == 'l') {
-                long_long = 1;
+            has_precision = 1;
+            while (*fmt >= '0' && *fmt <= '9') {
+                precision = precision * 10 + (*fmt - '0');
                 fmt++;
             }
         }
@@ -331,8 +332,11 @@ while (*fmt) {
 
 Supports:
 - `-` flag for left alignment
+- `0` flag for zero-padding
 - Width specification (numeric)
-- `ll` length modifier for 64-bit integers
+- `.N` precision on `%s`: print at most N characters (the BUG-1 fix)
+
+There is no `l`/`ll` length modifier. Every integer value on this target is already 64-bit, so the parser does not look for one. The same parser backs `kprintf`, `klog`, and `snprintf`, so the precision and width rules are identical across all three.
 
 ### String Alignment
 
@@ -355,6 +359,37 @@ if (width > 0 && width > str_len) {
 
 **Right-align** (default): Print spaces first, then string
 **Left-align** (`-` flag): Print string first, then spaces
+
+### String Precision
+
+```c
+/* Effective length is clamped to the precision when one was given */
+size_t str_len = strlen(str);
+if (has_precision && (size_t)precision < str_len) {
+    str_len = precision;
+}
+/* putstring then emits exactly str_len bytes */
+```
+
+`%.N` on `%s` prints at most N characters. This is the BUG-1 fix: before it, a `%.8s` printed the whole string and could run off a non-terminated buffer. The clamp happens before width padding, so `%-10.3s` prints 3 characters then pads to width 10.
+
+### Crash-Dump Ring
+
+```c
+static void putchar(char c)
+{
+    uart_putc(c);
+
+    /* Mirror into the crash-dump ring for the panic path */
+    kprintf_ring[ring_pos] = c;
+    ring_pos = (ring_pos + 1) % KPRINTF_RING_SIZE;
+
+    /* Order the byte store against the pos/wrap update for a panic reader */
+    __asm__ volatile("dmb ish" ::: "memory");
+}
+```
+
+`putchar` is the only writer of the ring, in normal context. `kprintf_ring_walk` reads it only on the panic path, called from `handle_exception`. The `dmb ish` (inner-shareable barrier) keeps the byte write and the position update ordered as a unit (SEC-04). Mutual exclusion between a normal write and the panic-time dump is the `handle_exception` DAIF mask, not a lock here, and it holds only because the kernel is single-CPU.
 
 ### Log Levels
 
