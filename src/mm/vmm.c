@@ -37,6 +37,18 @@ extern char _kernel_start[];
 /* L1 entry index for a VA is (VA >> 30) & 0x1FF (1GB per L1 entry). */
 #define L1_INDEX(va)    (((va) >> 30) & 0x1FFULL)
 
+/* Multi-level walk descriptors for the EL0 user window (ARMv8-A VMSAv8-64,
+ * D5.3). At L1/L2 bits[1:0]=0b11 is a TABLE descriptor (points at the next
+ * level); at L3 bits[1:0]=0b11 is a PAGE descriptor (terminates). NOT the
+ * DESC_TYPE_BLOCK 0b01 used for the L1 1GB blocks above - using 0b01 at L3 is
+ * INVALID and a block where a table is needed walks into garbage. */
+#define DESC_TYPE_TABLE 0x3ULL          /* bits[1:0]=0b11: L1/L2 table */
+#define DESC_TYPE_PAGE  0x3ULL          /* bits[1:0]=0b11: L3 page */
+#define DESC_AP_EL0RW   (1ULL << 6)     /* AP[2:1]=0b01: EL1 RW / EL0 RW */
+
+/* 4KB-aligned next-table / page output-address mask (bits [47:12]). */
+#define TABLE_OA_MASK   0x0000FFFFFFFFF000ULL
+
 /* SCTLR_EL1 enable bits. Set M, C, I together in a single write: caching with
  * the MMU off is implementation-defined, so C must never be set without M. */
 #define SCTLR_M  (1ULL << 0)
@@ -48,6 +60,14 @@ extern char _kernel_start[];
  * trap a vectorized clear, and the unused entries already read as 0 (invalid). */
 static uint64_t ttbr0_l1[512] __attribute__((aligned(4096)));  /* running identity map */
 static uint64_t ttbr1_l1[512] __attribute__((aligned(4096)));  /* high-half kernel alias */
+
+/* The L2/L3 tables backing the single EL0 user window at L1 index 2 (VA
+ * 0x80000000). Same BSS-zeroed rule as the L1 tables: not memset (vectorized
+ * clear would trap under -mgeneral-regs-only and the unused entries already
+ * read 0 = invalid). Built lazily by vmm_map_user_page; index 0/1 of ttbr0_l1
+ * are never touched, so a fault in this window cannot break the running kernel. */
+static uint64_t user_l2[512] __attribute__((aligned(4096)));
+static uint64_t user_l3[512] __attribute__((aligned(4096)));
 
 /**
  * Build an 8-byte L1 block descriptor: 1GB-aligned output address, AF set,
@@ -142,6 +162,45 @@ void vmm_init(void)
 {
     vmm_build_tables();
     vmm_enable();
+}
+
+/**
+ * Carve one 4KB EL0 page into the free L1 index for uva by building an
+ * L1->L2->L3 chain. The leaf gets AP=01 (EL0 RW), AF, Inner-Shareable, Normal
+ * memory, and PXN=1 always; UXN is set only for a data/stack page so a code
+ * page (USER_EXEC) stays EL0-fetchable. Writes only ttbr0_l1[L1_INDEX(uva)]
+ * (index 2 for 0x80000000) plus the user_l2/user_l3 leaves - never index 0/1.
+ */
+void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot)
+{
+    /* L1 table descriptor -> user_l2 (only the 0x80000000 window is supported). */
+    ttbr0_l1[L1_INDEX(uva)] = ((uint64_t)&user_l2 & TABLE_OA_MASK) | DESC_TYPE_TABLE;
+
+    /* L2 table descriptor -> user_l3. */
+    uint64_t l2i = (uva >> 21) & 0x1FFULL;
+    user_l2[l2i] = ((uint64_t)&user_l3 & TABLE_OA_MASK) | DESC_TYPE_TABLE;
+
+    /* L3 page leaf: PA + permissions. PXN=1 always (EL1 never executes user
+     * memory); UXN=1 only for data/stack so a code page can be fetched at EL0. */
+    uint64_t l3i = (uva >> 12) & 0x1FFULL;
+    uint64_t leaf = (pa & TABLE_OA_MASK)
+                  | DESC_AF
+                  | DESC_SH_INNER
+                  | DESC_AP_EL0RW
+                  | ((uint64_t)ATTRIDX_NORMAL << 2)
+                  | DESC_TYPE_PAGE;
+    leaf |= DESC_PXN;
+    if (prot == USER_DATA) {
+        leaf |= DESC_UXN;
+    }
+    user_l3[l3i] = leaf;
+
+    /* Publish the new entries to the live table walk and make the I-side
+     * coherent for a compile-time code page (RESEARCH Pitfalls 5 and 6). */
+    __asm__ volatile("dsb ish" ::: "memory");
+    __asm__ volatile("tlbi vmalle1");
+    __asm__ volatile("dsb ish" ::: "memory");
+    __asm__ volatile("isb");
 }
 
 uint32_t vmm_ttbr1_alias_read(uint64_t pa)
