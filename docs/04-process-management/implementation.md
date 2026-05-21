@@ -48,6 +48,9 @@ process_t *process_create(process_entry_t entry_point, const char *name)
 - Stack grows downward, so SP starts at top
 - x30 (link register) set to entry point - when context_switch returns, it jumps there
 - x29 (frame pointer) set to SP for proper stack traces
+- The name is copied into the PCB's fixed `char name[PROCESS_NAME_MAX]` (N = 32) with `strncpy` and an explicit NUL, so the PCB owns the bytes. A transient caller string is safe, a name of 31+ characters is truncated, and a NULL name becomes `(unnamed)`. This is the SEC-07 fix; `ps` never reads a freed caller pointer.
+
+There is no `process_get_by_pid`; it was removed because no global PCB table exists (only the run queue and `current_process`) and nothing called it.
 
 ### Process Exit
 
