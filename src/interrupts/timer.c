@@ -68,14 +68,23 @@ static inline void write_cntv_ctl(uint32_t val)
 
 /**
  * Timer interrupt handler
- * Called at TIMER_FREQ_HZ rate (100 Hz = every 10ms)
+ * Called at TIMER_FREQ_HZ rate (100 Hz = every 10ms).
+ *
+ * This is the live tick path: the timer PPI is delivered as an IRQ (Group 0,
+ * acked via GICC_IAR) and dispatched here from handle_irq. Re-arming the
+ * comparator with write_cntv_tval is what clears the timer condition; without
+ * it the level-sensitive interrupt would stay asserted and storm.
  */
 static void timer_irq_handler(void)
 {
+    /* Cheap per-tick stack-overflow check on the live IRQ path. One load and
+     * compare; pass 0 because a tick has no faulting instruction to name. */
+    stack_guard_check(0);
+
     /* Increment tick count */
     timer.ticks++;
 
-    /* Set next timer interrupt using virtual timer */
+    /* Set next timer interrupt using virtual timer (clears the interrupt) */
     write_cntv_tval(timer.tick_interval);
 
     /* Call scheduler tick for preemptive scheduling */
