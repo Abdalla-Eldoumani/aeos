@@ -38,14 +38,22 @@ void vmm_report(void);
 uint32_t vmm_ttbr1_alias_read(uint64_t pa);
 
 /**
- * Protection class for an EL0 user page. Both classes set AP[2:1]=01 (EL1 RW /
- * EL0 RW) and PXN=1 (EL1 must never execute user memory). They differ in UXN:
- *   USER_EXEC - UXN=0, so EL0 may fetch-and-execute the page (a code page).
- *   USER_DATA - UXN=1, so the page is never executed at any EL (a stack/data page).
- * This is NOT W^X: USER_EXEC is EL0-writable (AP=01). True read-only code (AP=11)
- * is a later follow-on; the educational one-shot accepts AP=01 per the phase scope.
+ * Protection class for an EL0 user page. All classes set PXN=1 (EL1 must never
+ * execute user memory). They differ in AP[2:1] and UXN:
+ *   USER_EXEC - AP=01 (EL0 RW), UXN=0: EL0 may fetch-and-execute AND write the
+ *               page. Kept for the Phase 5 one-shot payloads, which map a
+ *               compile-time code page in place and need it EL0-writable; NOT
+ *               W^X.
+ *   USER_DATA - AP=01 (EL0 RW), UXN=1: the page is never executed at any EL
+ *               (a stack/data page).
+ *   USER_TEXT - AP=11 (EL0 RO), UXN=0: EL0 may fetch-and-execute but NOT write
+ *               the page (a loaded code segment). This is real per-segment W^X
+ *               for loaded code: PF_X ELF segments are mapped USER_TEXT so the
+ *               EL0 program cannot rewrite its own instructions. The kernel
+ *               itself still runs from one coarse RWX 1GB block (kernel-wide
+ *               W^X is out of scope).
  */
-typedef enum { USER_EXEC, USER_DATA } user_prot_t;
+typedef enum { USER_EXEC, USER_DATA, USER_TEXT } user_prot_t;
 
 /**
  * Map a single 4KB EL0-accessible page at user VA uva to physical page pa with
