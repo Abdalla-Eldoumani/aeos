@@ -14,6 +14,7 @@
 #define AEOS_EXEC_H
 
 #include <aeos/types.h>
+#include <aeos/process.h>
 
 /**
  * Load, validate, map, and run a static ELF64 at EL0, one program at a time.
@@ -44,5 +45,14 @@ uint64_t usermode_map_base(void);
  * while an EL0 one-shot is active; used by the syscall user-pointer bound check.
  */
 uint64_t usermode_map_end(void);
+
+/**
+ * The process_t the loader registered for the EL0 program currently running
+ * (set by elf_exec_file for the duration of the run), or NULL when no EL0
+ * program is loaded. The syscall layer reads its kill_requested flag at the EL0
+ * syscall boundary - this is the LOADED process, NOT process_current() (which is
+ * idle during the synchronous one-shot), which is why a dedicated pointer exists.
+ */
+process_t *current_user_proc_get(void);
 
 #endif /* AEOS_EXEC_H */
