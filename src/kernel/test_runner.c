@@ -417,7 +417,7 @@ static void test_mmu_ttbr1_alias(void)
 }
 
 /* ============================================================================
- * EL0 scenarios — the headless proof of FEAT-02. The TEST kernel_main does NOT
+ * EL0 scenarios - the headless proof of FEAT-02. The TEST kernel_main does NOT
  * init the GIC/timer, so an EL0 run with a DAIF-masked SPSR (0x3C0) has no
  * preemption to fight: the one-shot is fully deterministic. scheduler_init ran
  * above, so process_current() is non-NULL and the user-page mapper is ready.
