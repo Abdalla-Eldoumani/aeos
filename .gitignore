@@ -6,6 +6,10 @@ build/
 *.o
 *.s
 
+# Hand-written EL0 test sources (the *.s rule above is for generated build/*.s)
+!tests/user/*.S
+!tests/user/*.s
+
 # Persistence files
 persist.bin
 flash0.img
