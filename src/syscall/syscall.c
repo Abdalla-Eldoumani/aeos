@@ -9,6 +9,7 @@
 #include <aeos/scheduler.h>
 #include <aeos/kprintf.h>
 #include <aeos/uart.h>
+#include <aeos/usermode.h>
 #include <aeos/types.h>
 
 /* System call statistics */
@@ -111,12 +112,20 @@ static uint64_t sys_exit_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
                                uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
     int status = (int)arg0;
-    process_t *proc = process_current();
 
     (void)arg1; (void)arg2; (void)arg3; (void)arg4; (void)arg5;
 
+    /* EL0 one-shot: return control to the kernel by restoring the saved kernel
+     * context, NOT through the vector tail's eret (which would go back to EL0).
+     * usermode_return never returns. The scheduler/process_exit path below is
+     * for kernel threads and is left unchanged. */
+    if (el0_oneshot_active()) {
+        klog_info("sys_exit: EL0 one-shot exiting with status %d", status);
+        usermode_return();
+    }
+
     klog_info("sys_exit: PID %u exiting with status %d",
-              (uint32_t)proc->pid, status);
+              (uint32_t)process_current()->pid, status);
 
     /* Call process_exit (never returns) */
     process_exit();
