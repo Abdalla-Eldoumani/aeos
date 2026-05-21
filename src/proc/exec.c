@@ -19,6 +19,7 @@
 #include <aeos/heap.h>
 #include <aeos/vfs.h>
 #include <aeos/usermode.h>
+#include <aeos/process.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
 #include <aeos/types.h>
@@ -39,6 +40,27 @@
 static uint64_t user_map_base;
 static uint64_t user_map_end;
 
+/* The registry PCB for the EL0 program currently running (set by elf_exec_file
+ * for the duration of usermode_enter, NULL otherwise). The syscall layer reads
+ * its kill_requested flag at the EL0 syscall boundary - this is the LOADED
+ * process, NOT process_current() (which is idle during the synchronous one-shot,
+ * so reading it would be a tautology and kill <pid> would never reap the run). */
+static process_t *current_user_proc;
+
+/* Physical pages backing the EL0 mapping (segments + stack), tracked so they
+ * are returned to the pmm after the run - closing the page leak across repeated
+ * exec calls. A static AArch64 test binary is a few pages; the cap bounds the
+ * tracking array. Pages mapped beyond the cap (a pathologically large segment)
+ * are not tracked for free, matching the pre-cap behavior - not a new leak. */
+#define EXEC_MAX_TRACKED_PAGES 256
+static uint64_t mapped_pas[EXEC_MAX_TRACKED_PAGES];
+static unsigned mapped_count;
+
+process_t *current_user_proc_get(void)
+{
+    return current_user_proc;
+}
+
 uint64_t usermode_map_base(void)
 {
     return user_map_base;
@@ -47,6 +69,15 @@ uint64_t usermode_map_base(void)
 uint64_t usermode_map_end(void)
 {
     return user_map_end;
+}
+
+/* Record a PA so it is freed after the EL0 run. Over the cap, the page stays
+ * mapped and is simply not tracked (no fault, no new leak vs. the prior code). */
+static void track_pa(uint64_t pa)
+{
+    if (mapped_count < EXEC_MAX_TRACKED_PAGES) {
+        mapped_pas[mapped_count++] = pa;
+    }
 }
 
 /* Round a VA up to the next 4KB boundary. */
@@ -114,6 +145,7 @@ int elf_exec_file(const char *path)
     const Elf64_Phdr *ph = (const Elf64_Phdr *)(buf + e->e_phoff);
     user_map_base = USER_WINDOW_BASE;
     uint64_t top_seg_end = USER_WINDOW_BASE;
+    mapped_count = 0;
 
     for (unsigned i = 0; i < e->e_phnum; i++) {
         if (ph[i].p_type != PT_LOAD) {
@@ -177,6 +209,7 @@ int elf_exec_file(const char *path)
             }
             memset((void *)pa, 0, 0x1000);
             vmm_map_user_page(page_va + p * 0x1000, pa, prot);
+            track_pa(pa);
 
             /* Copy this page's slice of the file bytes (page-aligned in-scope,
              * so in_page == 0; the general in-page offset is folded in for the
@@ -208,18 +241,48 @@ int elf_exec_file(const char *path)
     }
     memset((void *)stack_pa, 0, 0x1000);
     vmm_map_user_page(stack_va, stack_pa, USER_DATA);
+    track_pa(stack_pa);
     user_map_end = stack_va + 0x1000;
 
     /* 7. Enter EL0. The segments are copied into pmm pages, so the heap buffer
-     * is no longer needed during the run - free it before the enter. Keep the
-     * stack map -> log -> usermode_enter -> post-enter log as ONE linear block:
-     * 06-04 wraps usermode_enter with the PCB-registry lifecycle here, so there
-     * must be no helper and no early return between the last map and the enter.
-     * usermode_enter returns to here after the EL0 program exits via the
-     * sys_exit one-shot branch. */
+     * is no longer needed during the run - free it before the enter.
+     *
+     * The enter is bracketed by the PCB lifecycle: register a registry-only PCB
+     * (visible in ps, reapable by pid) and point current_user_proc at it so the
+     * syscall seam can read its kill_requested flag (the LOADED process, NOT
+     * idle). user_proc_register never enqueues the PCB, so ready_head stays NULL
+     * and the dormant scheduler is untouched. If registration fails, bail with a
+     * negative return BEFORE entering EL0 (an EL0 run must always have a PCB so a
+     * kill request has somewhere to land), freeing the mapped pages first.
+     *
+     * usermode_enter returns here after the EL0 program exits via the sys_exit
+     * one-shot branch OR after the kill seam reaps it via usermode_return. On
+     * return: clear current_user_proc, unregister + free the PCB, and return the
+     * mapped pmm pages (segments + stack), closing the leak across exec calls. */
     klog_info("exec: loaded %s entry=%p", path, (void *)e->e_entry);
     kfree(buf);
+
+    process_t *proc = user_proc_register(path);
+    if (proc == NULL) {
+        klog_error("exec: cannot register PCB for %s", path);
+        for (unsigned k = 0; k < mapped_count; k++) {
+            pmm_free_page(mapped_pas[k]);
+        }
+        mapped_count = 0;
+        return -8;
+    }
+    current_user_proc = proc;
+
     usermode_enter(e->e_entry, stack_va + 0x1000);
+
+    current_user_proc = NULL;
+    process_unregister(proc);
+    kfree(proc);
+    for (unsigned k = 0; k < mapped_count; k++) {
+        pmm_free_page(mapped_pas[k]);
+    }
+    mapped_count = 0;
+
     klog_info("exec: %s returned", path);
     return 0;
 }
