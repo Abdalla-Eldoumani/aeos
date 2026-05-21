@@ -93,6 +93,14 @@ uint64_t syscall_handler(uint64_t syscall_num,
                (uint32_t)syscall_num,
                (uint32_t)process_current()->pid);
 
+    /* The middle round-trip marker (criterion 4). Fires only for the EL0
+     * one-shot - never on the GUI/shell direct-call path, which is not one-shot
+     * - so the production serial shows enter-EL0 / svc-from-EL0 / return without
+     * spamming every kernel-thread syscall. klog_debug above is off by default. */
+    if (el0_oneshot_active()) {
+        klog_info("svc %u from EL0", (uint32_t)syscall_num);
+    }
+
     /* Dispatch to syscall implementation */
     return syscall_table[syscall_num](arg0, arg1, arg2, arg3, arg4, arg5);
 }

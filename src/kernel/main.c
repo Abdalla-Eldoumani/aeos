@@ -30,6 +30,7 @@
 #include <aeos/shell.h>
 #include <aeos/bootscreen.h>
 #include <aeos/gui.h>
+#include <aeos/usermode.h>
 
 /* External symbols from linker script */
 extern char _kernel_start;
@@ -391,6 +392,16 @@ void kernel_main(void *dtb_addr)
     kprintf("\n");
     klog_info("Initializing System Calls...");
     syscall_init();
+
+    /* Prove the EL0/EL1 boundary once on the production boot path (FEAT-02).
+     * The payload runs at EL0, issues svc #0 for getpid then exit; the serial
+     * shows the round trip (entered EL0 / svc N from EL0 / returned to kernel).
+     * SPSR=0x3C0 masks IRQ/FIQ for the payload's brief life so the running timer
+     * cannot preempt it; the masked FIQ is taken once control is back at EL1.
+     * One-shot only - never looped - and boot continues to the WM loop after. */
+    kprintf("\n");
+    klog_info("Running EL0 round trip...");
+    usermode_run_payload(USERMODE_PAYLOAD_ROUNDTRIP);
 
     /* Initialize Shell */
     kprintf("\n");
