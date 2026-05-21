@@ -286,7 +286,45 @@ el1_spx_serror:
     .balign 128
 el0_aarch64_sync:
     SAVE_CONTEXT
-    mov x0, #2          /* exception_source = 2 */
+
+    /* INCREMENT COUNTER: el0_aarch64_sync_count (index 8) */
+    stp x0, x1, [sp, #-16]!
+    adr x0, exception_counters
+    ldr x1, [x0, #64]       /* Load counter[8] = el0_aarch64_sync */
+    add x1, x1, #1          /* Increment */
+    str x1, [x0, #64]       /* Store back */
+    ldp x0, x1, [sp], #16
+
+    /* Check if this is an SVC instruction by examining ESR_EL1. This block is a
+     * copy of el1_spx_sync's proven SVC decode; the eret returns to EL0 because
+     * the SAVED SPSR in the frame is EL0t (set by usermode_enter), not because
+     * of anything here. The EL1 SVC path stays untouched. */
+    mrs x0, esr_el1
+    lsr x1, x0, #26         /* Extract EC (Exception Class) bits [31:26] */
+    cmp x1, #0x15           /* EC = 0x15 means SVC instruction from AArch64 */
+    bne 1f                  /* Not SVC, handle as generic exception */
+
+    /* This is an SVC from EL0 - extract number/args from the saved frame
+     * (identical SAVE_CONTEXT layout: x8 at [sp,#(16*4)], x0-x5 below). */
+    ldr x0, [sp, #(16 * 4)]     /* x8 = syscall number */
+    ldr x1, [sp, #(16 * 0)]     /* x0 = arg0 */
+    ldr x2, [sp, #(16 * 0 + 8)] /* x1 = arg1 */
+    ldr x3, [sp, #(16 * 1)]     /* x2 = arg2 */
+    ldr x4, [sp, #(16 * 1 + 8)] /* x3 = arg3 */
+    ldr x5, [sp, #(16 * 2)]     /* x4 = arg4 */
+    ldr x6, [sp, #(16 * 2 + 8)] /* x5 = arg5 */
+
+    /* Call syscall handler */
+    bl syscall_handler
+
+    /* Store return value back to saved x0 */
+    str x0, [sp, #(16 * 0)]
+
+    RESTORE_CONTEXT
+    eret
+
+1:  /* Not an SVC (e.g. a trapped privileged instruction) - report it. */
+    mov x0, #2          /* exception_source = 2 (EXC_FROM_LOWER_A64) */
     mov x1, #0          /* exception_type = SYNC */
     mov x2, sp
     bl handle_exception
