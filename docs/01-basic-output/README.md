@@ -39,9 +39,18 @@ This section covers the bootstrap code and basic output functionality for AEOS. 
 - **Location**: `src/kernel/kprintf.c`
 - **Purpose**: Kernel printf implementation
 - **Key Features**:
-  - Format specifiers: %d, %u, %x, %X, %llu, %lld, %p, %s, %c, %%
-  - Width modifiers (e.g., %-10s, %10s)
+  - Format specifiers: %d, %u, %x, %X, %p, %s, %c, %%
+  - Width modifiers (e.g., %-10s, %10s) and a `0` zero-pad flag
+  - `%.N` precision on `%s` (prints at most N characters), the BUG-1 fix
   - Logging levels (DEBUG, INFO, WARN, ERROR, FATAL)
+
+`kprintf`, `klog`, and `snprintf` share the same parser and all three accept `%.N` precision on `%s`. None of them understand the `l`/`ll` length modifiers; values are already 64-bit on this target.
+
+### Crash-Dump Ring
+
+`kprintf` keeps a fixed-size crash-dump ring (`kprintf_ring` in `kprintf.c`). Every byte that `putchar` emits in normal context is also stored in the ring; the ring is read only on the panic path, by `kprintf_ring_walk` from `handle_exception`. After storing a byte, `putchar` issues a `dmb ish` so the byte write and the ring's position/wrap update are ordered as a unit for a panic-time reader (SEC-04).
+
+The only thing keeping a normal ring write from racing the panic-time dump is the `handle_exception` DAIF mask, not a lock inside `kprintf`. That invariant holds only because the kernel is single-CPU. A real ring lock is future work for the SMP phase.
 
 ## Boot Sequence
 
