@@ -82,6 +82,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/proc/process.c \
               src/proc/scheduler.c \
               src/proc/usermode.c \
+              src/proc/elf.c \
               src/syscall/syscall.c \
               src/fs/vfs.c \
               src/fs/ramfs.c \
