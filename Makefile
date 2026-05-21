@@ -104,6 +104,18 @@ ASM_OBJECTS = $(patsubst src/%.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
 C_OBJECTS   = $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(C_SOURCES))
 ALL_OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 
+# EL0 test payload (tests/user/hello.S). Built with its own link script into a
+# single-PT_LOAD ET_EXEC ELF at VA 0x80000000, then wrapped by objcopy into a
+# linkable object exporting _binary_hello_elf_start/_end/_size. The object is
+# appended to ALL_OBJECTS so both kernel link passes resolve those symbols; the
+# Phase 6 loader parses these embedded ELF bytes. See the rules below the
+# compile rules and tests/user/CLAUDE.md for the build-id/flat-binary pitfalls.
+USER_TEST_SRC = tests/user/hello.S
+USER_TEST_LD  = tests/user/user.ld
+USER_TEST_ELF = $(BUILD_DIR)/hello.elf
+USER_TEST_OBJ = $(BUILD_DIR)/hello_elf.o
+ALL_OBJECTS  += $(USER_TEST_OBJ)
+
 # Generated symbol table for the in-kernel backtrace. See the "Symbol table
 # two-pass build" comment near the link rules.
 SYMBOLS_C       = $(BUILD_DIR)/kernel/symbol_data.c
@@ -209,6 +221,28 @@ $(BUILD_DIR)/%.o: src/%.c
 	@echo "Compiling $<..."
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Build the EL0 test payload as a single-PT_LOAD ET_EXEC ELF at VA 0x80000000.
+# The custom link script + --build-id=none + /DISCARD/ *(.note*) collapses the
+# image to one in-window LOAD; without them gcc emits a build-id note LOAD at
+# 0x400000 (outside the user window). Not a pattern rule: it uses its own link
+# recipe, not the kernel CFLAGS/LDFLAGS.
+$(USER_TEST_ELF): $(USER_TEST_SRC) $(USER_TEST_LD)
+	@echo "Building EL0 test payload $@..."
+	@mkdir -p $(BUILD_DIR)
+	$(CC) -nostdlib -static -mgeneral-regs-only -ffreestanding \
+	    -Wl,-T,$(USER_TEST_LD) -Wl,-z,max-page-size=0x1000 -Wl,--build-id=none \
+	    -o $@ $(USER_TEST_SRC)
+
+# Wrap the ELF bytes into a linkable object. NEVER objcopy -O binary this
+# high-VA program (it zero-fills 0..0x80000000 into a 2.1 GB file); -I binary
+# -O elf64-littleaarch64 embeds the real ELF. cd into $(BUILD_DIR) first so the
+# input is the bare name hello.elf and the exported symbol is
+# _binary_hello_elf_start, not a path-mangled _binary_build_hello_elf_start.
+$(USER_TEST_OBJ): $(USER_TEST_ELF)
+	@echo "Embedding $< as $@..."
+	cd $(BUILD_DIR) && $(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 \
+	    hello.elf hello_elf.o
 
 # Clean build artifacts
 clean:
