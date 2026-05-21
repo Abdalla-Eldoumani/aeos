@@ -19,8 +19,11 @@
 #define PHYS_RAM_SIZE   0x10000000  /* 256MB default */
 #define PHYS_RAM_END    (PHYS_RAM_START + PHYS_RAM_SIZE)
 
-/* Kernel virtual memory layout */
-#define KERNEL_VIRT_BASE    0xFFFF000000000000ULL  /* Kernel high half */
+/* Kernel virtual memory layout. The high-half base is the 39-bit TTBR1
+ * canonical base (T1SZ=25, top 25 bits all 1), matching the VMM bringup in
+ * src/mm/vmm.c (VMM_TTBR1_BASE). Unused by running code today; reconciled so
+ * the macro does not contradict the table the MMU actually installs. */
+#define KERNEL_VIRT_BASE    0xFFFFFF8000000000ULL  /* Kernel high half (39-bit) */
 #define USER_VIRT_MAX       0x0000800000000000ULL  /* User space limit */
 
 /* Convert between physical and virtual addresses */
