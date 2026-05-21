@@ -7,9 +7,11 @@ This section implements the exception handling infrastructure for AEOS, includin
 ## Status: Fully Functional
 
 Timer interrupts work via FIQ handling. The system runs with:
-- Both FIQ and IRQ unmasked (DAIF bits cleared)
+- FIQ and IRQ unmasked during normal operation so the 100 Hz timer can fire
 - Timer ticks at 100 Hz
 - Preemptive multitasking enabled
+
+The interrupt mask is only forced on at one point: the exception-handler entry. `handle_exception` issues `msr DAIFSet, #0xF` (debug, SError, IRQ, FIQ) before it prints anything. This is the BUG-15 fix and it is specific to the crash-dump path, not a global change to how the kernel runs.
 
 ## FIQ Solution
 
@@ -21,6 +23,23 @@ On QEMU virt, timer interrupts arrive as FIQ (Fast Interrupt) instead of IRQ, re
 
 This approach bypasses the GIC for timer interrupts, which is correct since FIQs don't go through the normal GIC acknowledge flow.
 
+## Exception Entry: DAIF Mask
+
+When any unhandled exception lands in `handle_exception`, the first thing it does is mask DAIF (debug, SError, IRQ, FIQ) with `msr DAIFSet, #0xF`, before the first `kprintf`. `kprintf` is not reentrant: it walks a shared crash-dump ring and prints character by character. A timer FIQ landing in the middle of that print path would corrupt the trace, so the panic path runs with interrupts masked.
+
+This mutual exclusion holds only because the kernel is single-CPU. There is no lock inside `kprintf`; the DAIF mask is the entire guarantee. A real ring lock is future work for the SMP phase and is not present today.
+
+## Stack-Guard Sentinel
+
+The kernel has no MMU yet, so there is no faulting guard page below the boot stack. Instead `boot.asm` stamps a sentinel value, `STACK_GUARD_MAGIC` (0xAE057ACC), at `__stack_limit` (the bottom of the boot stack) before `kernel_main` runs. A stack overflow grows past that address and clobbers the sentinel.
+
+Two paths check it, both in `src/kernel/stack_guard.c`:
+
+- `handle_exception` calls `stack_guard_check(context->pc)` right after the DAIF mask, before the first `kprintf`. If the sentinel is clobbered, the panic names the offending PC (the saved `ELR_EL1`) deterministically instead of printing a misleading trace off a corrupt stack.
+- `timer_handle_fiq` calls `stack_guard_check(0)` on each tick (0 because there is no faulting PC on a healthy tick). This catches a slow overflow before it reaches a fault.
+
+On a clobbered sentinel `stack_guard_check` reports a `klog_fatal` naming the PC, masks DAIF, and halts in a `wfi` loop. The check allocates nothing and is reentrant-safe because it runs on the FIQ tick path. The PMM must not hand out the stack region or it overwrites the sentinel, so `mm.c` starts the buddy allocator at `__stack_top`, not `heap_end`.
+
 ## Components
 
 ### Exception Vector Table (vectors.asm)
@@ -28,9 +47,10 @@ This approach bypasses the GIC for timer interrupts, which is correct since FIQs
 - **Purpose**: 16-entry exception vector table for ARM64
 - **Features**:
   - Context save/restore macros
-  - SVC (system call) handling
   - IRQ/FIQ routing
   - Exception counters for debugging
+
+The synchronous-exception vector exists and decodes the SVC class, but the kernel's own syscalls do not trap through it. The syscall dispatcher is a direct C function-call table lookup (see Section 05). The SVC path is reserved for future EL0 userspace work and is not the current syscall mechanism.
 
 ### Exception Handlers (exceptions.c)
 - **Location**: `src/interrupts/exceptions.c`
@@ -180,6 +200,10 @@ When the timer fires:
 6. Calls `scheduler_tick()` for preemption
 
 The GIC is still initialized for other interrupts, but timer handling bypasses it entirely.
+
+For interrupts that do go through the GIC, `handle_irq` and `handle_fiq` return early when `gic_acknowledge_irq()` reports one of the GICv2 spurious IDs (1020-1023, with 1022 = group-0 spurious and 1023 = group-1 spurious). Those must not be EOI'd and must never index the handler table. The threshold is the literal 1020, not `GIC_MAX_IRQ` (which is 1024, the array length); an earlier version compared against the full table size and produced thousands of "Unhandled IRQ: 1022" lines on every redraw tick.
+
+Uptime is read separately from the tick counter. `timer_get_uptime_ms` and `timer_get_uptime_sec` read `CNTVCT_EL0` directly rather than scaling `timer.ticks`. The FIQ-driven counter falls behind wall time inside busy-wait loops (bootscreen fades, window animations), while `CNTVCT` advances regardless.
 
 ## Shell Commands
 
