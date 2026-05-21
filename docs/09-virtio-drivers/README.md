@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements VirtIO device drivers for AEOS, enabling graphics display and input device support in QEMU. The drivers use the VirtIO MMIO transport layer with support for both legacy (v1) and modern (v2) protocols. VirtIO provides a standardized interface for virtual hardware that is efficient and well-documented.
+This section implements VirtIO device drivers for AEOS, enabling graphics display and input device support in QEMU. The drivers use the VirtIO MMIO transport layer. The active path on QEMU virt is the legacy (v1) protocol, which is what is stable there without modern feature negotiation; a modern (v2) branch exists in the queue setup but is not the exercised path. VirtIO provides a standardized interface for virtual hardware that is efficient and well documented.
 
 ## Components
 
@@ -15,17 +15,37 @@ This section implements VirtIO device drivers for AEOS, enabling graphics displa
   - Framebuffer attachment
   - Scanout configuration
   - Display updates (transfer + flush)
-  - Support for legacy and modern VirtIO
+  - Legacy (v1) protocol on QEMU virt; allocates a host resource, attaches the framebuffer, flushes on update
 
 ### VirtIO Input Driver (virtio_input.c)
 - **Location**: `src/drivers/virtio_input.c`
 - **Purpose**: Keyboard and mouse input
 - **Features**:
   - Automatic device detection
-  - Mouse movement (relative and absolute)
-  - Mouse button handling
-  - Keyboard scancode translation
-  - Event generation for GUI
+  - Mouse movement (relative) and button handling
+  - Keyboard scancode translation through a 128-entry table (see below)
+  - Pushes every decoded event into the `kernel/event.c` queue via `event_push`
+  - No per-click console logging: the polling loop is silent on the normal path (the per-event mouse-button log line was removed in the BUG-10 cleanup)
+
+### Keyboard scancode translation
+
+`virtio_input.c` carries a `scancode_to_keycode[128]` table that maps two
+families of codes to AEOS keycodes:
+
+- **Legacy AT-style positions**, e.g. position 72 maps to `KEY_UP`.
+- **The Linux input-event-codes navigation cluster (102-111)**: `KEY_HOME`,
+  `KEY_UP`, `KEY_PAGE_UP`, `KEY_LEFT`, `KEY_RIGHT`, `KEY_END`, `KEY_DOWN`,
+  `KEY_PAGE_DOWN`, `KEY_INSERT`, `KEY_DELETE`, which is what QEMU's
+  virtio-keyboard emits directly.
+
+This second family is what makes the terminal scrollback Page Up / Page Down
+and the editor arrow navigation work. The keyboard handler bounds `ev->code`
+against the table size before the lookup and drops any code that maps to
+`KEY_NONE`.
+
+The drivers stay isolated: they never call into `wm` or `desktop`. Decoded
+events go up the stack through `event_push`, and the window manager pulls them
+off the queue on its own loop.
 
 ### Framebuffer Driver (framebuffer.c)
 - **Location**: `src/drivers/framebuffer.c`
