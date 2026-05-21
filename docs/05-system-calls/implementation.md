@@ -21,7 +21,7 @@ static const syscall_fn_t syscall_table[MAX_SYSCALLS] = {
 
 **Function Signature**: All handlers have same signature (6 uint64_t args) for uniform dispatch.
 
-### Syscall Handler (SVC Dispatch)
+### Syscall Handler (Direct Dispatch)
 
 ```c
 uint64_t syscall_handler(uint64_t syscall_num,
@@ -47,17 +47,9 @@ uint64_t syscall_handler(uint64_t syscall_num,
 }
 ```
 
-**Called From**: Exception vector `el1_spx_sync` when ESR_EL1 indicates SVC.
+**Called From**: Kernel code directly, with the syscall number passed as the first argument. There is no SVC trap and no exception-vector entry on this path. Everything runs at EL1, so the handler is reached as a plain C call.
 
-**Arguments Extracted From Stack**: The exception handler pulls saved register values:
-```assembly
-ldr x0, [sp, #(16 * 4)]     /* x8 = syscall number */
-ldr x1, [sp, #(16 * 0)]     /* x0 = arg0 */
-ldr x2, [sp, #(16 * 0 + 8)] /* x1 = arg1 */
-/* etc */
-bl syscall_handler
-str x0, [sp, #(16 * 0)]     /* Store return value in saved x0 */
-```
+**Arguments**: Passed straight through as C function arguments. The dispatcher does not read a saved register frame because nothing trapped to get here. A bad number (out of range or an unimplemented slot whose table entry is NULL) returns -1.
 
 ### Kernel-Side Wrappers
 
@@ -68,7 +60,7 @@ uint64_t sys_write(int fd, const void *buf, size_t count)
 }
 ```
 
-**Purpose**: Provide typed interface for kernel code that doesn't need SVC overhead.
+**Purpose**: Provide a typed interface for kernel callers. The wrapper calls the implementation directly; there was never an SVC step to skip.
 
 **Type Safety**: Converts typed args to uint64_t, passes unused args as 0.
 
@@ -190,7 +182,9 @@ static uint64_t sys_yield_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
 
 ## SVC Instruction (Future Use)
 
-### User-Space Invocation
+This section sketches what an EL0 syscall path would look like. None of it is wired up today; the live dispatcher is the direct call above. It is here to show what changes when userspace lands.
+
+### User-Space Invocation (future)
 
 ```assembly
 /* Setup syscall number and arguments */
@@ -202,43 +196,11 @@ svc #0                  /* Trigger SVC exception */
 /* Return value in x0 */
 ```
 
-**SVC Immediate**: The `#0` is ignored on ARMv8. Syscall number comes from x8.
+**SVC Immediate**: The `#0` is ignored on ARMv8. The syscall number would come from x8.
 
-### Exception Vector Handling
+### Exception Vector Handling (future)
 
-From `vectors.asm`:
-
-```assembly
-el1_spx_sync:
-    SAVE_CONTEXT
-
-    /* Check ESR_EL1 for SVC */
-    mrs x0, esr_el1
-    lsr x1, x0, #26
-    cmp x1, #0x15           /* EC = 0x15 is SVC */
-    bne handle_other_sync
-
-    /* Extract args from saved context */
-    ldr x0, [sp, #(16 * 4)]     /* x8 */
-    ldr x1, [sp, #(16 * 0)]     /* x0 */
-    ldr x2, [sp, #(16 * 0 + 8)] /* x1 */
-    ldr x3, [sp, #(16 * 1)]     /* x2 */
-    ldr x4, [sp, #(16 * 1 + 8)] /* x3 */
-    ldr x5, [sp, #(16 * 2)]     /* x4 */
-    ldr x6, [sp, #(16 * 2 + 8)] /* x5 */
-
-    bl syscall_handler
-
-    /* Store return value */
-    str x0, [sp, #(16 * 0)]
-
-    RESTORE_CONTEXT
-    eret
-```
-
-**Register Extraction**: Saved context on stack has registers at specific offsets.
-
-**Return Value**: Stored back to saved x0 so when context is restored, return value is in x0.
+A future EL0 path would add SVC decoding to the synchronous vector in `vectors.asm`: recognize the SVC class in ESR_EL1, pull the syscall number and arguments from the saved register frame, call `syscall_handler`, and store the return value back into the saved x0 before `eret`. The current synchronous vector decodes the exception class for diagnostics only and does not run any of this; the kernel reaches `syscall_handler` by a direct call instead.
 
 ## Error Handling
 
@@ -308,22 +270,15 @@ for (int i = 0; i < MAX_SYSCALLS; i++) {
 }
 ```
 
-### Test SVC Instruction
+### Exercise the Dispatcher
 
 ```c
-/* Inline assembly to trigger SVC */
-uint64_t result;
-__asm__ volatile(
-    "mov x8, %1\n"
-    "mov x0, %2\n"
-    "svc #0\n"
-    "mov %0, x0\n"
-    : "=r"(result)
-    : "r"((uint64_t)SYS_GETPID), "r"(0ULL)
-    : "x0", "x8"
-);
-kprintf("PID from SVC: %llu\n", result);
+/* Direct numeric dispatch, the same path the kernel uses */
+uint64_t pid = syscall_handler(SYS_GETPID, 0, 0, 0, 0, 0, 0);
+kprintf("PID from dispatcher: %llu\n", pid);
 ```
+
+An `svc #0` would not reach the dispatcher today. With no EL0 path wired up, it traps into `handle_exception`, which masks DAIF and halts. Call `syscall_handler` (or the typed wrapper) directly instead.
 
 ## Performance Considerations
 
