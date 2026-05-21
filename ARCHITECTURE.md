@@ -5,9 +5,13 @@ through it. Read it before diving into a subsystem; the per-section walkthroughs
 in `docs/` go deeper.
 
 It describes the kernel as it stands today: a single-address-space AArch64 kernel.
-The MMU is enabled with an identity map plus a high-half alias (described below),
-but there is no userspace, no SMP, and no networking, and the kernel does not yet
-enforce W^X or an EL0 boundary. Those are the next milestones, not shipped behavior.
+The MMU is enabled with an identity map plus a high-half alias (described below).
+There is no general userspace and no SMP or networking, and the kernel does not
+yet enforce per-section W^X. The EL0/EL1 privilege boundary itself, however, is
+now established and tested: a minimal in-kernel payload runs at EL0, reaches the
+kernel only through trapped `svc` syscalls, and a privileged instruction from EL0
+faults to EL1 (see the EL0/EL1 boundary section). A scheduled EL0 process loaded
+from a file, W^X, and user-pointer validation are the next milestones.
 
 ## Overview
 
@@ -23,9 +27,14 @@ machine. A few properties shape everything else:
   identity map, not a relinked high-half kernel; TTBR0 is reserved for the future
   per-process user mapping. The kernel loads at `0x40000000` and RAM ends at
   `0x50000000` (256 MB).
-- **No privilege boundary.** Everything runs at EL1. There are no EL0 processes,
-  so a "system call" is not an `SVC` trap; `syscall(num, ...)` in
-  `src/syscall/syscall.c` is a table lookup followed by a direct C call.
+- **Two ways to make a syscall, one dispatcher.** The kernel itself runs at EL1,
+  where a "system call" is a direct C call: `syscall(num, ...)` in
+  `src/syscall/syscall.c` is a table lookup, not an `SVC` trap. An EL0 payload,
+  by contrast, issues `svc #0`, which traps into the EL1 vector table and is
+  routed through the SAME `syscall_handler`. The EL0 path is additive; the GUI
+  and shell keep using the direct-call path. The EL0/EL1 boundary is real and
+  tested but currently exercised by a one-shot in-kernel payload, not a scheduled
+  process (see the EL0/EL1 boundary section).
 - **Direct calls across layers.** Apps call window and VFS functions directly.
   There is no message bus and no IPC. The one strict rule on call direction is
   that drivers push events up and never call down into the GUI (see below).
@@ -87,7 +96,11 @@ are load-bearing.
 7. `init_graphics`, which runs `fb_init` then `virtio_gpu_init`. The framebuffer
    and GPU must be up before anything draws.
 8. `process_init` then `scheduler_init`.
-9. `syscall_init` to populate the syscall table.
+9. `syscall_init` to populate the syscall table, then a one-shot EL0 round trip
+   (`usermode_run_payload`) that drops to EL0, issues `svc #0` for getpid and
+   exit, and returns to the kernel - the serial shows "entered EL0", "svc N from
+   EL0", "returned to kernel". It runs once and boot continues; SPSR=0x3C0 masks
+   IRQ/FIQ so the running timer cannot preempt the brief EL0 lifetime.
 10. `shell_init`.
 11. `bootscreen_init`, stage updates, `gui_init`, then `gui_run` when graphical
     mode is available.
@@ -171,12 +184,56 @@ These follow from the properties above and are easy to violate by accident:
 - **Identity mapping, no W^X, no demand paging.** The MMU is enabled but the
   kernel runs through an identity map, so virtual equals physical and there is no
   copy-on-write and no `mmap`. The whole kernel (code, rodata, data, heap, stack)
-  lives in one RWX 1GB block, so there is no per-section W^X yet, and there is no
-  EL0 boundary; both are later milestones once finer-grained tables and userspace
-  land. The heap is 4 MB and its base moves with the kernel image size.
+  lives in one RWX 1GB block, so there is no per-section W^X yet - a later
+  milestone once finer-grained kernel tables land. The EL0/EL1 boundary itself IS
+  established and tested (kernel pages are EL0-no-access, `svc` is the only EL0
+  gateway), but it is not yet full userspace memory safety: there is no
+  user-pointer validation in syscalls (the one-shot payload passes no user
+  pointers) and no W^X on the user page. The heap is 4 MB and its base moves with
+  the kernel image size.
 - **File-scope state, no loose globals.** The window manager, event queue,
   scheduler, and VFS each keep their state in file-scope `static` variables rather
   than exported globals.
+
+## The EL0/EL1 boundary
+
+The kernel runs at EL1; a minimal in-kernel payload can be run at EL0, and that
+transition is the kernel's first real privilege boundary. The pieces:
+
+- **Entry.** `usermode_enter` (in `src/proc/usermode.c`, kept out of the
+  do-not-touch `context.asm`) saves the kernel's callee-saved registers and SP,
+  sets `ELR_EL1` to the user entry, `SP_EL0` to a user stack, `SPSR_EL1=0x3C0`
+  (EL0t with DAIF masked), and `eret`s. The eret lands at EL0 purely because of
+  the saved SPSR.
+- **The gateway.** At EL0, `svc #0` traps into the EL1 vector table entry
+  `el0_aarch64_sync` (`src/interrupts/vectors.asm`, VBAR+0x400), which decodes
+  `ESR_EL1` EC=0x15, pulls the syscall number and args from the saved register
+  frame, and calls the SAME `syscall_handler` the EL1 direct-call path uses. A
+  non-SVC synchronous exception from EL0 (for example a trapped privileged
+  instruction) takes the entry's other branch into the fault path.
+- **Return.** `SYS_EXIT` from the EL0 one-shot calls `usermode_return`, which
+  restores the saved kernel context and returns to the kernel caller, abandoning
+  the `svc` exception frame rather than `eret`-ing back to EL0.
+- **Isolation.** The user code page is mapped at VA `0x80000000` through a free
+  TTBR0 L1 slot (index 2) with AP=01 (EL0 accessible) and PXN=1 (EL1 cannot
+  execute it). The kernel's RAM block stays AP=00, so EL0 faults on every kernel
+  address. A privileged instruction from EL0 - `msr daifset` - traps to EL1 with
+  ESR EC=0x18 (because `SCTLR_EL1.UMA` is 0, the reset value the kernel never
+  changes) instead of executing.
+
+Both halves are proven headlessly by `make test`/`make audit`: `test_el0_roundtrip`
+asserts the kernel regains control after the round trip and that the getpid `svc`
+reached the dispatcher, and `test_el0_priv_trap` asserts the privileged-instruction
+trap is EC=0x18. The production boot runs the round trip once and the serial shows
+the full cycle (entered EL0 / svc N from EL0 / returned to kernel) before the
+window manager loop starts.
+
+**Honest scope.** This establishes and tests the EL0/EL1 boundary; it is NOT full
+userspace memory safety. There is no per-section W^X (the kernel still runs from
+one coarse RWX 1GB block, and that block is UXN=0 because `.text` shares it), and
+no user-pointer validation in syscalls (the one-shot payload passes no user
+pointers, so no `IS_USER_ADDR` range-check exists yet). A scheduled EL0 process
+loaded from a file, W^X, and user-pointer validation are follow-on work.
 
 ## Where to read next
 
