@@ -195,6 +195,18 @@ static uint64_t sys_read_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
     return 0;
 }
 
+#ifdef TEST_BUILD
+/* Records the pid the most recent sys_getpid returned. test_el0_roundtrip clears
+ * it, runs the EL0 round trip, then asserts it holds the current pid - a
+ * deterministic proof the EL0 svc reached syscall_handler -> sys_getpid_impl. */
+static uint64_t last_el0_getpid;
+
+uint64_t syscall_test_last_getpid(void)
+{
+    return last_el0_getpid;
+}
+#endif /* TEST_BUILD */
+
 /**
  * sys_getpid - Get current process ID
  *
@@ -208,6 +220,10 @@ static uint64_t sys_getpid_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
 
     (void)arg0; (void)arg1; (void)arg2;
     (void)arg3; (void)arg4; (void)arg5;
+
+#ifdef TEST_BUILD
+    last_el0_getpid = proc->pid;
+#endif
 
     return proc->pid;
 }

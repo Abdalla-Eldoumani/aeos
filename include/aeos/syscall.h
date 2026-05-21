@@ -43,6 +43,16 @@ uint64_t syscall_handler(uint64_t syscall_num,
  */
 void syscall_init(void);
 
+#ifdef TEST_BUILD
+/*
+ * Returns the pid the most recent sys_getpid serviced. The EL0 round-trip
+ * scenario clears the observable, runs the payload (whose svc #0 dispatches
+ * SYS_GETPID), then asserts this equals the current pid - proving the svc
+ * reached the dispatcher. Compiled only under TEST_BUILD, like the editor seam.
+ */
+uint64_t syscall_test_last_getpid(void);
+#endif /* TEST_BUILD */
+
 /*
  * Individual syscall implementations (kernel-side)
  */
