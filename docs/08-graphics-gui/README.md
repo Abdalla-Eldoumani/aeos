@@ -35,11 +35,51 @@ This section implements the complete graphical desktop environment for AEOS. It 
   - Z-ordered window list (front to back); doubly linked
   - Focus tracking and switching (`wm_focus_window` raises; `focus_no_raise` for Alt+Tab cycling)
   - Window dragging by title bar with edge clamping (32 px of title bar stays on-screen)
-  - Window open animation (slide + fade), deferred close animation, focused-window drop shadow
+  - Window open animation (slide-up + fade), deferred close animation, focused-window drop shadow
   - Mouse cursor rendering with backup/restore
   - 30 FPS display refresh; toasts force per-frame redraws while alive
   - Keyboard shortcuts: Alt+Tab focus cycle, Alt+F4 close-via-fade, Esc dismiss start menu + toasts
   - `wm_request_redraw()` for live-content apps that need the WM to keep ticking
+
+### Window manager behavior
+
+The behavior below is the current compositor. The snippet sections under
+`docs/08-graphics-gui/implementation.md` and the in-tree `src/kernel/CLAUDE.md`
+carry the function-level detail.
+
+- **Redraw trigger.** `wm_update_display` repaints when `wm.needs_redraw` is true
+  OR `notify_active()` is true. `window_invalidate(win)` sets that window's
+  `WINDOW_FLAG_DIRTY` AND calls `wm_request_redraw()` so the next compositor tick
+  takes the redraw branch instead of skipping it. Apps call `window_invalidate`
+  from their `on_mouse` / `on_key` handlers after mutating state. Live-content
+  apps that need a frame without an input event (the System Monitor heap graph,
+  the Notes caret blink) call `wm_request_redraw()` directly each tick.
+- **Open animation.** `wm_register_window` stamps `open_anim_start_ms`.
+  `window_draw` slides the draw position down by `WINDOW_OPEN_SLIDE_PX` and eases
+  it up over `WINDOW_OPEN_ANIM_MS`, blending a `THEME_BG_DEEP` overlay at
+  decreasing alpha. Hit-testing keeps the unanimated coordinates, so clicks land
+  where the user sees the final window position.
+- **Deferred close.** Clicking the close button or pressing Alt+F4 sets
+  `WINDOW_FLAG_CLOSING` and stamps `close_anim_start_ms`. `wm_run` runs the
+  fade-out, then `reap_closing_windows` destroys the window only after
+  `WINDOW_CLOSE_ANIM_MS` has elapsed, and only then invokes `on_close`. Events
+  on a closing window are ignored so the fade cannot be interrupted.
+- **Focused-window drop shadow.** The focused window currently gets the
+  design-system fallback shadow: a single 2-px `THEME_BORDER_SUBTLE` line offset
+  1 px below the window. The richer three-rect alpha shadow is staged behind
+  `fb_blend_rect` but is not the active path.
+
+### Global keyboard shortcuts
+
+Handled in `wm.c::handle_key`:
+
+- **Alt+Tab** cycles focus through the visible windows in z-order without
+  raising (`focus_no_raise` / `next_focus_candidate`); the cycled window is
+  raised when Alt is released.
+- **Alt+F4** routes the focused window through the same close-button fade-out
+  rather than destroying it immediately.
+- **Esc** dismisses the start menu and force-fades active toasts
+  (`notify_dismiss_all`) before falling through to the focused window.
 
 ### Window (window.c)
 - **Location**: `src/kernel/window.c`
