@@ -291,25 +291,30 @@ static void test_vfs(void)
     }
     kprintf("  Mounted ramfs at /\n");
 
-    /* Write the embedded static ELF to /hello so the loader has a real binary
-     * to run on the boot path (and an interactive `exec /hello`). The file lives
-     * only in ramfs (it is not persisted to the host image). A write failure is
-     * logged and skipped, not fatal - the exec will then simply report not-found
-     * and boot continues (the WM loop is the dominant non-negotiable). */
-    {
-        uint64_t hello_size =
-            (uint64_t)(_binary_hello_elf_end - _binary_hello_elf_start);
-        int hfd = vfs_open("/hello", O_CREAT | O_WRONLY | O_TRUNC, 0755);
-        if (hfd < 0) {
-            klog_error("Failed to create /hello (embedded ELF)");
-        } else {
-            vfs_write(hfd, _binary_hello_elf_start, (size_t)hello_size);
-            vfs_close(hfd);
-            klog_info("Wrote embedded /hello (%u bytes)", (uint32_t)hello_size);
-        }
-    }
-
     klog_info("VFS initialized successfully!");
+}
+
+/**
+ * Write the embedded static ELF into ramfs at /hello. Called AFTER
+ * scheduler_init: vfs_open allocates the fd through process_current()'s fd
+ * table, which only exists once the idle process is created in scheduler_init,
+ * so this cannot run inside test_vfs (which precedes process/scheduler init).
+ * The file lives only in ramfs (it is not persisted to the host image), and is
+ * available to both the boot-path exec and an interactive `exec /hello`. A write
+ * failure is logged and skipped, not fatal - the exec then reports not-found and
+ * boot continues (reaching the WM loop is the dominant non-negotiable). */
+static void write_embedded_hello(void)
+{
+    uint64_t hello_size =
+        (uint64_t)(_binary_hello_elf_end - _binary_hello_elf_start);
+    int hfd = vfs_open("/hello", O_CREAT | O_WRONLY | O_TRUNC, 0755);
+    if (hfd < 0) {
+        klog_error("Failed to create /hello (embedded ELF)");
+        return;
+    }
+    vfs_write(hfd, _binary_hello_elf_start, (size_t)hello_size);
+    vfs_close(hfd);
+    klog_info("Wrote embedded /hello (%u bytes)", (uint32_t)hello_size);
 }
 
 /**
@@ -434,8 +439,11 @@ void kernel_main(void *dtb_addr)
      * sys_write and exits, control returns here, and boot continues. This is the
      * criterion-3 production proof. A negative return is logged and IGNORED -
      * never halt - because reaching the WM loop is the dominant non-negotiable.
-     * One-shot only, never looped. */
+     * One-shot only, never looped. The embedded ELF is written into ramfs here
+     * (not in test_vfs) because vfs_open needs the idle process's fd table,
+     * which scheduler_init created above. */
     kprintf("\n");
+    write_embedded_hello();
     klog_info("Running exec /hello (FEAT-03)...");
     int hello_rc = elf_exec_file("/hello");
     if (hello_rc < 0) {
