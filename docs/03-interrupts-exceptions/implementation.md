@@ -15,17 +15,22 @@ The vector table must be aligned to 2KB (0x800) per ARMv8 specification. The `.b
 
 ### Vector Entry Layout
 
-Each of the 16 vectors is exactly 128 bytes (0x80):
+Each of the 16 vector slots is exactly 128 bytes (0x80) and holds a single branch to its handler body. The bodies live in a block below the 2KB table:
 
 ```assembly
-    .balign 128                     /* Start of vector */
-el1_spx_irq:
+    .balign 128                     /* Start of slot (one per 0x80) */
+    b el1_spx_irq                   /* VBAR + 0x280 */
+    /* ... 15 more slots ... */
+
+    .balign 2048                    /* Close the table at exactly base+0x800 */
+el1_spx_irq:                        /* Handler body, reached by the stub above */
     SAVE_CONTEXT
     /* ... handle IRQ ... */
     RESTORE_CONTEXT
     eret
-    /* Padding to 128 bytes if needed */
 ```
+
+Keeping each slot to a single branch is what guarantees the architectural offsets (`VBAR + N*0x80`). An inlined body that grows past 0x80 shifts every later slot and silently misaligns the table -- the bug that once routed the EL1h IRQ slot into the FIQ handler body and masked the timer-as-IRQ servicing.
 
 ### Context Size Calculation
 
@@ -145,7 +150,7 @@ interrupts_disable:
 - I: IRQ (bit 1)
 - F: FIQ (bit 0)
 
-We use `#3` to enable both FIQ and IRQ since timer interrupts arrive as FIQ on QEMU virt.
+We use `#3` to clear both the FIQ and IRQ mask bits. The timer arrives as an IRQ (Group 0, `FIQEn = 0`); unmasking FIQ as well is harmless and keeps the dormant FIQ fallback path live.
 
 ## exceptions.c - Exception Handling
 
@@ -258,7 +263,7 @@ void handle_fiq(uint32_t source, uint32_t type, cpu_context_t *context)
 }
 ```
 
-**Why direct timer check?** On QEMU virt, timer interrupts arrive as FIQ regardless of GIC group configuration. The GIC doesn't track FIQs, so `gic_acknowledge_irq()` returns spurious (1022). We check the timer's ISTATUS bit directly instead.
+**Status of this path:** `handle_fiq` is a dormant fallback. The timer is delivered as an IRQ (Group 0, `FIQEn = 0`) and serviced by `handle_irq` -> `timer_irq_handler`, which goes through the normal GIC acknowledge flow. The direct ISTATUS check here (via `timer_handle_fiq`) is retained only in case a future source is routed as FIQ. Earlier revisions believed the timer arrived as FIQ "regardless of GIC group configuration" -- that was an artifact of a misaligned vector table, not a property of QEMU. See the README's "Timer Interrupt Delivery" section.
 
 **Why 1020 and not GIC_MAX_IRQ?** GICv2 reserves IDs 1020-1023 as spurious-interrupt indicators (1022 = group-0 spurious, 1023 = group-1 spurious). Using `< 1020` correctly drops them; an earlier version compared against the full table size and produced thousands of "Unhandled IRQ: 1022" log spam on every redraw tick.
 
@@ -432,13 +437,14 @@ void timer_init(void)
 ```c
 static void timer_irq_handler(void)
 {
+    stack_guard_check(0);                  /* live tick path: cheap overflow check */
     timer.ticks++;
-    write_cntv_tval(timer.tick_interval);  /* re-arm */
+    write_cntv_tval(timer.tick_interval);  /* re-arm, clears the condition */
     scheduler_tick();                      /* drive preemption */
 }
 ```
 
-On QEMU virt the same path is reached via FIQ (`timer_handle_fiq` checks `CNTV_CTL`'s ISTATUS and only acts when the bit is set; see the FIQ Handler section above).
+This is the live tick path: the timer arrives as an IRQ and `handle_irq` dispatches `timer_irq_handler`. The dormant FIQ fallback (`timer_handle_fiq`, which checks `CNTV_CTL`'s ISTATUS and only acts when the bit is set; see the FIQ Handler section above) reaches the same re-arm + `scheduler_tick` work.
 
 ### Wall-clock Uptime
 
@@ -449,7 +455,7 @@ uint64_t timer_get_uptime_ms(void)
 }
 ```
 
-This deliberately reads `CNTVCT_EL0` directly instead of returning `timer.ticks * 10`. The FIQ-driven counter falls behind real time during busy-wait loops (bootscreen fades, window animations), so animations would appear frozen. CNTVCT keeps advancing regardless.
+This deliberately reads `CNTVCT_EL0` directly instead of returning `timer.ticks * 10`. The interrupt-driven counter falls behind real time during busy-wait loops (bootscreen fades, window animations), so animations would appear frozen. CNTVCT keeps advancing regardless.
 
 ### Busy-Wait Delay
 
