@@ -31,6 +31,7 @@
 #include <aeos/bootscreen.h>
 #include <aeos/gui.h>
 #include <aeos/usermode.h>
+#include <aeos/exec.h>
 
 /* External symbols from linker script */
 extern char _kernel_start;
@@ -41,6 +42,12 @@ extern char __stack_top;
 
 /* External symbols from vectors.asm */
 extern uint64_t exception_counters[16];
+
+/* The embedded static ELF (objcopy -I binary) - the EL0 test binary built and
+ * embedded in 06-02. Written into ramfs at /hello in test_vfs, then run once on
+ * the boot path via elf_exec_file to prove the loader on the production boot. */
+extern const unsigned char _binary_hello_elf_start[];
+extern const unsigned char _binary_hello_elf_end[];
 
 /**
  * Display AEOS banner
@@ -284,6 +291,24 @@ static void test_vfs(void)
     }
     kprintf("  Mounted ramfs at /\n");
 
+    /* Write the embedded static ELF to /hello so the loader has a real binary
+     * to run on the boot path (and an interactive `exec /hello`). The file lives
+     * only in ramfs (it is not persisted to the host image). A write failure is
+     * logged and skipped, not fatal - the exec will then simply report not-found
+     * and boot continues (the WM loop is the dominant non-negotiable). */
+    {
+        uint64_t hello_size =
+            (uint64_t)(_binary_hello_elf_end - _binary_hello_elf_start);
+        int hfd = vfs_open("/hello", O_CREAT | O_WRONLY | O_TRUNC, 0755);
+        if (hfd < 0) {
+            klog_error("Failed to create /hello (embedded ELF)");
+        } else {
+            vfs_write(hfd, _binary_hello_elf_start, (size_t)hello_size);
+            vfs_close(hfd);
+            klog_info("Wrote embedded /hello (%u bytes)", (uint32_t)hello_size);
+        }
+    }
+
     klog_info("VFS initialized successfully!");
 }
 
@@ -402,6 +427,20 @@ void kernel_main(void *dtb_addr)
     kprintf("\n");
     klog_info("Running EL0 round trip...");
     usermode_run_payload(USERMODE_PAYLOAD_ROUNDTRIP);
+
+    /* Run the embedded static ELF once on the production boot path (FEAT-03):
+     * the loader reads /hello from ramfs, maps its PT_LOAD segments into the EL0
+     * window, and enters EL0 at e_entry; the binary writes "hello, EL0!" via
+     * sys_write and exits, control returns here, and boot continues. This is the
+     * criterion-3 production proof. A negative return is logged and IGNORED -
+     * never halt - because reaching the WM loop is the dominant non-negotiable.
+     * One-shot only, never looped. */
+    kprintf("\n");
+    klog_info("Running exec /hello (FEAT-03)...");
+    int hello_rc = elf_exec_file("/hello");
+    if (hello_rc < 0) {
+        klog_warn("exec /hello failed (%d) - continuing boot", hello_rc);
+    }
 
     /* Initialize Shell */
     kprintf("\n");
