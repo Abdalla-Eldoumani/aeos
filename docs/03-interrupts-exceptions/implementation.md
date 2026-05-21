@@ -74,37 +74,26 @@ SP+240: x30
 SP+0:   x0-x29 (pairs)
 ```
 
-### SVC Detection and Handling
+### Synchronous Exceptions and the SVC Class
+
+The synchronous vector decodes the exception class from ESR_EL1 to triage faults (data abort, instruction abort, SP alignment, SVC). The SVC class (0x15) is recognized for diagnostics, but the kernel's syscalls do not trap through this vector. `syscall(num, args...)` is a direct C function-call table lookup; there is no privilege boundary at EL1 to cross, so there is no SVC trap on the live path. See Section 05 for the dispatcher.
 
 ```assembly
 el1_spx_sync:
     SAVE_CONTEXT
 
-    /* Check ESR_EL1 for exception class */
+    /* Decode ESR_EL1 exception class for diagnostics */
     mrs x0, esr_el1
     lsr x1, x0, #26             /* EC = bits [31:26] */
-    cmp x1, #0x15               /* 0x15 = SVC from AArch64 */
-    bne 1f                      /* Not SVC, handle generically */
 
-    /* Extract syscall arguments from saved context */
-    ldr x0, [sp, #(16 * 4)]     /* x8 from saved context */
-    ldr x1, [sp, #(16 * 0)]     /* x0 */
-    ldr x2, [sp, #(16 * 0 + 8)] /* x1 */
-    ldr x3, [sp, #(16 * 1)]     /* x2 */
-    ldr x4, [sp, #(16 * 1 + 8)] /* x3 */
-    ldr x5, [sp, #(16 * 2)]     /* x4 */
-    ldr x6, [sp, #(16 * 2 + 8)] /* x5 */
-
-    bl syscall_handler
-
-    /* Store return value back to saved x0 */
-    str x0, [sp, #(16 * 0)]
+    /* Dispatch to the generic C handler with source/type/context */
+    bl handle_exception
 
     RESTORE_CONTEXT
     eret
 ```
 
-**Why load from stack?** The saved context contains the register values at the time of the SVC instruction. We need to extract arguments from there, not from current registers.
+A future EL0 userspace would add SVC-trap handling here: extract the syscall number and arguments from the saved register frame and call into the dispatcher. That is forward work, not current behavior.
 
 ### Exception Counters
 
@@ -181,6 +170,14 @@ static uint32_t get_exception_class(uint64_t esr)
 ```c
 void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
 {
+    /* Mask debug, SError, IRQ, and FIQ before touching kprintf. The print path
+     * is not reentrant, so a timer FIQ landing here would corrupt the trace. */
+    __asm__ volatile("msr DAIFSet, #0xF" ::: "memory");
+
+    /* If a stack overflow brought us here, the boot-stack sentinel is clobbered.
+     * Check it before the first kprintf so the panic names the offending PC. */
+    stack_guard_check(context->pc);
+
     uint64_t esr = get_exception_syndrome();
     uint64_t far = get_fault_address();
     uint32_t ec = get_exception_class(esr);
@@ -201,6 +198,10 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
     }
 }
 ```
+
+**DAIF mask**: `msr DAIFSet, #0xF` runs first so a timer FIQ cannot recurse into the non-reentrant `kprintf` while the crash dump is printing. This is the BUG-15 fix; the mask is scoped to the handler entry, not to normal operation (the timer runs unmasked otherwise).
+
+**stack_guard_check**: Called immediately after the mask, before the first `kprintf`. If a kernel stack overflow clobbered the sentinel at `__stack_limit`, this reports a deterministic `klog_fatal` naming `context->pc` (the saved `ELR_EL1`) and halts, rather than letting the backtrace walk a corrupt stack. The same check runs on every timer tick from `timer_handle_fiq` with a PC argument of 0. See `src/kernel/stack_guard.c`.
 
 **ESR_EL1**: Exception Syndrome Register - describes what went wrong
 **FAR_EL1**: Fault Address Register - virtual address that caused fault
@@ -371,7 +372,7 @@ void gic_set_priority(uint32_t irq, uint8_t priority)
 
 ## timer.c - ARM Generic Timer
 
-The kernel uses the **virtual** timer (CNTV) — that's the right choice for non-secure EL1 on QEMU virt. The PPI for the virtual timer is **IRQ 27**.
+The kernel uses the **virtual** timer (CNTV), the right choice for non-secure EL1 on QEMU virt. The PPI for the virtual timer is **IRQ 27**.
 
 ### System Register Access
 
