@@ -73,6 +73,19 @@ uint64_t syscall_handler(uint64_t syscall_num,
                          uint64_t arg0, uint64_t arg1, uint64_t arg2,
                          uint64_t arg3, uint64_t arg4, uint64_t arg5)
 {
+    /* Honor a pending kill at the EL0 syscall boundary BEFORE dispatching. The
+     * flag is read off the LOADED process via current_user_proc_get(), NOT
+     * process_current() (which returns idle during the synchronous one-shot, so
+     * reading it would be a tautology and the exec'd binary would never be
+     * reaped). usermode_return never returns - it restores the kernel context
+     * and returns to the loader's usermode_enter caller, so a killed program
+     * does NOT resume at EL0 and the syscall below NEVER runs. Sitting at the
+     * TOP means a kill-armed run reaps the very NEXT svc before it dispatches. */
+    if (el0_oneshot_active() && current_user_proc_get() != NULL &&
+        current_user_proc_get()->kill_requested) {
+        usermode_return();
+    }
+
     /* Validate syscall number */
     if (syscall_num >= MAX_SYSCALLS) {
         klog_error("syscall_handler: Invalid syscall number %u", (uint32_t)syscall_num);
