@@ -15,6 +15,7 @@
 #include <aeos/mm.h>
 #include <aeos/pmm.h>
 #include <aeos/heap.h>
+#include <aeos/vmm.h>
 #include <aeos/interrupts.h>
 #include <aeos/vfs.h>
 #include <aeos/ramfs.h>
@@ -593,6 +594,15 @@ void kernel_main(void *dtb_addr)
     klog_info("==== AEOS test runner starting ====");
 
     mm_init();
+
+    /* Enable the MMU and caches right after the heap is up, mirroring the
+     * production kernel_main in main.c. Without this the TEST kernel runs
+     * MMU-off and the suite proves nothing about the MMU: every scenario below
+     * (PMM, heap, VFS, the framebuffer readback) then executes under virtual
+     * addressing, and the dedicated MMU scenarios assert the enable directly. */
+    vmm_init();
+    vmm_report();
+
     interrupts_init();
     semihost_init();
 
