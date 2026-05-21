@@ -192,7 +192,11 @@ void handle_irq(uint32_t source, uint32_t type, cpu_context_t *context)
     /* Update statistics */
     exception_stats.irq_count++;
 
-    /* Acknowledge interrupt and get IRQ number */
+    /* Acknowledge interrupt and get IRQ number. The timer (PPI 27) is a Group 0
+     * interrupt on this setup, so GICC_IAR returns its real INTID here; the
+     * registered timer_irq_handler then re-arms the comparator and EOIs below.
+     * (Group 1 interrupts would return 1022 from GICC_IAR and need GICC_AIAR,
+     * which QEMU virt's no-security-extensions GICv2 does not service.) */
     irq = gic_acknowledge_irq();
 
     /* GICv2 reserves IDs 1020-1023 as spurious indicators (1022 = group-0
