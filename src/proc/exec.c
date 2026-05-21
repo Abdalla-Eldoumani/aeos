@@ -259,7 +259,12 @@ int elf_exec_file(const char *path)
      * one-shot branch OR after the kill seam reaps it via usermode_return. On
      * return: clear current_user_proc, unregister + free the PCB, and return the
      * mapped pmm pages (segments + stack), closing the leak across exec calls. */
-    klog_info("exec: loaded %s entry=%p", path, (void *)e->e_entry);
+    /* Capture e_entry BEFORE kfree(buf): e aliases buf, so reading e->e_entry
+     * after the free is a use-after-free (it read 0 once user_proc_register's
+     * kmalloc reused the chunk, and the eret landed on a null entry -> EL0
+     * instruction abort). Latent until this loader was actually invoked. */
+    uint64_t entry = e->e_entry;
+    klog_info("exec: loaded %s entry=%p", path, (void *)entry);
     kfree(buf);
 
     process_t *proc = user_proc_register(path);
@@ -273,7 +278,7 @@ int elf_exec_file(const char *path)
     }
     current_user_proc = proc;
 
-    usermode_enter(e->e_entry, stack_va + 0x1000);
+    usermode_enter(entry, stack_va + 0x1000);
 
     current_user_proc = NULL;
     process_unregister(proc);
