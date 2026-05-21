@@ -473,6 +473,16 @@ int virtio_gpu_transfer_to_host(uint32_t resource_id, uint32_t x, uint32_t y,
         return -1;
     }
 
+    /* Order prior framebuffer pixel writes ahead of the device read. Since the
+     * MMU is enabled (SCTLR_EL1.C=1) the framebuffer is Normal-WB cacheable, but
+     * the virtio GPU is a DMA agent that reads physical RAM directly and is not
+     * behind the EL1 MMU. This transfer is exactly where QEMU copies the resource
+     * out of guest RAM, so a barrier here makes the CPU's writes globally visible
+     * to the Inner-Shareable domain the device participates in before it reads.
+     * RAM is mapped Inner Shareable, so dsb ish reaches the device's view; an
+     * explicit cache-line clean is held in reserve for a future tearing report. */
+    __asm__ volatile("dsb ish" ::: "memory");
+
     /* Prepare command */
     memset(&cmd, 0, sizeof(cmd));
     cmd.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
