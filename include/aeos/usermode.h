@@ -40,4 +40,53 @@ void usermode_return(void) __attribute__((noreturn));
  */
 bool el0_oneshot_active(void);
 
+/**
+ * One-shot EL0 payload selector for usermode_run_payload.
+ *   USERMODE_PAYLOAD_ROUNDTRIP - svc SYS_GETPID (observable) then svc SYS_EXIT.
+ *   USERMODE_PAYLOAD_PRIV_TRAP - msr daifset (traps EC=0x18) then a fail-path exit.
+ */
+typedef enum {
+    USERMODE_PAYLOAD_ROUNDTRIP,
+    USERMODE_PAYLOAD_PRIV_TRAP
+} usermode_payload_t;
+
+/**
+ * Map the selected naked payload at VA 0x80000000 (USER_EXEC) and a fresh
+ * pmm-backed stack page at 0x80001000 (USER_DATA), then usermode_enter at the
+ * payload entry with SP_EL0 = 0x80002000. The single map+enter recipe lives
+ * here so both callers (test_runner and main.c) stay thin. Returns by way of
+ * usermode_return once the payload's exit (or the trap seam) hands control back.
+ */
+void usermode_run_payload(usermode_payload_t kind);
+
+/**
+ * EL0 lower-EL synchronous handler for the non-SVC path of el0_aarch64_sync.
+ * Declared unconditionally because the vector calls it in every build. When the
+ * test trap-capture is armed (TEST_BUILD only), it records the ESR_EL1 EC and
+ * returns to the kernel via usermode_return; otherwise it forwards to the
+ * halting handle_exception, so production EL0 faults still panic as before.
+ */
+void handle_el0_sync(uint32_t source, uint32_t type, void *ctx);
+
+#ifdef TEST_BUILD
+/**
+ * Arm the one-shot trap-capture seam: the next non-SVC EL0 sync exception is
+ * recorded (its ESR_EL1 EC stored, a captured flag set) and control returns to
+ * the kernel instead of halting. Compiled only under TEST_BUILD; production
+ * builds never arm it, so handle_el0_sync always forwards to handle_exception.
+ */
+void usermode_arm_trap_capture(void);
+
+/**
+ * The ESR_EL1 exception class (EC, bits [31:26]) recorded by the armed seam.
+ * Valid only after usermode_trap_was_captured() returns true.
+ */
+uint32_t usermode_captured_ec(void);
+
+/**
+ * True once the armed seam has recorded a trapped EL0 exception.
+ */
+bool usermode_trap_was_captured(void);
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_USERMODE_H */
