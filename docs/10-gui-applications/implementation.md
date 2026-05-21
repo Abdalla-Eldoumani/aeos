@@ -1,8 +1,8 @@
 # GUI Applications - Implementation Details
 
 > The snippets below are simplified illustrations. `include/aeos/apps/*.h`
-> and `src/apps/*.c` are the source of truth — newer additions (ANSI parser
-> state, scrollback ring, calculator/sysmon/notes) live there.
+> and `src/apps/*.c` are the source of truth; newer additions (ANSI parser
+> state, scrollback ring, calculator/sysmon/notes/tetris) live there.
 
 ## Terminal Implementation
 
@@ -23,7 +23,7 @@ typedef struct {
     uint32_t input_pos;
     bool input_ready;
 
-    /* ANSI CSI parser state, scrollback ring — see header for full layout. */
+    /* ANSI CSI parser state, scrollback ring; see header for full layout. */
     /* ... */
 } terminal_t;
 
@@ -596,6 +596,100 @@ static void app_close(window_t *win)
     }
 }
 ```
+
+### Client-Area Drawing
+
+Apps draw inside the client area only and use the `window_*` helpers
+(`window_clear`, `window_fill_rect`, `window_putchar`, `window_puts`, and the
+rest), never the raw `fb_*` primitives. The `window_*` helpers translate
+client-relative coordinates into framebuffer coordinates and keep the window
+decorations untouched, so an app cannot paint over its own title bar or a
+neighbor's pixels.
+
+### Editor Apps in the GUI
+
+`edit` and `vi` are blocked from the GUI Terminal because the editor's input
+loop calls `uart_getc` directly and would block `wm_run`, freezing the whole
+desktop. Editing happens in text mode instead. The Terminal's output rendering
+is ANSI-parser-compatible, so command output still displays correctly. The
+Notes app is the GUI editor: it wraps the same `editor_t` buffer engine but
+drives input through the window callbacks, so it never blocks the WM loop.
+
+## Tetris Implementation
+
+### Tetris Structure
+
+```c
+typedef struct {
+    window_t *window;
+    uint8_t board[TET_ROWS][TET_COLS];  /* 20 rows x 10 cols */
+    int piece_type, piece_rot;
+    int piece_x, piece_y;
+    uint32_t score, high_score, lines_cleared, level;
+    uint64_t last_drop_ms;              /* gravity clock */
+    bool paused, game_over;
+} tetris_t;
+```
+
+The board is 10 columns by 20 rows at 16 px per cell. All seven tetrominoes are
+encoded as four rotations of a 16-bit grid each, in a static table.
+
+### Gravity from the Paint Hook
+
+```c
+static void tetris_paint(window_t *win)
+{
+    tetris_t *t = (tetris_t *)win->user_data;
+    uint64_t now = timer_get_uptime_ms();
+
+    /* Drop the active piece when the per-level interval elapses. */
+    if (!t->paused && !t->game_over && now - t->last_drop_ms >= tet_drop_ms(t)) {
+        tet_drop_one(t);
+        t->last_drop_ms = now;
+    }
+
+    /* draw board, active piece, score panel ... */
+
+    wm_request_redraw();  /* keep the WM ticking with no input */
+}
+```
+
+Gravity is paced by `timer_get_uptime_ms`: the active piece falls when the
+per-level interval has elapsed, and `wm_request_redraw` keeps the compositor
+ticking even when no key is pressed. The drop interval shaves 50 ms per level
+down to a 100 ms floor; the level rises every 10 cleared lines. Line clears use
+the Nintendo scoring table (100/300/500/800 points scaled by level). Arrow keys
+move and rotate, Down soft-drops, Space hard-drops, P pauses, R restarts.
+
+### High-Score Persistence
+
+```c
+#define TET_HIGH_SCORE_PATH "/tetris_high.bin"
+
+static uint32_t tet_load_high_score(void)
+{
+    int fd = vfs_open(TET_HIGH_SCORE_PATH, O_RDONLY, 0);
+    if (fd < 0) return 0;
+
+    tet_high_record_t rec;
+    ssize_t n = vfs_read(fd, &rec, sizeof(rec));
+    vfs_close(fd);
+
+    /* Short read, wrong magic/version, or bad checksum means no saved score. */
+    if (n != (ssize_t)sizeof(rec) ||
+        rec.magic != TET_HIGH_MAGIC || rec.version != TET_HIGH_VERSION ||
+        (rec.magic ^ rec.version ^ rec.score) != rec.checksum) {
+        return 0;
+    }
+    return rec.score;
+}
+```
+
+The high score lives in `/tetris_high.bin` through the VFS, loaded on
+`tetris_create` and written on `tetris_close` with `vfs_open` / `vfs_write`.
+The on-disk record is 16 bytes: a magic (`AETT`), a version, the `uint32_t`
+score, and a checksum. A truncated or tampered file is read back as no saved
+score, so a corrupt file never puts garbage on the side panel.
 
 ## Debugging
 
