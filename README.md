@@ -18,6 +18,53 @@ AEOS is **deliberately small**. It is meant to be readable end-to-end in a few s
 
 If you want any of those, AEOS is not the right starting point. If you want a small, hackable system you can read top-to-bottom and modify in an afternoon, it is.
 
+## What's interesting
+
+A few parts of AEOS are worth a reader's attention, either because of how they
+work under the constraints above or because they are not what you would expect
+from a kernel this small.
+
+- **A compositing window manager with no floating point.** The desktop runs
+  overlapping windows with slide-and-fade open animations, a fade-out close, and
+  toast notifications composited on top, all at 30 FPS. Because the kernel is
+  built with `-mgeneral-regs-only` (CPACR_EL1 never enables Q-register access at
+  EL1, so any float or SIMD code traps), every easing curve is computed in Q0.8
+  fixed-point in `src/lib/anim.c`. The animation system that would normally lean
+  on floats does the same work in integers.
+
+- **System calls are direct C function calls.** With no EL0 and no privilege
+  boundary, there is nothing to trap to. `syscall(num, ...)` is a table lookup
+  and a direct call, not an `SVC`. This is the right design for an all-EL1 kernel
+  and a deliberate simplification; it is also the first thing that changes once
+  EL0 userspace lands and the boundary becomes real.
+
+- **Security invariants you can re-check with one command.** A hardening pass
+  added defenses that `make audit` verifies on every run: a stack-guard sentinel
+  catches kernel stack overflow (there is no MMU yet for a faulting guard page, so
+  the boot stack carries a magic value that the exception path and the timer tick
+  both check), heap block headers carry a magic value re-stamped on every header
+  operation so `kfree` refuses a caller pointer whose magic is wrong, the editor
+  and VFS bound their attacker-influenced sizes and path lengths before
+  allocating, and the panic path masks DAIF on entry so a timer FIQ cannot corrupt
+  the crash dump. `make audit` runs the test suite and then asserts each security
+  scenario actually reported `PASS`, so silently dropping one fails the build.
+
+- **The filesystem survives a reboot through semihosting.** Files live in RAM at
+  runtime, but `save` serializes the whole ramfs tree to a flat blob and writes it
+  to `aeos_fs.img` on the host through ARM semihosting. On the next boot it is read
+  back and the tree is reconstructed, so a file written in one session is there in
+  the next without any block device or real disk driver.
+
+### Coming soon: a userspace program killed from the shell
+
+A short clip of a userspace program being started and then killed from the shell
+is planned but not yet captured. It depends on work that does not exist today:
+EL0 userspace and the ELF loader land in later phases, and recording the clip
+needs a display that is unavailable in the current build environment. This note
+is a placeholder; the clip will be added during the final documentation pass once
+those features are in. There is no screenshot here yet, and none has been
+fabricated.
+
 ## Features
 
 ### Graphical Desktop Environment
@@ -144,7 +191,7 @@ When running in graphical mode (`make run-ramfb`), AEOS displays:
 
 ### Keyboard Shortcuts
 - **Alt + Tab**: Cycle focus through visible windows in z-order. Hold Alt and press Tab repeatedly to keep stepping; releasing Alt commits the selection and raises the focused window to the top.
-- **Alt + F4**: Close the focused window. Same fade-out path as the window's close button — the app's `on_close` runs after the close animation completes.
+- **Alt + F4**: Close the focused window. Same fade-out path as the window's close button; the app's `on_close` runs after the close animation completes.
 - **Esc**: Dismiss UI overlays without sending the key to the focused app. Closes the start menu and starts the fade-out for any active toast notifications. If nothing's open to dismiss, Esc falls through to the focused window like any other key.
 
 ## Shell Commands
