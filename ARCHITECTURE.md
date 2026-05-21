@@ -5,16 +5,23 @@ through it. Read it before diving into a subsystem; the per-section walkthroughs
 in `docs/` go deeper.
 
 It describes the kernel as it stands today: a single-address-space AArch64 kernel.
-There is no MMU, no userspace, no SMP, and no networking. Those are the next
-milestones, not shipped behavior.
+The MMU is enabled with an identity map plus a high-half alias (described below),
+but there is no userspace, no SMP, and no networking, and the kernel does not yet
+enforce W^X or an EL0 boundary. Those are the next milestones, not shipped behavior.
 
 ## Overview
 
 AEOS is a monolithic kernel that runs entirely at EL1 inside QEMU's `virt`
 machine. A few properties shape everything else:
 
-- **Single flat address space.** There is no MMU and no page tables, so every
-  pointer is a physical address. The kernel loads at `0x40000000` and RAM ends at
+- **Identity-mapped single address space.** The MMU is on, but the running
+  kernel is identity-mapped: one L1 page table maps RAM as a Normal-WB cacheable
+  1GB block and the low MMIO window as a Device-nGnRnE block, so virtual equals
+  physical for the kernel. A TTBR1 high-half alias of RAM also exists at
+  `0xFFFFFF8000000000` and is demonstrated by reading the kernel image back
+  through it, but the kernel does not yet execute from the high half. This is an
+  identity map, not a relinked high-half kernel; TTBR0 is reserved for the future
+  per-process user mapping. The kernel loads at `0x40000000` and RAM ends at
   `0x50000000` (256 MB).
 - **No privilege boundary.** Everything runs at EL1. There are no EL0 processes,
   so a "system call" is not an `SVC` trap; `syscall(num, ...)` in
@@ -65,18 +72,24 @@ are load-bearing.
    anything calls `kmalloc`, so this comes early. `mm_init` starts the PMM at
    `__stack_top`, not at the heap end, so the buddy allocator never hands out the
    boot stack's pages and the stack-guard sentinel survives.
-3. `interrupts_init` installs the EL1 vector table. This happens before any IRQ
+3. `vmm_init`, then `vmm_report`. This builds the identity page table plus the
+   TTBR1 high-half alias and turns on the MMU and caches. It runs after the heap
+   is up and before any driver, the GIC, or the first timer FIQ, so every later
+   MMIO and DMA access uses the final mapping. The kernel is identity-mapped, so
+   the PC is unchanged across the enable; `vmm_report` prints the SCTLR bits and
+   confirms the high-half alias.
+4. `interrupts_init` installs the EL1 vector table. This happens before any IRQ
    source is enabled so a stray interrupt cannot land on an empty vector.
-4. `gic_init`, then `timer_init`, then `interrupts_enable`, then `timer_start`.
+5. `gic_init`, then `timer_init`, then `interrupts_enable`, then `timer_start`.
    The controller and timer are configured before interrupts are unmasked, and
    the timer is started last.
-5. `vfs_init`, then ramfs creation, then mounting `/`.
-6. `init_graphics`, which runs `fb_init` then `virtio_gpu_init`. The framebuffer
+6. `vfs_init`, then ramfs creation, then mounting `/`.
+7. `init_graphics`, which runs `fb_init` then `virtio_gpu_init`. The framebuffer
    and GPU must be up before anything draws.
-7. `process_init` then `scheduler_init`.
-8. `syscall_init` to populate the syscall table.
-9. `shell_init`.
-10. `bootscreen_init`, stage updates, `gui_init`, then `gui_run` when graphical
+8. `process_init` then `scheduler_init`.
+9. `syscall_init` to populate the syscall table.
+10. `shell_init`.
+11. `bootscreen_init`, stage updates, `gui_init`, then `gui_run` when graphical
     mode is available.
 
 If `gui_run` returns, or the user selects text mode at the boot screen, control
@@ -155,9 +168,12 @@ These follow from the properties above and are easy to violate by accident:
   wrong, but the rule is to never allocate in interrupt context in the first
   place. The scheduler tick guards against this with an early return before it is
   initialized.
-- **All addresses are physical.** With no MMU there is no virtual mapping, no
-  copy-on-write, and no `mmap`. The heap is 4 MB and its base moves with the
-  kernel image size.
+- **Identity mapping, no W^X, no demand paging.** The MMU is enabled but the
+  kernel runs through an identity map, so virtual equals physical and there is no
+  copy-on-write and no `mmap`. The whole kernel (code, rodata, data, heap, stack)
+  lives in one RWX 1GB block, so there is no per-section W^X yet, and there is no
+  EL0 boundary; both are later milestones once finer-grained tables and userspace
+  land. The heap is 4 MB and its base moves with the kernel image size.
 - **File-scope state, no loose globals.** The window manager, event queue,
   scheduler, and VFS each keep their state in file-scope `static` variables rather
   than exported globals.
