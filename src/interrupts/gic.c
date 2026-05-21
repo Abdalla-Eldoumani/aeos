@@ -69,9 +69,25 @@ void gic_init(void)
         MMIO_WRITE(GICD_ICENABLER + (i / 32) * 4, 0xFFFFFFFF);
     }
 
-    /* Set all interrupts to Group 1 (IRQ, not FIQ) */
+    /* Default every interrupt to Group 1. */
     for (i = 0; i < num_irqs; i += 32) {
         MMIO_WRITE(GICD_IGROUPR + (i / 32) * 4, 0xFFFFFFFF);
+    }
+
+    /* Move the virtual timer PPI (INTID 27) to Group 0. This is the acknowledge
+     * path that actually works on QEMU virt's GICv2 (no security extensions):
+     * a Group 0 interrupt is acknowledged by a plain GICC_IAR read, which then
+     * returns the real INTID 27 to handle_irq. A Group 1 interrupt instead makes
+     * GICC_IAR return the 1022 group-0-spurious indicator and must be acked via
+     * GICC_AIAR -- but the aliased registers depend on the Non-secure banking
+     * that this configuration does not provide, so an AIAR read returns 0 and
+     * the timer is never serviced. With FIQEn left at 0 (the reset default) a
+     * Group 0 interrupt is still signaled as IRQ, so the timer keeps arriving on
+     * the el1_spx_irq -> handle_irq path; only its acknowledge group changes. */
+    {
+        uint32_t grp = MMIO_READ(GICD_IGROUPR + (27 / 32) * 4);
+        grp &= ~(1u << (27 % 32));
+        MMIO_WRITE(GICD_IGROUPR + (27 / 32) * 4, grp);
     }
 
     /* Set all interrupts to lowest priority */
@@ -89,8 +105,9 @@ void gic_init(void)
         MMIO_WRITE(GICD_ICFGR + (i / 16) * 4, 0);
     }
 
-    /* Enable distributor for Group 1 interrupts */
-    MMIO_WRITE(GICD_CTLR, GICD_CTLR_ENABLE_GRP1);
+    /* Enable the distributor for both groups. Group 0 carries the timer PPI
+     * (see the IGROUPR setup above); Group 1 carries everything else. */
+    MMIO_WRITE(GICD_CTLR, GICD_CTLR_ENABLE_GRP0 | GICD_CTLR_ENABLE_GRP1);
 
     /* Configure CPU interface */
     /* Set priority mask to allow all priorities */
@@ -99,8 +116,10 @@ void gic_init(void)
     /* Set binary point to no grouping */
     MMIO_WRITE(GICC_BPR, 0);
 
-    /* Enable CPU interface for Group 1 interrupts (IRQ) */
-    MMIO_WRITE(GICC_CTLR, GICC_CTLR_ENABLE_GRP1);
+    /* Enable the CPU interface for both groups. FIQEn is left at 0, so Group 0
+     * interrupts (the timer) are signaled as IRQ, not FIQ -- they still arrive
+     * on the el1_spx_irq -> handle_irq path and are acked via GICC_IAR. */
+    MMIO_WRITE(GICC_CTLR, GICC_CTLR_ENABLE_GRP0 | GICC_CTLR_ENABLE_GRP1);
 
     kprintf("  GIC base: GICD=%p, GICC=%p\n",
             (void *)GICD_BASE, (void *)GICC_BASE);
