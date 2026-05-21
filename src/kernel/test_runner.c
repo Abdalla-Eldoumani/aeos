@@ -473,10 +473,24 @@ static void test_sec_stack_guard(void)
 static void test_sec_double_free_after_merge(void)
 {
     /* SEC-06 worst case from the audit: free two adjacent blocks so they merge,
-     * reuse the merged region, then free the first pointer again. Its old
-     * header is now mid-block of the reused allocation, so kfree must refuse it
-     * (klog_error + return) rather than corrupt the free list. The refusal path
-     * must not halt or this scenario hangs the runner. */
+     * reuse the merged region, then free a pointer whose old header now lands
+     * strictly mid-block of the reused allocation. kfree must refuse it via the
+     * bad-magic check (klog_error + return), not corrupt the free list. The
+     * refusal must not halt or this scenario hangs the runner.
+     *
+     * Geometry on this target (heap_block_t is 40 bytes, kmalloc(64) rounds to a
+     * 104-byte block): `a` = [A, A+104) payload A+40, `b` = [A+104, A+208)
+     * payload A+144. kfree(a); kfree(b) folds `b` into `a` (absorb-prev), so the
+     * 208-byte survivor starts at A. c = kmalloc(128) reuses that block; its
+     * payload base is A+40, identical to `a`'s old payload. So `a` is NOT a
+     * mid-block pointer -- freeing it would hit the live header at A and the
+     * pre-existing double-free / valid-header path, never the bad-magic check.
+     *
+     * The genuine mid-block pointer is `b`: its header at A+104 is strictly
+     * interior to `c`'s allocation. merge_free_blocks zeroed that absorbed
+     * header's magic during the fold (WR-02), so kfree(b) reads a cleared magic
+     * and is refused via the bad-magic path deterministically -- no reliance on
+     * uninitialized reuse bytes happening to differ from HEAP_MAGIC. */
     heap_stats_t before, after;
     heap_get_stats(&before);
 
@@ -498,9 +512,13 @@ static void test_sec_double_free_after_merge(void)
         return;
     }
 
-    /* The stale free of `a` is refused; reaching the next line proves no halt. */
-    kfree(a);
+    /* `b` lands mid-block of `c`; its absorbed header carries a cleared magic.
+     * kfree must refuse it via the bad-magic path. Reaching the next line proves
+     * the refusal did not halt. */
+    kfree(b);
 
+    /* `c` is still a valid live allocation -- the refused free of `b` left it
+     * untouched. Releasing it returns the whole merged region to baseline. */
     kfree(c);
 
     heap_get_stats(&after);
