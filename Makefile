@@ -75,6 +75,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/mm/mm.c \
               src/mm/pmm.c \
               src/mm/heap.c \
+              src/mm/vmm.c \
               src/interrupts/exceptions.c \
               src/interrupts/gic.c \
               src/interrupts/timer.c \
