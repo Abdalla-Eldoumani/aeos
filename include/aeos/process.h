@@ -58,6 +58,14 @@ typedef struct process {
     uint64_t time_slice;            /* Time quantum (for preemptive scheduling) */
     uint64_t total_time;            /* Total CPU time used */
 
+    /* Registry (SCHEDULER-INDEPENDENT). reg_next links the PCB onto a parallel
+     * list (registry_head in process.c) used by ps and process_kill; it is
+     * DISTINCT from the scheduler's next pointer so the registry never touches
+     * the run queue. kill_requested is set by process_kill and honored at the
+     * EL0 syscall boundary via the loader's current_user_proc pointer. */
+    struct process *reg_next;       /* Next process in the enumeration registry */
+    bool kill_requested;            /* Kill flag, honored at the next EL0 svc */
+
 } process_t;
 
 /**
@@ -99,5 +107,39 @@ void process_init(void);
  * @param proc Process to set as current
  */
 void process_set_current(process_t *proc);
+
+/**
+ * Link/unlink a PCB on the SCHEDULER-INDEPENDENT enumeration registry (reg_next +
+ * registry_head), distinct from the scheduler run queue. process_create calls
+ * process_register so every created process shows in ps; process_exit calls
+ * process_unregister so a reaped process leaves the registry.
+ */
+void process_register(process_t *proc);
+void process_unregister(process_t *proc);
+
+/**
+ * Head of the registry list; walk it via proc->reg_next (NULL-terminated) to
+ * enumerate live processes (pid/name/state) without touching the scheduler.
+ */
+process_t *process_registry_head(void);
+
+/**
+ * Mint a REGISTRY-ONLY PCB for a synchronous EL0 run: a heap PCB with pid,
+ * name, state=PROCESS_RUNNING, kill_requested=false, prepended on the registry.
+ * It is NEVER enqueued in the scheduler (no scheduler_add_process, no kernel
+ * stack), so ready_head stays NULL and the dormant scheduler is not woken - the
+ * Scope B boot-stability invariant. The caller frees it (process_unregister +
+ * kfree) after the run. Returns the PCB, or NULL on allocation failure.
+ */
+process_t *user_proc_register(const char *name);
+
+/**
+ * Look up a registered process by pid and set its kill_requested flag, honored
+ * at the next EL0 syscall boundary (via the loader's current_user_proc pointer).
+ * Returns 0 if a process with that pid is registered, negative otherwise. Scope
+ * B: this reaps a synchronously-running EL0 program at its next svc, NOT a
+ * concurrently-running one (no preemption until Phase 7).
+ */
+int process_kill(uint64_t pid);
 
 #endif /* AEOS_PROCESS_H */
