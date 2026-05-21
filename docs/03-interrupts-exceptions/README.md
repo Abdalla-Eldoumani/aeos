@@ -6,22 +6,23 @@ This section implements the exception handling infrastructure for AEOS, includin
 
 ## Status: Fully Functional
 
-Timer interrupts work via FIQ handling. The system runs with:
+Timer interrupts work via the IRQ path. The system runs with:
 - FIQ and IRQ unmasked during normal operation so the 100 Hz timer can fire
 - Timer ticks at 100 Hz
 - Preemptive multitasking enabled
 
 The interrupt mask is only forced on at one point: the exception-handler entry. `handle_exception` issues `msr DAIFSet, #0xF` (debug, SError, IRQ, FIQ) before it prints anything. This is the BUG-15 fix and it is specific to the crash-dump path, not a global change to how the kernel runs.
 
-## FIQ Solution
+## Timer Interrupt Delivery
 
-On QEMU virt, timer interrupts arrive as FIQ (Fast Interrupt) instead of IRQ, regardless of GIC configuration. The solution:
+On QEMU virt the virtual-timer PPI (INTID 27) is delivered as an **IRQ** and serviced through the normal GIC acknowledge flow:
 
-1. **Dedicated FIQ Handler**: `handle_fiq()` checks timer status directly
-2. **Direct Timer Status Check**: Reads CNTV_CTL's ISTATUS bit to confirm timer fired
-3. **FIQ Unmasking**: `interrupts_enable()` clears both FIQ and IRQ mask bits
+1. **Group 0 placement**: `gic_init` moves INTID 27 into GIC Group 0. With `GICC_CTLR.FIQEn = 0`, a Group 0 interrupt is signaled as IRQ (not FIQ).
+2. **Plain IAR acknowledge**: the IRQ arrives on the `el1_spx_irq -> handle_irq` path, which reads `GICC_IAR` and gets the real INTID 27, dispatches the registered `timer_irq_handler` (which re-arms `CNTV_TVAL` to clear the condition), then writes `GICC_EOIR`.
 
-This approach bypasses the GIC for timer interrupts, which is correct since FIQs don't go through the normal GIC acknowledge flow.
+Why Group 0 and not Group 1: QEMU virt's GICv2 has no security extensions. With the recommended `AckCtl = 0` model, a Group 1 interrupt makes a `GICC_IAR` read return the spurious value 1022 and must be acknowledged via the aliased `GICC_AIAR` register -- but without the Non-secure register banking, an `AIAR` read returns 0, so a Group 1 timer is never acknowledged and the interrupt storms. Group 0 + `FIQEn = 0` keeps the timer on the IRQ path while making `GICC_IAR` return its real INTID.
+
+Historical note: earlier revisions of this kernel claimed the timer arrived as FIQ "regardless of GIC configuration" and that the FIQ path bypassed the GIC. That was an artifact of an oversized, misaligned vector table: the EL1h IRQ slot (VBAR+0x280) physically fell inside the SP0 FIQ handler body, so the timer was serviced by the FIQ fragment by accident. Once the table was realigned to canonical 0x80 branch stubs, the timer had to be made a real, serviceable IRQ. `handle_fiq` / `timer_handle_fiq` remain as a dormant fallback.
 
 ## Exception Entry: DAIF Mask
 
@@ -38,7 +39,7 @@ Two paths check it, both in `src/kernel/stack_guard.c`:
 - `handle_exception` calls `stack_guard_check(context->pc)` right after the DAIF mask, before the first `kprintf`. If the sentinel is clobbered, the panic names the offending PC (the saved `ELR_EL1`) deterministically instead of printing a misleading trace off a corrupt stack.
 - `timer_handle_fiq` calls `stack_guard_check(0)` on each tick (0 because there is no faulting PC on a healthy tick). This catches a slow overflow before it reaches a fault.
 
-On a clobbered sentinel `stack_guard_check` reports a `klog_fatal` naming the PC, masks DAIF, and halts in a `wfi` loop. The check allocates nothing and is reentrant-safe because it runs on the FIQ tick path. The PMM must not hand out the stack region or it overwrites the sentinel, so `mm.c` starts the buddy allocator at `__stack_top`, not `heap_end`.
+On a clobbered sentinel `stack_guard_check` reports a `klog_fatal` naming the PC, masks DAIF, and halts in a `wfi` loop. The check allocates nothing and is reentrant-safe because it runs on the timer tick path (an IRQ on this setup). The PMM must not hand out the stack region or it overwrites the sentinel, so `mm.c` starts the buddy allocator at `__stack_top`, not `heap_end`.
 
 ## Components
 
@@ -105,7 +106,7 @@ Offset   Source                    Type
 0x780    Lower EL (AArch32)        SError
 ```
 
-Each vector is 128 bytes. Total table size = 2KB, must be 2KB-aligned.
+Each vector slot is 128 bytes (0x80); total table size = 2KB, must be 2KB-aligned. Each slot holds a single `b <handler>` branch stub, and the handler bodies live in a block below the 2KB table. Keeping each slot to one branch is what guarantees the offsets above line up; an inlined body that exceeds 0x80 shifts every later slot and misaligns the table.
 
 ## GICv2 Memory Map (QEMU virt)
 
@@ -188,22 +189,22 @@ void timer_delay_ms(uint32_t ms);
 bool timer_handle_fiq(void);
 ```
 
-## How FIQ Handling Works
+## How Timer Handling Works
 
 When the timer fires:
 
-1. Timer interrupt arrives as FIQ (QEMU virt behavior)
-2. FIQ vector calls `handle_fiq()`
-3. `handle_fiq()` calls `timer_handle_fiq()`
-4. `timer_handle_fiq()` checks CNTV_CTL's ISTATUS bit
-5. If set, increments tick counter and rearms timer
-6. Calls `scheduler_tick()` for preemption
+1. Timer interrupt arrives as an IRQ (Group 0, `FIQEn = 0`; see "Timer Interrupt Delivery")
+2. The `el1_spx_irq` stub calls `handle_irq()`
+3. `handle_irq()` reads `GICC_IAR`, gets the real INTID 27, and calls the registered `timer_irq_handler()`
+4. `timer_irq_handler()` re-arms `CNTV_TVAL` (clearing the timer condition) and increments the tick counter
+5. Calls `scheduler_tick()` for preemption
+6. `handle_irq()` writes `GICC_EOIR` to complete the interrupt
 
-The GIC is still initialized for other interrupts, but timer handling bypasses it entirely.
+The timer goes through the normal GIC acknowledge flow like any other IRQ. The dormant `handle_fiq` / `timer_handle_fiq` path (which reads CNTV_CTL's ISTATUS bit directly) is kept only as a fallback.
 
-For interrupts that do go through the GIC, `handle_irq` and `handle_fiq` return early when `gic_acknowledge_irq()` reports one of the GICv2 spurious IDs (1020-1023, with 1022 = group-0 spurious and 1023 = group-1 spurious). Those must not be EOI'd and must never index the handler table. The threshold is the literal 1020, not `GIC_MAX_IRQ` (which is 1024, the array length); an earlier version compared against the full table size and produced thousands of "Unhandled IRQ: 1022" lines on every redraw tick.
+`handle_irq` and `handle_fiq` return early when `gic_acknowledge_irq()` reports one of the GICv2 spurious IDs (1020-1023, with 1022 = group-0 spurious and 1023 = group-1 spurious). Those must not be EOI'd and must never index the handler table. The threshold is the literal 1020, not `GIC_MAX_IRQ` (which is 1024, the array length); an earlier version compared against the full table size and produced thousands of "Unhandled IRQ: 1022" lines on every redraw tick. (This same 1022 value is also what a `GICC_IAR` read returns for a Group 1 interrupt -- the reason the timer is placed in Group 0.)
 
-Uptime is read separately from the tick counter. `timer_get_uptime_ms` and `timer_get_uptime_sec` read `CNTVCT_EL0` directly rather than scaling `timer.ticks`. The FIQ-driven counter falls behind wall time inside busy-wait loops (bootscreen fades, window animations), while `CNTVCT` advances regardless.
+Uptime is read separately from the tick counter. `timer_get_uptime_ms` and `timer_get_uptime_sec` read `CNTVCT_EL0` directly rather than scaling `timer.ticks`. The interrupt-driven counter falls behind wall time inside busy-wait loops (bootscreen fades, window animations), while `CNTVCT` advances regardless.
 
 ## Shell Commands
 
@@ -217,14 +218,14 @@ System Uptime:
   Ticks: 8300 (at 100 Hz)
 ```
 
-**irqinfo**: Shows exception vector counters (FIQ counter increases with timer ticks)
+**irqinfo**: Shows exception vector counters (the EL1 SPx IRQ counter increases with timer ticks)
 ```
 AEOS> irqinfo
 Interrupt Statistics:
 
 Exception Vector Counters:
   EL1 SP0: sync=0 irq=0 fiq=0 serr=0
-  EL1 SPx: sync=0 irq=0 fiq=8300 serr=0
+  EL1 SPx: sync=0 irq=8300 fiq=0 serr=0
   ...
 ```
 
