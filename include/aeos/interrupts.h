@@ -90,6 +90,14 @@ uint64_t get_fault_address(void);
  */
 void dump_system_registers(void);
 
+/**
+ * Generic synchronous/SError exception handler. Called from the assembly vector
+ * stubs with the saved frame; masks DAIF, prints the ESR/FAR/PC decode, and
+ * halts. Declared here so C callers that forward to it (e.g. the EL0 trap seam)
+ * see a prototype rather than an implicit declaration.
+ */
+void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context);
+
 /* Assembly functions from vectors.asm */
 extern void exception_vector_table(void);
 
