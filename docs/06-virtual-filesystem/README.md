@@ -58,10 +58,36 @@ typedef struct vfs_inode {
     vfs_file_type_t type;       /* FILE or DIRECTORY */
     uint32_t mode;              /* Permissions (not enforced) */
     uint64_t size;              /* File size in bytes */
+    uint32_t nlinks;            /* Number of hard links */
+    uint32_t refcount;          /* Live references; freed when this hits 0 */
     void *fs_data;              /* Filesystem-specific data */
     vfs_filesystem_t *fs;       /* Owning filesystem */
 } vfs_inode_t;
 ```
+
+### Inode Refcount Lifecycle
+
+The `refcount` field tracks live references to an inode:
+
+- The directory entry holds the first reference when the inode is created.
+- Each open file pins the inode with an additional reference (`vfs_open` does `inode->refcount++`).
+- `unlink` on an open file removes the directory entry immediately, but the inode survives. The reference held by the open file keeps it alive.
+- When the last open file closes, `vfs_inode_unref` drops the count to zero and calls the filesystem's `inode_destroy` op, which releases the fs-specific data and frees the inode.
+
+This is the fix for the unlink-while-open use-after-free: deleting a name no longer frees data that an open descriptor still points at.
+
+`vfs_open` issues a `dmb ish` (inner-shareable release) barrier between the `refcount++` and handing the inode to `vfs_fd_alloc`, so the count store is ordered before the inode becomes reachable through the fd table. The barrier covers `-O2` reordering today; a full atomic refcount is deferred to the SMP phase and is not present yet.
+
+`vfs_fd_table_destroy` walks `table->fds` directly rather than going through `vfs_close`, so it can tear down any process's table, not only the current process's.
+
+### Path Length Bounds
+
+`split_path` bounds attacker-influenced input before it allocates:
+
+- A path whose `strlen` exceeds `VFS_PATH_MAX` (1024, defined in `vfs.h`) is rejected with a "path too long" warning and a negative return, before the `kmalloc(strlen(path) + 1)` copy. Without this bound a pathological path drives an arbitrarily large allocation against the kernel heap.
+- Each path component is rejected if its length reaches `MAX_FILENAME_LEN` (64), before the per-token allocation. The effective bound is 63 because ramfs stores names in a `char[64]`. Components are rejected, not truncated, so a create and a later lookup agree on the name instead of silently disagreeing on a truncated one.
+
+The negative return propagates through `vfs_path_lookup` to the caller.
 
 ### VFS File
 
