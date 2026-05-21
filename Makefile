@@ -116,7 +116,7 @@ KERNEL_IMG = kernel.img
 PFLASH_IMG = persist.bin
 
 # Phony targets
-.PHONY: all clean run debug dump directories pflash test
+.PHONY: all clean run debug dump directories pflash test audit
 
 # Default target
 all: directories $(KERNEL_ELF) $(KERNEL_BIN) pflash
@@ -349,6 +349,43 @@ test:
 		fi; \
 	else \
 		echo "Test runner did not finish (no TEST RESULTS line)"; \
+		exit 1; \
+	fi
+
+# ----------------------------------------------------------------------------
+# Security audit gate
+#
+# `make audit` is the phase gate for the 13.B security work. It runs the full
+# test suite (which now includes the security smoke scenarios in test_runner.c)
+# and then asserts that every expected sec_* scenario reported PASS in
+# build/test.log. The second check is what makes audit distinct from test: if a
+# future change silently drops a security scenario, the suite could still report
+# all-pass while the security coverage quietly shrank. Asserting the named PASS
+# lines turns that into a hard failure. Exits non-zero on any test failure or
+# any missing sec_* scenario.
+# ----------------------------------------------------------------------------
+SEC_SCENARIOS = sec_kcalloc_overflow \
+                sec_stack_guard \
+                sec_double_free_after_merge \
+                sec_vfs_path_too_long \
+                sec_editor_growth_overflow
+
+audit: test
+	@echo "----- security scenario check -----"
+	@missing=0; \
+	for s in $(SEC_SCENARIOS); do \
+		if grep -q "PASS: $$s" $(BUILD_DIR)/test.log; then \
+			echo "present: $$s"; \
+		else \
+			echo "MISSING or not PASS: $$s"; \
+			missing=1; \
+		fi; \
+	done; \
+	if [ "$$missing" = "0" ]; then \
+		echo "All security scenarios present and green."; \
+		echo "OK"; exit 0; \
+	else \
+		echo "Security audit failed: a scenario is missing or did not pass."; \
 		exit 1; \
 	fi
 
