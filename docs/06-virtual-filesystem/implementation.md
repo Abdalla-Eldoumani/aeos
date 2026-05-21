@@ -2,7 +2,7 @@
 
 ## Key Implementation Details
 
-The VFS layer spans `vfs.c`, `ramfs.c`, and `fs_persist.c`. This walkthrough focuses on the parts that bite — the AArch64 struct-assignment hazard, path resolution, ramfs's allocation pattern, the file-descriptor table, and the persistence handoff. Headers and source files are the source of truth for everything else.
+The VFS layer spans `vfs.c`, `ramfs.c`, and `fs_persist.c`. This walkthrough focuses on the parts that bite: the AArch64 struct-assignment hazard, path resolution, the inode refcount lifecycle, ramfs's allocation pattern, the file-descriptor table, and the persistence handoff. Headers and source files are the source of truth for everything else.
 
 ## Struct Assignment Bug (Critical)
 
@@ -30,6 +30,13 @@ strncpy(entry.name, some_struct->name, MAX_FILENAME_LEN);
 ```c
 static int split_path(const char *path, char **components, int max_components)
 {
+    /* Reject an over-long path before the kmalloc(strlen+1) copy. Without this
+     * a pathological path drives an unbounded allocation against the heap. */
+    if (strlen(path) > VFS_PATH_MAX) {            /* VFS_PATH_MAX = 1024 */
+        klog_warn("Path too long (over %d bytes), rejected", VFS_PATH_MAX);
+        return -1;
+    }
+
     char *path_copy = kmalloc(strlen(path) + 1);
     strcpy(path_copy, path);
 
@@ -39,6 +46,17 @@ static int split_path(const char *path, char **components, int max_components)
     int count = 0;
 
     while (token != NULL && count < max_components) {
+        /* Reject a component that does not fit the name field before
+         * allocating. The effective bound is MAX_FILENAME_LEN - 1 (63)
+         * because ramfs stores names in a char[MAX_FILENAME_LEN]. Rejecting
+         * rather than truncating avoids a create-vs-lookup name mismatch. */
+        if (strlen(token) >= MAX_FILENAME_LEN) {  /* MAX_FILENAME_LEN = 64 */
+            klog_warn("Path component too long (over %d bytes), rejected",
+                      MAX_FILENAME_LEN - 1);
+            for (int i = 0; i < count; i++) kfree(components[i]);
+            kfree(path_copy);
+            return -1;
+        }
         components[count] = kmalloc(strlen(token) + 1);
         strcpy(components[count], token);
         count++;
@@ -50,9 +68,11 @@ static int split_path(const char *path, char **components, int max_components)
 }
 ```
 
+**Length bounds (SEC-03)**: The path is rejected if `strlen(path) > VFS_PATH_MAX` (1024) before any allocation, and each component is rejected if `strlen(token) >= MAX_FILENAME_LEN` (64, effective bound 63). Both bounds run before the matching `kmalloc`, so attacker-influenced shell input cannot drive an unbounded allocation, and an over-long component is rejected rather than silently truncated.
+
 **Memory Management**: Each component is separately allocated. Caller must free all.
 
-**Error Handling**: If allocation fails mid-way, previously allocated components are freed.
+**Error Handling**: If a component is rejected or an allocation fails mid-way, previously allocated components are freed and a negative value is returned.
 
 ## Ramfs Inode Creation
 
@@ -70,6 +90,7 @@ static vfs_inode_t *ramfs_create_inode(vfs_file_type_t type, uint32_t mode)
     inode->type = type;
     inode->mode = mode;
     inode->size = 0;
+    inode->refcount = 1;      /* The directory entry holds the first reference */
     inode->fs_data = ramfs_data;
 
     /* Initialize ramfs data */
@@ -260,6 +281,44 @@ void vfs_fd_free(int fd)
 **Reference Counting**: Multiple FDs can point to same file. Closed when refcount reaches 0.
 
 **Table Per Process**: Each process has independent FD space.
+
+## Inode Refcounts and the vfs_open Barrier
+
+There are two reference counts: `vfs_file_t.refcount` (above, counts fds pointing at one open file) and `vfs_inode_t.refcount` (counts live references to the inode itself). The inode count is what makes unlink-while-open safe.
+
+```c
+/* In vfs_open, after the inode is resolved: */
+inode->refcount++;   /* pin the inode for this open file */
+
+/* Publish the refcount store before the inode becomes reachable through the
+ * fd table. Without the barrier, -O2 may move the store after vfs_fd_alloc. */
+__asm__ volatile("dmb ish" ::: "memory");
+
+fd = vfs_fd_alloc(file, 0);
+if (fd < 0) {
+    vfs_inode_unref(inode);   /* roll back the pin on failure */
+    kfree(file);
+    return -1;
+}
+```
+
+```c
+static void vfs_inode_unref(vfs_inode_t *inode)
+{
+    if (inode == NULL) return;
+    if (inode->refcount > 0) inode->refcount--;
+    if (inode->refcount == 0 && inode->fs && inode->fs->ops &&
+        inode->fs->ops->inode_destroy) {
+        inode->fs->ops->inode_destroy(inode);   /* free fs data + inode */
+    }
+}
+```
+
+**Lifecycle**: the directory entry holds the first reference; each open adds one. `unlink` on an open inode removes the directory entry right away, but `vfs_inode_unref` only destroys the inode when the count reaches zero, which happens at the last close. This closes the unlink-while-open use-after-free.
+
+**Barrier (SEC-05)**: the `dmb ish` orders the `refcount++` store ahead of the inode becoming reachable through the fd table. It covers `-O2` reordering on the single CPU today; a full atomic refcount is deferred to the SMP phase and is not present yet.
+
+**Table teardown**: `vfs_fd_table_destroy` walks `table->fds` directly instead of calling `vfs_close`, so it works for any process's table, not only `process_current()`'s.
 
 ## Filesystem Operations Dispatch
 
