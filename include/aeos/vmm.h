@@ -37,4 +37,28 @@ void vmm_report(void);
  */
 uint32_t vmm_ttbr1_alias_read(uint64_t pa);
 
+/**
+ * Protection class for an EL0 user page. Both classes set AP[2:1]=01 (EL1 RW /
+ * EL0 RW) and PXN=1 (EL1 must never execute user memory). They differ in UXN:
+ *   USER_EXEC - UXN=0, so EL0 may fetch-and-execute the page (a code page).
+ *   USER_DATA - UXN=1, so the page is never executed at any EL (a stack/data page).
+ * This is NOT W^X: USER_EXEC is EL0-writable (AP=01). True read-only code (AP=11)
+ * is a later follow-on; the educational one-shot accepts AP=01 per the phase scope.
+ */
+typedef enum { USER_EXEC, USER_DATA } user_prot_t;
+
+/**
+ * Map a single 4KB EL0-accessible page at user VA uva to physical page pa with
+ * the given protection. Builds an L1->L2->L3 walk chain at the FREE L1 index for
+ * uva (only the single VA 0x80000000 1GB window is supported this phase: index 2,
+ * which the Phase 4 identity map leaves invalid). The kernel RAM block (L1 index
+ * 1) and MMIO block (index 0) are NOT touched, so EL0 still faults on every kernel
+ * VA via their AP=00. Ends with dsb ish; tlbi vmalle1; dsb ish; isb so the live
+ * table walk sees the new entries and the I-side is coherent for a code page.
+ *
+ * uva and pa must be 4KB aligned. Re-calling for a second VA in the same window
+ * (e.g. a stack page) reuses the same L2/L3 tables.
+ */
+void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot);
+
 #endif /* AEOS_VMM_H */
