@@ -69,6 +69,10 @@ This section implements an interactive command-line shell and a vim-like text ed
 - Whitespace separation (space and tab)
 - Max arguments: 16
 - Quote stripping for grep patterns
+- A command line is split on the `|` pipe character into stages before parsing each stage
+
+### Pipes
+The shell splits a command line on `|` and runs the stages serially. Built-ins always print through `kprintf`, so a pipe stage installs a `kprintf` output hook that appends each character into a small fixed ring (256 bytes); the next stage reads that captured output back through `shell_pipe_readline` instead of opening a file. There are no real processes or kernel pipes behind this; the stages run one after another, up to a small fixed number of stages. A built-in opts into pipe input by reading `shell_pipe_readline` when its argv has no filename, as `grep` does.
 
 ### Path Resolution
 - Absolute paths start with `/`
@@ -118,6 +122,16 @@ This section implements an interactive command-line shell and a vim-like text ed
 - Line numbers in left margin
 - Mode indicator in status bar
 - Filename and modification status shown
+
+### Buffer Growth and Memory Safety
+The editor grows two buffers, and both growth sites are overflow-guarded (SEC-02):
+
+- `editor_add_line` grows the line array (through `editor_grow_lines`). It rejects a growth whose `new_cap * sizeof(editor_line_t)` byte size would overflow.
+- `line_grow` grows a single line's character buffer. It rejects a `*2` doubling that would wrap.
+
+Both use the `((size_t)-1) / elem` idiom from `kcalloc` (`SIZE_MAX` is absent from this tree). On an overflow or a `kmalloc` failure the existing buffer is left intact and the function returns -1; it never hands back an undersized block that the following copy would overrun. `editor_add_line` surfaces the controlled out-of-memory path with `notify_error("Out of memory")` plus a status line.
+
+`editor_set_status` is copy-only: it `strncpy`s the format string and ignores any varargs, so callers pass a plain literal. A `%` specifier left in a status string prints verbatim.
 
 ## API Reference
 
@@ -202,11 +216,11 @@ This will persist
 ### No Arrow Key Navigation
 Arrow keys generate escape sequences that cause SError exceptions. The escape sequence parser is disabled, so arrow keys appear as literal characters. Command history is stored but cannot be navigated with up/down arrows.
 
-### No Tab Completion
-Tab key is not processed for filename completion.
+### No Filename Completion
+The input loop reads UART directly and does not process the Tab key, so there is no filename completion.
 
-### No I/O Redirection
-Operators like `>`, `<`, `|`, `>>` are not implemented.
+### Limited Redirection
+The pipe operator `|` is supported (see Pipes below). File redirection operators `>`, `<`, and `>>` are not implemented.
 
 ### Global Working Directory
 Current working directory is global, not per-process.
