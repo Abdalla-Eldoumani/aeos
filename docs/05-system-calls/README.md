@@ -2,18 +2,20 @@
 
 ## Overview
 
-This section implements the system call interface for AEOS. Currently uses direct function calls instead of SVC instructions, as all code runs at EL1 (kernel mode).
+This section implements the system call interface for AEOS. It uses direct function calls, not SVC instructions, because all code runs at EL1 (kernel mode) and there is no privilege boundary to cross.
 
 ## Implementation Approach
 
-### Current: Direct Function Calls
-System calls are implemented as regular C functions that can be called directly:
+### Direct Function Calls
+A syscall is a table lookup followed by a direct C call. `syscall(num, args...)` validates `num` against the table size, fetches `syscall_table[num]`, and calls the handler as an ordinary function. The kernel-side wrappers (`sys_write`, `sys_getpid`, and so on) call the implementations directly:
 ```c
 sys_write(STDOUT_FILENO, "Hello\n", 6);
 ```
 
-### Future: SVC Instructions
-For user space (EL0) support, would use SVC:
+There is no SVC trap on the live path. The exception vectors decode the SVC class for diagnostics, but no syscall flows through them today.
+
+### Future: SVC for EL0
+If userspace at EL0 is added later, the dispatcher would move into the synchronous exception handler in `src/interrupts/exceptions.c` and pull arguments from the saved register frame:
 ```assembly
 mov x8, #SYS_WRITE
 mov x0, #1          /* STDOUT_FILENO */
@@ -22,7 +24,7 @@ mov x2, #6
 svc #0
 ```
 
-The exception handler would dispatch based on x8 (syscall number).
+That is future work, not the current mechanism.
 
 ## Components
 
@@ -79,14 +81,16 @@ uint64_t sys_getpid(void);
 uint64_t sys_yield(void);
 ```
 
-### Syscall Handler (for SVC)
+### Syscall Handler
 
 ```c
-/* Called from exception vector for SVC instructions */
+/* Numeric dispatch entry: validates the number, looks up the table, calls it */
 uint64_t syscall_handler(uint64_t syscall_num,
                          uint64_t arg0, uint64_t arg1, uint64_t arg2,
                          uint64_t arg3, uint64_t arg4, uint64_t arg5);
 ```
+
+`syscall_handler` is the numeric dispatch entry. It is called directly with a syscall number, not from an SVC trap. It validates the number, rejects an out-of-range or unimplemented number with -1, and otherwise calls `syscall_table[num]`.
 
 ## Syscall Implementations
 
@@ -215,11 +219,11 @@ Tracks:
 
 ## Known Issues
 
-### No Actual SVC Dispatch
-The code exists in `vectors.asm` to handle SVC, but syscalls currently use direct function calls. SVC handling is untested.
+### No SVC Dispatch
+There is no SVC trap on the live path; syscalls are direct function calls. The synchronous vector decodes the SVC class for diagnostics, but no syscall flows through it. SVC-based dispatch is reserved for the future EL0 work described above.
 
 ### No User Space
-Without user space (EL0), the syscall mechanism isn't strictly necessary. It exists for future expansion.
+Without user space (EL0), a trap-based syscall boundary is not needed. The numeric dispatcher and table exist so that adding EL0 later is a smaller change.
 
 ### Limited Error Codes
 System calls return -1 or 0 for errors, not errno codes. No global errno variable.
