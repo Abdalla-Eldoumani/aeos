@@ -134,6 +134,14 @@ el1_entry:
     ldr x1, =__bss_end
     ZERO_MEMORY(x0, x1, x2)
 
+    /* Stamp the stack-overflow guard sentinel at the bottom of the boot stack.
+     * STACK_GUARD_MAGIC in include/aeos/stack_guard.h must match this value.
+     * The overflow check reads this word; a corrupted word means the stack grew
+     * past its bottom. Done before the DTB restore so x0/x1 are free here. */
+    ldr x0, =__stack_limit
+    ldr x1, =0xAE057ACC
+    str x1, [x0]
+
     /* Restore device tree pointer */
     mov x0, x19
 
