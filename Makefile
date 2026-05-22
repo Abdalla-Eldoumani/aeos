@@ -50,6 +50,7 @@ LDFLAGS = -T linker.ld -nostdlib
 
 # Source files
 ASM_SOURCES = src/boot/boot.asm \
+              src/boot/secondary.asm \
               src/interrupts/vectors.asm \
               src/proc/context.asm
 C_SOURCES   = $(KERNEL_ENTRY_C) \
