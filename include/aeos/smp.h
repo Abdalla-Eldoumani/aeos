@@ -68,4 +68,19 @@ uint32_t smp_is_online(uint32_t cpu);
  * failure is logged and ignored - a missing marker is never fatal. */
 void smp_register_core_idle(uint32_t cpu);
 
+#ifdef TEST_BUILD
+/* TEST_BUILD cross-core runqueue stress seam (criterion 2 proof). Brings up the
+ * secondaries in stress mode - each does the EL2->EL1 drop + vmm_enable_secondary
+ * (MMU on, REQUIRED for the cross-core exclusive monitor) + a per-core stack, but
+ * SKIPS gic_init_secondary (the TEST GICD is unconfigured; a memory stress needs
+ * no interrupts). Each secondary then runs `iters` iterations of the self-locking
+ * runqueue mutators on its own dummy PCB + a shared lock-protected counter bump,
+ * then parks (wfe). Uses the same bounded handshake as smp_init (timeout +
+ * log-and-continue, never infinite). Returns how many cores participated in
+ * *out_online and the shared counter total in *out_counter, so the scenario can
+ * assert counter == online * iters EXACTLY and fail non-vacuously if no core came
+ * up. Production smp.h is unchanged when TEST_BUILD is not set. */
+void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out_counter);
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_SMP_H */
