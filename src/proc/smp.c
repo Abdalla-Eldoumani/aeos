@@ -132,11 +132,18 @@ void smp_init(void)
         }
         if (smp_is_online((uint32_t)target)) {
             online++;
+            /* Register this core's idle marker on the registry so ps lists it.
+             * Done HERE on the primary - the secondary is parked in wfe and must
+             * not kmalloc (the heap is not thread-safe). Registry-only, so the
+             * dormant scheduler stays asleep. A kmalloc failure is non-fatal. */
+            smp_register_core_idle((uint32_t)target);
         } else {
             klog_warn("smp: core %u TIMEOUT - continuing", (uint32_t)target);
         }
     }
-    klog_info("smp: %d secondary cores online", online);
+    /* online counts the secondaries; the primary (core 0) is always online, so
+     * the total core count is online + 1. */
+    klog_info("smp: %d cores online", online + 1);
 }
 
 /* The real secondary_entry now lives in src/boot/secondary.asm (the per-core
