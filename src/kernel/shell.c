@@ -1659,6 +1659,13 @@ static int cmd_kill(int argc, char **argv)
             kprintf("kill: invalid pid '%s'\n", argv[1]);
             return -1;
         }
+        /* Reject before the accumulate would wrap uint64_t (no UINT64_MAX in
+         * this tree, so the ((uint64_t)-1) idiom the editor guards use). A
+         * wrapped pid could collide with a real registered pid (WR-04). */
+        if (pid > (((uint64_t)-1) - 9) / 10) {
+            kprintf("kill: pid '%s' out of range\n", argv[1]);
+            return -1;
+        }
         pid = pid * 10 + (uint64_t)(*c - '0');
     }
 
