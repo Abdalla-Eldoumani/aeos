@@ -66,6 +66,14 @@ typedef enum { USER_EXEC, USER_DATA, USER_TEXT } user_prot_t;
  *
  * uva and pa must be 4KB aligned. Re-calling for a second VA in the same window
  * (e.g. a stack page) reuses the same L2/L3 tables.
+ *
+ * MAPPABLE EXTENT (load-bearing): the implementation keeps ONE static
+ * user_l3[512], so it maps only the FIRST 2MB of the window, [0x80000000,
+ * 0x80200000). Two VAs in different 2MB regions (e.g. 0x80000000 and 0x80200000)
+ * have the same L3 index and collapse onto the same leaf - the second write
+ * silently repoints the first. The 1GB L1 index is NOT the mappable region; it
+ * is the single 2MB L3. Callers (the ELF loader, exec.c USER_L3_TOP) MUST reject
+ * any VA reaching past 0x80200000 before calling this, or the mapping aliases.
  */
 void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot);
 

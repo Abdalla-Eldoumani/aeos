@@ -20,16 +20,25 @@
  * Load, validate, map, and run a static ELF64 at EL0, one program at a time.
  *
  * Opens path read-only, reads it into a size-bounded heap buffer, runs
- * elf_validate, maps each PT_LOAD into the [0x80000000, 0xC0000000) EL0 window
- * (PF_X -> USER_TEXT read-only code, otherwise USER_DATA), zero-fills any BSS
- * tail, maps a fresh EL0 stack page ABOVE the highest loaded segment, then
- * enters EL0 at e_entry via the reused usermode_enter one-shot. Returns after
- * the EL0 program exits through the sys_exit one-shot branch.
+ * elf_validate, maps each PT_LOAD into the single 2MB EL0 window
+ * [0x80000000, 0x80200000) (PF_X -> USER_TEXT read-only code, otherwise
+ * USER_DATA), zero-fills any BSS tail, maps a fresh EL0 stack page ABOVE the
+ * highest loaded segment, then enters EL0 at e_entry via the reused
+ * usermode_enter one-shot. Returns after the EL0 program exits through the
+ * sys_exit one-shot branch.
+ *
+ * The 2MB ceiling is the REAL mappable region: vmm_map_user_page backs the
+ * window with one static user_l3[512] = 2MB. Segments must be page-aligned,
+ * strictly ascending and non-overlapping, and the segment+stack extent must not
+ * cross 0x80200000 (a wider VA would alias an L3 leaf). The L1 index covers 1GB
+ * but only its first 2MB is mapped; the loader validates against the 2MB top,
+ * not the 1GB top.
  *
  * Returns 0 on a completed run, a negative error code on any reject/error.
- * A malformed or non-ELF file (or one with an out-of-bounds/out-of-window
- * segment) is rejected with a logged error and never faults. Only the single
- * EL0 window is supported; one EL0 program runs at a time.
+ * A malformed or non-ELF file (or one with an out-of-bounds/out-of-window/
+ * overlapping segment) is rejected with a logged error and never faults. Only
+ * the single EL0 window is supported; one EL0 program runs at a time (a
+ * re-entrant call is refused).
  */
 int elf_exec_file(const char *path);
 
