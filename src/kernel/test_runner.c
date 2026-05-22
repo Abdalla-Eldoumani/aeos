@@ -1168,6 +1168,84 @@ static void test_smp_runqueue_lock(void)
 }
 
 /* ============================================================================
+ * SMP last_cpu (criterion 3): the PCB records the core a process last ran on.
+ *
+ * The NON-VACUOUS proof that last_cpu is actually WRITTEN at the run/touch
+ * point (process_set_current), using the 06-05 sentinel technique. On the
+ * primary smp_cpu_id() is 0 and a field left uninitialized could also be 0, so
+ * "last_cpu == 0" would be vacuous. Instead we pre-set last_cpu to a SENTINEL
+ * (0xFFu) that smp_cpu_id() can never return (cpu ids are 0..3 on this flat
+ * board), call process_set_current, and assert last_cpu became smp_cpu_id() -
+ * proving the write happened. A missing write leaves the sentinel and FAILS.
+ *
+ * Paired against the create-time init: process_create already set last_cpu to
+ * smp_cpu_id() (asserted first), so the scenario also catches a create path
+ * that left the field garbage.
+ * ============================================================================ */
+
+static void test_smp_last_cpu(void)
+{
+    /* A value smp_cpu_id() can never return (cpu ids are 0..3 on this flat
+     * single-cluster board), so an assertion against smp_cpu_id() is real, not
+     * an accidental 0-equals-0 on the primary. */
+    const uint32_t LAST_CPU_SENTINEL = 0xFFu;
+
+    uint32_t self = smp_cpu_id();
+
+    /* Save the current process so process_set_current's global mutation is
+     * restored after the test (idle is current on the primary one-shot). */
+    process_t *saved_current = process_current();
+
+    process_t *p = process_create(test_process_dummy_entry, "last_cpu_test");
+    if (p == NULL) {
+        test_fail("smp_last_cpu", "process_create returned NULL");
+        return;
+    }
+
+    /* (1) process_create initializes last_cpu to the creating core. */
+    if (p->last_cpu != self) {
+        test_fail("smp_last_cpu", "process_create did not initialize last_cpu to smp_cpu_id()");
+        scheduler_remove_process(p);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* (2) The run/touch point WRITES last_cpu. Sentinel it to a value
+     * smp_cpu_id() can never be, touch the PCB via process_set_current, and
+     * assert the sentinel was overwritten with smp_cpu_id() - the non-vacuous
+     * proof the write happens. */
+    p->last_cpu = LAST_CPU_SENTINEL;
+    process_set_current(p);
+
+    if (p->last_cpu == LAST_CPU_SENTINEL) {
+        test_fail("smp_last_cpu", "process_set_current did not write last_cpu (sentinel survived)");
+        process_set_current(saved_current);
+        scheduler_remove_process(p);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+    if (p->last_cpu != self) {
+        test_fail("smp_last_cpu", "last_cpu not set to smp_cpu_id() at the touch point");
+        process_set_current(saved_current);
+        scheduler_remove_process(p);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* Restore the current process the one-shot started with, then tear down the
+     * test PCB (detach from both lists, free) - the 06-04/06-05 teardown. */
+    process_set_current(saved_current);
+    scheduler_remove_process(p);
+    process_unregister(p);
+    kfree(p);
+
+    test_pass("smp_last_cpu");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -1264,6 +1342,12 @@ void kernel_main(void *dtb_addr)
      * after the process scenarios; the stress secondaries park (wfe) afterward so
      * the remaining scenarios run on the primary undisturbed. */
     test_smp_runqueue_lock();
+
+    /* FEAT-04 criterion 3 (the ps CPU column data half). Proves last_cpu is
+     * WRITTEN at the run/touch point non-vacuously: a 0xFF sentinel (a value
+     * smp_cpu_id() can never return) is overwritten by process_set_current. NOT
+     * a sec_* scenario. */
+    test_smp_last_cpu();
 
     test_shell_parse_basic();
     test_shell_parse_whitespace();
