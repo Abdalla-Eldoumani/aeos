@@ -258,6 +258,18 @@ The current implementation assumes single-threaded execution during initializati
 ### No PID Lookup
 `process_get_by_pid` was removed. There is no global PCB table, only the run queue and `current_process`, and nothing called the lookup. A future command that needs PID lookup (for example `kill`) should add a parallel list with its own field on `process_t` rather than reusing the run queue's `next` pointer.
 
+## SMP bringup (Phase 7)
+
+The QEMU virt board boots with four cortex-a57 cores. The primary core (0) runs `kernel_main`; the other three start powered off. `smp_init` brings them online:
+
+- Each secondary is started via PSCI `CPU_ON` (an `HVC` call - QEMU virt has no EL3, so PSCI is reached at EL2 from EL1). It lands at a per-core entry that drops EL2 -> EL1 (mirroring the primary's boot drop, including resetting the virtual timer offset), sets its own stack, enables the MMU against the page tables the primary already built (the tables are shared, not rebuilt), programs its own GIC CPU interface (the shared distributor is left alone, owned by the primary), installs the shared exception vector table in its `VBAR_EL1`, prints `smp: core N online`, signals that it is up, and then parks in a `wfe` idle loop.
+- The primary's wait for each secondary is **bounded**: it spins on the secondary's online flag for a fixed maximum, then moves on. A `CPU_ON` that fails, or a secondary that never reports, is logged and skipped. The primary always continues to the window manager - a stuck secondary can never hang the kernel.
+- After the bringup, the serial shows `smp: core 1 online`, `smp: core 2 online`, `smp: core 3 online`, and a `smp: N cores online` summary (the total, counting the primary).
+
+**`ps` and the per-core idle process.** For each online core, the primary registers a per-core idle process on the enumeration registry (`idle/cpu1`, `idle/cpu2`, `idle/cpu3`; the primary's own idle is PID 1). These are registry markers only - they are not enqueued in the scheduler, so the dormant scheduler stays asleep. They are registered by the primary because the heap allocator is not thread-safe; the secondaries never allocate. `ps` therefore lists a process for cores 0..3, and a CPU column showing which core each process last ran on is added in a later plan.
+
+**Honest scope.** The secondaries come online and report, but they do **not** run scheduled work - the scheduler stays cooperative and single-core, and the runqueue is guarded by a spinlock added in a later plan. Cross-core preemptive scheduling (a process actually migrating to or running on a secondary) is out of scope; the bringup proves the cores are up and visible, nothing more.
+
 ## Testing
 
 ### Basic Scheduling Test
