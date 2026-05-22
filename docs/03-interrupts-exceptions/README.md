@@ -28,7 +28,9 @@ Historical note: earlier revisions of this kernel claimed the timer arrived as F
 
 When any unhandled exception lands in `handle_exception`, the first thing it does is mask DAIF (debug, SError, IRQ, FIQ) with `msr DAIFSet, #0xF`, before the first `kprintf`. `kprintf` is not reentrant: it walks a shared crash-dump ring and prints character by character. A timer FIQ landing in the middle of that print path would corrupt the trace, so the panic path runs with interrupts masked.
 
-This mutual exclusion holds only because the kernel is single-CPU. There is no lock inside `kprintf`; the DAIF mask is the entire guarantee. A real ring lock is future work for the SMP phase and is not present today.
+The DAIF mask is the same-core exclusion: it stops a timer IRQ on this core from preempting a ring write while the dump reads the buffer. Under SMP it does nothing about the other cores, so `kprintf` also carries a dedicated ring spinlock (`kprintf_ring_lock`, kprintf.c). `putchar` takes it across the ring store and the index/wrap update so two cores cannot splice a torn `(pos, wrapped)` pair. The lock is additive: it adds the cross-core ordering on top of the DAIF mask, it does not replace it (this is the SMP-phase ring lock the earlier single-CPU note deferred).
+
+The panic reader does not block on that lock. `kprintf_ring_walk` uses `spin_trylock`-or-bypass: it tries the lock and reads the ring whether or not it gets it. A faulted core could hold the lock forever, and a blocking acquire there would deadlock the panic so the crash dump prints nothing - so the dump always reads, accepting a slightly-torn read over a silent panic. The same short lock window in `putchar` keeps the same-core sequence (`handle_exception` -> `kprintf` -> `putchar` lock/unlock, then `kprintf_ring_walk`) from self-deadlocking on the non-recursive lock.
 
 ## Stack-Guard Sentinel
 
