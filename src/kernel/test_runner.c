@@ -32,6 +32,7 @@
 #include <aeos/syscall.h>
 #include <aeos/exec.h>
 #include <aeos/elf.h>
+#include <aeos/spinlock.h>
 
 /* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
  * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
@@ -154,6 +155,57 @@ static void test_heap_balanced(void)
         return;
     }
     test_pass("heap_balanced");
+}
+
+/* ============================================================================
+ * Spinlock scenarios
+ * ============================================================================ */
+
+static void test_spinlock_uncontended(void)
+{
+    /* RED gate for include/aeos/spinlock.h before any SMP code depends on it.
+     * On one core spin_lock is one ldaxr + one stlxr (no spin) and spin_unlock
+     * one stlr, so this exercises the real acquire/release path, uncontended.
+     * The held-lock check uses spin_trylock, never spin_lock: a blocking
+     * acquire on a lock this same single thread holds would deadlock the
+     * runner (the 30s timeout would then report a failure). */
+    spinlock_t lk = SPINLOCK_INIT;
+    volatile uint64_t counter = 0;
+    const uint64_t N = 1000;
+
+    /* Round trip + guarded counter: a lost update or a no-op lock diverges. */
+    for (uint64_t i = 0; i < N; i++) {
+        spin_lock(&lk);
+        counter++;
+        spin_unlock(&lk);
+    }
+    if (counter != N) {
+        test_fail("spinlock_uncontended", "guarded counter != iterations");
+        return;
+    }
+
+    /* trylock on a free lock takes it. */
+    if (spin_trylock(&lk) == 0) {
+        test_fail("spinlock_uncontended", "trylock failed on a free lock");
+        return;
+    }
+
+    /* trylock on the lock now held from above must fail without spinning. */
+    if (spin_trylock(&lk) != 0) {
+        spin_unlock(&lk);
+        test_fail("spinlock_uncontended", "trylock took a held lock");
+        return;
+    }
+
+    /* Release, then it must be retakeable. */
+    spin_unlock(&lk);
+    if (spin_trylock(&lk) == 0) {
+        test_fail("spinlock_uncontended", "lock not free after unlock");
+        return;
+    }
+    spin_unlock(&lk);
+
+    test_pass("spinlock_uncontended");
 }
 
 /* ============================================================================
@@ -1077,6 +1129,10 @@ void kernel_main(void *dtb_addr)
     test_heap_kmalloc_kfree();
     test_heap_kfree_null();
     test_heap_balanced();
+
+    /* Spinlock acquire/release RED gate. Needs no subsystem beyond the lock
+     * itself, so it runs right after the heap block. */
+    test_spinlock_uncontended();
 
     /* Security smoke scenarios that only need the heap, the stack-guard
      * sentinel, and the editor seam run alongside the heap tests. */
