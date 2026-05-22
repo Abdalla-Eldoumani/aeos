@@ -16,6 +16,7 @@
 #include <aeos/timer.h>
 #include <aeos/process.h>
 #include <aeos/scheduler.h>
+#include <aeos/smp.h>
 #include <aeos/syscall.h>
 #include <aeos/vfs.h>
 #include <aeos/ramfs.h>
@@ -417,6 +418,25 @@ void kernel_main(void *dtb_addr)
     process_init();
     scheduler_init();
     klog_info("Process management initialized");
+
+    /* Bring up the secondary cores (FEAT-04). smp_init CPU_ONs cores 1..3 via
+     * PSCI with a BOUNDED handshake and ALWAYS returns: a CPU_ON failure or a
+     * secondary that does not report within the spin bound is logged and skipped,
+     * so a stuck secondary can NEVER block the primary's path to the WM loop (the
+     * dominant non-negotiable). No wait or fail-if-not-all-online gate is added
+     * here - a partial bringup is fine, the primary proceeds regardless.
+     *
+     * Placed AFTER gic_init/timer_init/interrupts_enable (so the GIC distributor
+     * + the per-core GICC path exist for the secondaries to attach to) and after
+     * scheduler_init (so the process registry exists for the per-core idle
+     * markers smp_init registers), and BEFORE the EL0 block / shell / GUI branch.
+     * Each online core gets a registry-only "idle/cpuN" PCB so ps lists cores
+     * 0..3; the secondaries then park in wfe (no scheduled work). The "smp: core
+     * N online" prints race the primary's kprintf - the ring lock that orders
+     * them is a later plan; the markers are still present. */
+    kprintf("\n");
+    klog_info("Bringing up secondary cores...");
+    smp_init();
 
     /* Initialize System Calls */
     kprintf("\n");
