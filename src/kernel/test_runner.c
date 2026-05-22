@@ -30,6 +30,20 @@
 #include <aeos/editor.h>
 #include <aeos/usermode.h>
 #include <aeos/syscall.h>
+#include <aeos/exec.h>
+#include <aeos/elf.h>
+
+/* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
+ * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
+ * test ramfs and execs them; the loaded binary writes "hello, EL0!\n\0\0" (14
+ * bytes - mov x2, #14) then exits. */
+extern const unsigned char _binary_hello_elf_start[];
+extern const unsigned char _binary_hello_elf_end[];
+
+/* The byte length the embedded binary passes to sys_write (mov x2, #14 in
+ * tests/user/hello.S; confirmed by the 06-02 readelf/objdump). test_elf_load_run
+ * asserts the observed EL0 write length equals this exactly. */
+#define HELLO_WRITE_LEN 14
 
 static uint32_t test_pass_count = 0;
 static uint32_t test_fail_count = 0;
@@ -482,6 +496,117 @@ static void test_el0_priv_trap(void)
 }
 
 /* ============================================================================
+ * ELF loader scenarios (FEAT-03, criteria 1/2/3 headlessly). These run INSIDE
+ * the VFS suite block (a ramfs must be mounted): the load-run scenario writes
+ * the embedded ELF into ramfs and execs it, the reject scenario feeds malformed
+ * inputs to elf_validate + elf_exec_file. No GIC/timer in the runner, so the
+ * DAIF-masked one-shot the loader enters is deterministic, exactly like the EL0
+ * scenarios above. test_elf_load_run mirrors test_el0_roundtrip's sentinel +
+ * observable shape, but drives the real loader instead of a compiled-in payload.
+ * ============================================================================ */
+
+static void test_elf_load_run(void)
+{
+    /* Criteria 2/3: the real embedded ELF loads, runs at EL0, and its sys_write
+     * svc side effect is observed. Write the embedded bytes to /hello in the
+     * mounted ramfs, exec it, and assert (a) the loader returned 0, (b) control
+     * came back to the kernel (the EL0 program exited and usermode_return ret'd
+     * here - a hang would trip the 30s timeout = a detected failure), and (c)
+     * the TEST write observable shows the binary's write reached sys_write_impl
+     * with length 14. A vacuous pass (e.g. the exec never ran) would leave the
+     * observable length at 0, so the equality is a tight criterion-3 proof. */
+    int fd = vfs_open("/hello", O_CREAT | O_WRONLY | O_TRUNC, 0755);
+    if (fd < 0) {
+        test_fail("elf_load_run", "could not create /hello");
+        return;
+    }
+    uint64_t n = (uint64_t)(_binary_hello_elf_end - _binary_hello_elf_start);
+    if (vfs_write(fd, _binary_hello_elf_start, n) != (ssize_t)n) {
+        test_fail("elf_load_run", "short write of the embedded ELF to /hello");
+        vfs_close(fd);
+        return;
+    }
+    vfs_close(fd);
+
+    /* Clear the write observable so its post-run value is unambiguously from
+     * this EL0 run, then run with a sentinel mirroring test_el0_roundtrip. */
+    syscall_test_reset_last_write();
+    volatile int returned = 0;
+
+    int rc = elf_exec_file("/hello");
+    returned = 1;
+
+    if (rc != 0) {
+        test_fail("elf_load_run", "elf_exec_file did not return 0");
+        return;
+    }
+    if (returned != 1) {
+        test_fail("elf_load_run", "kernel did not regain control after the ELF exited");
+        return;
+    }
+    if (syscall_test_last_write_len() != HELLO_WRITE_LEN) {
+        test_fail("elf_load_run", "ELF sys_write side effect not observed (wrong length)");
+        return;
+    }
+
+    test_pass("elf_load_run");
+}
+
+static void test_elf_reject_malformed(void)
+{
+    /* Criterion 1: malformed / non-ELF / missing inputs are REJECTED with a
+     * negative return and the kernel does NOT fault. Two layers: elf_validate as
+     * the pure header unit (no fault possible - it reads only inside the buffer),
+     * and elf_exec_file as the integration (a real ramfs file). Reaching each
+     * assertion line proves the prior call returned (no fault). */
+
+    /* elf_validate direct unit checks. */
+    unsigned char tiny[8] = {0};
+    if (elf_validate(tiny, sizeof(tiny)) >= 0) {
+        test_fail("elf_reject_malformed", "elf_validate accepted a too-small buffer");
+        return;
+    }
+
+    unsigned char bad[64];
+    memset(bad, 0, sizeof(bad));
+    bad[0] = 0x7F;
+    bad[1] = 'X';                 /* not 'E' - bad magic */
+    if (elf_validate(bad, sizeof(bad)) >= 0) {
+        test_fail("elf_reject_malformed", "elf_validate accepted a bad-magic buffer");
+        return;
+    }
+
+    /* elf_exec_file integration: a non-ELF file must be rejected (negative) with
+     * no fault. Write junk bytes to /notelf, exec it, assert negative + that
+     * control is still here. */
+    const char *junk = "not an elf file at all\n";
+    int fd = vfs_open("/notelf", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        test_fail("elf_reject_malformed", "could not create /notelf");
+        return;
+    }
+    if (vfs_write(fd, junk, strlen(junk)) != (ssize_t)strlen(junk)) {
+        test_fail("elf_reject_malformed", "short write of junk to /notelf");
+        vfs_close(fd);
+        return;
+    }
+    vfs_close(fd);
+
+    if (elf_exec_file("/notelf") >= 0) {
+        test_fail("elf_reject_malformed", "elf_exec_file accepted a non-ELF file");
+        return;
+    }
+
+    /* A missing file must also be rejected (vfs_open fails inside the loader). */
+    if (elf_exec_file("/does_not_exist") >= 0) {
+        test_fail("elf_reject_malformed", "elf_exec_file accepted a missing file");
+        return;
+    }
+
+    test_pass("elf_reject_malformed");
+}
+
+/* ============================================================================
  * Framebuffer scenarios — exercise the graphics path (init, fill, getpixel)
  * end-to-end without booting the full GUI. The test runner doesn't have a
  * VirtIO GPU attached, but `fb_init` allocates an in-memory framebuffer and
@@ -751,6 +876,12 @@ void kernel_main(void *dtb_addr)
         test_vfs_create_read_write();
         test_vfs_unlink();
         test_sec_vfs_path_too_long();
+
+        /* ELF loader scenarios (FEAT-03). They need the mounted ramfs to write
+         * the embedded ELF (load-run) and a junk file (reject). The DAIF-masked
+         * one-shot the loader enters is deterministic - no GIC/timer here. */
+        test_elf_load_run();
+        test_elf_reject_malformed();
     } else {
         test_fail("vfs_setup", "could not register/mount ramfs");
     }
