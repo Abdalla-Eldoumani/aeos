@@ -9,6 +9,7 @@
 #include <aeos/kprintf.h>
 #include <aeos/uart.h>
 #include <aeos/types.h>
+#include <aeos/spinlock.h>
 
 /* External context switch function (from context.asm) */
 extern void context_switch(process_t *from, process_t *to);
@@ -24,6 +25,21 @@ static struct {
     uint64_t context_switches;
     bool initialized;
 } scheduler;
+
+/* The runqueue lock (criterion 2). Guards the three mutators that touch the
+ * shared ready_head/ready_tail - scheduler_add_process, scheduler_remove_process,
+ * schedule - so two cores cannot interleave a list operation and corrupt the
+ * queue. The discipline is UNLOCKED-INNER / LOCKED-PUBLIC: the actual list work
+ * lives in static *_inner helpers that run with the lock ALREADY HELD, and the
+ * public entry points wrap them by taking scheduler_lock exactly once. This is
+ * why schedule's internal self-requeue (it calls remove+add to rotate the
+ * current process) does NOT re-acquire the held lock and deadlock - it calls the
+ * inner helpers directly. The public mutators are SELF-LOCKING: a caller (incl.
+ * the cross-core stress in test_smp_runqueue_lock) must NOT take this lock itself.
+ * Uncontended (the single-core cooperative path: scheduler_init's remove(idle),
+ * yield -> schedule) it is one ldaxr/stlxr/stlr (spinlock.h), so the boot and the
+ * dormant production scheduler (ready_head stays NULL) are unchanged. */
+static spinlock_t scheduler_lock = SPINLOCK_INIT;
 
 /**
  * Idle process - runs when no other process is ready
@@ -89,9 +105,12 @@ void scheduler_init(void)
 }
 
 /**
- * Add a process to the ready queue
+ * Append a process to the ready queue. INNER helper: call with scheduler_lock
+ * ALREADY HELD (the public scheduler_add_process wrapper holds it; schedule's
+ * self-requeue calls this directly under the lock it already took). Does the
+ * list mutation only - no lock acquire/release here.
  */
-void scheduler_add_process(process_t *proc)
+static void add_inner(process_t *proc)
 {
     if (proc == NULL) {
         return;
@@ -119,9 +138,10 @@ void scheduler_add_process(process_t *proc)
 }
 
 /**
- * Remove a process from the scheduler
+ * Remove a process from the ready queue. INNER helper: call with scheduler_lock
+ * ALREADY HELD. Does the list walk + unlink only - no lock here.
  */
-void scheduler_remove_process(process_t *proc)
+static void remove_inner(process_t *proc)
 {
     process_t *current, *prev;
 
@@ -160,15 +180,43 @@ void scheduler_remove_process(process_t *proc)
 }
 
 /**
- * Select the next process to run (round-robin)
+ * Add a process to the ready queue. PUBLIC: self-locking - takes scheduler_lock,
+ * runs the inner mutation, releases. A caller must NOT hold scheduler_lock.
+ */
+void scheduler_add_process(process_t *proc)
+{
+    spin_lock(&scheduler_lock);
+    add_inner(proc);
+    spin_unlock(&scheduler_lock);
+}
+
+/**
+ * Remove a process from the scheduler. PUBLIC: self-locking (see above).
+ */
+void scheduler_remove_process(process_t *proc)
+{
+    spin_lock(&scheduler_lock);
+    remove_inner(proc);
+    spin_unlock(&scheduler_lock);
+}
+
+/**
+ * Select the next process to run (round-robin). PUBLIC: self-locking. Takes
+ * scheduler_lock at entry and releases it at EVERY return path (incl. the
+ * ready_head==NULL early return). The self-requeue uses the UNLOCKED inner
+ * helpers (remove_inner/add_inner), NOT the public wrappers, so it does not
+ * re-acquire the held lock and deadlock.
  */
 process_t *schedule(void)
 {
     process_t *next;
 
+    spin_lock(&scheduler_lock);
+
     if (scheduler.ready_head == NULL) {
-        /* No ready processes, return idle process */
+        /* No ready processes, return idle process. Unlock before returning. */
         klog_debug("schedule: ready queue empty, returning idle process");
+        spin_unlock(&scheduler_lock);
         return scheduler.idle;
     }
 
@@ -181,9 +229,10 @@ process_t *schedule(void)
 
         scheduler.current->state = PROCESS_READY;
 
-        /* Remove from wherever it is and add to tail */
-        scheduler_remove_process(scheduler.current);
-        scheduler_add_process(scheduler.current);
+        /* Remove from wherever it is and add to tail. Use the INNER helpers so
+         * we do not re-acquire the lock we already hold (no self-deadlock). */
+        remove_inner(scheduler.current);
+        add_inner(scheduler.current);
     }
 
     /* Remove next process from ready queue */
@@ -193,6 +242,7 @@ process_t *schedule(void)
     }
     next->next = NULL;
 
+    spin_unlock(&scheduler_lock);
     return next;
 }
 
