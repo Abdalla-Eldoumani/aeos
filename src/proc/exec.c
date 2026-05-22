@@ -61,6 +61,18 @@ process_t *current_user_proc_get(void)
     return current_user_proc;
 }
 
+#ifdef TEST_BUILD
+/* Point the kill seam at a process WITHOUT a full elf_exec_file run. elf_exec_file
+ * is the only production setter of current_user_proc; test_process_kill_reap uses
+ * this hook to arm the seam against a user_proc_register'd PCB before entering EL0
+ * with a bare payload, then clears it (set NULL) after. TEST_BUILD only - the
+ * production loader still owns the pointer's lifecycle. */
+void current_user_proc_set(process_t *proc)
+{
+    current_user_proc = proc;
+}
+#endif /* TEST_BUILD */
+
 uint64_t usermode_map_base(void)
 {
     return user_map_base;
