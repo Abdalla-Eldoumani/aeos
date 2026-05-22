@@ -626,6 +626,103 @@ static void test_elf_reject_malformed(void)
     test_pass("elf_reject_malformed");
 }
 
+/* Write a little-endian value of width bytes at buf+off (no unaligned struct
+ * stores; the crafted header is built byte-exact). */
+static void le_store(unsigned char *buf, uint64_t off, uint64_t val, unsigned width)
+{
+    for (unsigned k = 0; k < width; k++) {
+        buf[off + k] = (unsigned char)(val >> (8u * k));
+    }
+}
+
+static void test_elf_reject_oversized_segment(void)
+{
+    /* CR-01/CR-03 regression: a header-valid ELF whose single PT_LOAD declares a
+     * p_memsz that spills past the mapped 2MB L3 ceiling (USER_L3_TOP =
+     * 0x80200000) must be REJECTED with a negative return and NO fault, and must
+     * leak no pmm pages. Before the fix, exec.c validated against the 1GB window
+     * and let the page loop alias L3 leaves / drain the pmm. The segment is
+     * BSS-only (p_filesz=0, p_memsz=3MB at p_vaddr=0x80000000); the file-extent
+     * and memsz>=filesz checks pass, but vaddr+memsz = 0x80300000 > USER_L3_TOP.
+     *
+     * Built byte-exact in a small buffer (Ehdr at 0, one Phdr at e_phoff=64) so
+     * elf_validate accepts the header, then written to ramfs and run through the
+     * real elf_exec_file - the same VFS seam test_elf_load_run uses. */
+    unsigned char elf[128];
+    memset(elf, 0, sizeof(elf));
+
+    /* Ehdr: magic + class/data/version, ET_EXEC, EM_AARCH64, one 56-byte phdr at
+     * offset 64. e_entry is irrelevant (the run is rejected before any enter). */
+    elf[EI_MAG0] = ELFMAG0;
+    elf[EI_MAG1] = ELFMAG1;
+    elf[EI_MAG2] = ELFMAG2;
+    elf[EI_MAG3] = ELFMAG3;
+    elf[EI_CLASS] = ELFCLASS64;
+    elf[EI_DATA]  = ELFDATA2LSB;
+    elf[EI_VERSION] = EV_CURRENT;
+    le_store(elf, 0x10, ET_EXEC, 2);        /* e_type */
+    le_store(elf, 0x12, EM_AARCH64, 2);     /* e_machine */
+    le_store(elf, 0x14, EV_CURRENT, 4);     /* e_version */
+    le_store(elf, 0x18, 0x80000000ULL, 8);  /* e_entry */
+    le_store(elf, 0x20, 64, 8);             /* e_phoff (phdr right after Ehdr) */
+    le_store(elf, 0x36, 56, 2);             /* e_phentsize */
+    le_store(elf, 0x38, 1, 2);              /* e_phnum */
+
+    /* One PT_LOAD: BSS-only (filesz 0), memsz 3MB at VA 0x80000000. */
+    uint64_t ph = 64;
+    le_store(elf, ph + 0x00, PT_LOAD, 4);          /* p_type */
+    le_store(elf, ph + 0x04, PF_R | PF_W, 4);      /* p_flags */
+    le_store(elf, ph + 0x08, 0, 8);                /* p_offset */
+    le_store(elf, ph + 0x10, 0x80000000ULL, 8);    /* p_vaddr */
+    le_store(elf, ph + 0x18, 0x80000000ULL, 8);    /* p_paddr */
+    le_store(elf, ph + 0x20, 0, 8);                /* p_filesz */
+    le_store(elf, ph + 0x28, 0x300000ULL, 8);      /* p_memsz = 3MB, past 2MB top */
+    le_store(elf, ph + 0x30, 0x1000ULL, 8);        /* p_align */
+
+    /* Sanity: the header itself must be valid, or the test would pass for the
+     * wrong reason (rejected at the header gate, not the 2MB ceiling). */
+    if (elf_validate(elf, sizeof(elf)) != 0) {
+        test_fail("elf_reject_oversized_segment", "crafted header failed elf_validate");
+        return;
+    }
+
+    int fd = vfs_open("/oversized", O_CREAT | O_WRONLY | O_TRUNC, 0755);
+    if (fd < 0) {
+        test_fail("elf_reject_oversized_segment", "could not create /oversized");
+        return;
+    }
+    if (vfs_write(fd, elf, sizeof(elf)) != (ssize_t)sizeof(elf)) {
+        test_fail("elf_reject_oversized_segment", "short write of the crafted ELF");
+        vfs_close(fd);
+        return;
+    }
+    vfs_close(fd);
+
+    /* Capture pmm free pages so the reject can be proven leak-free. */
+    pmm_stats_t before, after;
+    pmm_get_stats(&before);
+
+    volatile int returned = 0;
+    int rc = elf_exec_file("/oversized");
+    returned = 1;   /* reaching here proves no fault took the kernel down */
+
+    if (returned != 1) {
+        test_fail("elf_reject_oversized_segment", "kernel did not return from the loader");
+        return;
+    }
+    if (rc >= 0) {
+        test_fail("elf_reject_oversized_segment", "oversized segment was not rejected");
+        return;
+    }
+    pmm_get_stats(&after);
+    if (after.free_pages != before.free_pages) {
+        test_fail("elf_reject_oversized_segment", "rejected load leaked pmm pages");
+        return;
+    }
+
+    test_pass("elf_reject_oversized_segment");
+}
+
 /* ============================================================================
  * Process kill-reap scenario (FEAT-03 criterion 4, headless, NON-VACUOUS).
  *
@@ -1013,6 +1110,7 @@ void kernel_main(void *dtb_addr)
          * one-shot the loader enters is deterministic - no GIC/timer here. */
         test_elf_load_run();
         test_elf_reject_malformed();
+        test_elf_reject_oversized_segment();
     } else {
         test_fail("vfs_setup", "could not register/mount ramfs");
     }
