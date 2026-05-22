@@ -108,32 +108,10 @@ void smp_init(void)
     klog_info("smp: %d secondary cores online", online);
 }
 
-/* ----------------------------------------------------------------------------
- * PLACEHOLDER bridge so this plan's smp.c links standalone.
- *
- * smp_init takes the address of secondary_entry, so the linker must resolve the
- * symbol. The real per-core entry (the EL2->EL1 drop + per-core SP + the MMU/GIC
- * body in secondary_main) lands in src/boot/secondary.asm in a later plan. Until
- * then this file ships a MINIMAL, harmless placeholder. A LATER PLAN MUST REMOVE
- * this block (both secondary_entry and the placeholder secondary_main body) and
- * supply the real src/boot/secondary.asm + the production secondary_main.
- *
- * secondary_entry is a top-level naked asm block, .global, NOT a C function with
- * __attribute__((naked)) - AArch64 GCC rejects naked on a function with a body
- * (the same lesson usermode.c's payloads learned). On entry x0 = context_id =
- * this core's stack top (per psci_cpu_on's x3), so set SP from x0 and call into
- * C; if ever entered it just parks. It is never reached in this plan because
- * smp_init is not called. */
-__asm__(
-    ".section .text\n"
-    ".global secondary_entry\n"
-    ".type secondary_entry, %function\n"
-    "secondary_entry:\n"
-    "   mov sp, x0\n"           /* x0 = context_id = per-core stack top */
-    "   bl secondary_main\n"
-    "1: wfi\n"
-    "   b 1b\n"
-);
+/* The real secondary_entry now lives in src/boot/secondary.asm (the per-core
+ * EL2->EL1 drop + SP set + bl secondary_main); the 07-03 placeholder asm block
+ * that defined it here was removed. smp_init takes &secondary_entry as the
+ * CPU_ON entry PA; the symbol is resolved by secondary.asm at link time. */
 
 /* Placeholder secondary_main: signal online and park. The production version
  * (a later plan) enables the per-core MMU (vmm_enable_secondary), the per-core
