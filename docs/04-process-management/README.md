@@ -266,7 +266,19 @@ The QEMU virt board boots with four cortex-a57 cores. The primary core (0) runs 
 - The primary's wait for each secondary is **bounded**: it spins on the secondary's online flag for a fixed maximum, then moves on. A `CPU_ON` that fails, or a secondary that never reports, is logged and skipped. The primary always continues to the window manager - a stuck secondary can never hang the kernel.
 - After the bringup, the serial shows `smp: core 1 online`, `smp: core 2 online`, `smp: core 3 online`, and a `smp: N cores online` summary (the total, counting the primary).
 
-**`ps` and the per-core idle process.** For each online core, the primary registers a per-core idle process on the enumeration registry (`idle/cpu1`, `idle/cpu2`, `idle/cpu3`; the primary's own idle is PID 1). These are registry markers only - they are not enqueued in the scheduler, so the dormant scheduler stays asleep. They are registered by the primary because the heap allocator is not thread-safe; the secondaries never allocate. `ps` therefore lists a process for cores 0..3, and a CPU column showing which core each process last ran on is added in a later plan.
+**`ps` and the per-core idle process.** For each online core, the primary registers a per-core idle process on the enumeration registry (`idle/cpu1`, `idle/cpu2`, `idle/cpu3`; the primary's own idle is PID 1). These are registry markers only - they are not enqueued in the scheduler, so the dormant scheduler stays asleep. They are registered by the primary because the heap allocator is not thread-safe; the secondaries never allocate. `ps` therefore lists a process for cores 0..3.
+
+**The `ps` CPU column.** Each PCB carries a `last_cpu` field - the core a process last ran on, or was last touched on. `process_create` and the registry-mint helpers set it to the core that creates the PCB, and `process_set_current` refreshes it whenever a process becomes current, so it records the core that last ran the process. The per-core idle markers are the exception: each `idle/cpuN` marker carries its own represented core (`idle/cpu2` reads CPU 2), not the primary that registered it, so the column spans cores 0..3. `ps` prints `last_cpu` as a CPU column:
+
+```
+  PID  CPU  STATE      NAME
+  1    0    RUNNING    idle
+  5    1    RUNNING    idle/cpu1
+  6    2    RUNNING    idle/cpu2
+  7    3    RUNNING    idle/cpu3
+```
+
+This is honest about the bounded scope: `last_cpu` shows the LAST core to touch a PCB, not live cross-core scheduling. On the production path everything runs on the primary (core 0) and the secondaries park, so the registered processes read core 0; the per-core idle markers read 1..3 because they stand in for the parked cores. The column does **not** mean a process migrates between cores - that is full cross-core scheduling, which is out of scope. `last_cpu` is a display field: an aligned word write, with no invariant depending on its value, so it needs no lock.
 
 **The runqueue lock.** The scheduler runqueue (`ready_head`/`ready_tail`) is guarded by a spinlock so two cores cannot interleave a list operation and corrupt it. The three mutators that touch the queue - `scheduler_add_process`, `scheduler_remove_process`, and `schedule` - take the lock at entry and release it at every return path. `schedule` rotates the running process by removing and re-adding it, so it would re-acquire its own held lock and deadlock if the mutators were naively locked; instead the actual list work lives in unlocked inner helpers, and the public entry points wrap them by taking the lock exactly once. The lock is uncontended on the single-core cooperative path (the cooperative `yield` and the boot `scheduler_init`), where it costs one acquire/release, so the boot is unchanged. Its correctness under genuine contention is proven by a cross-core stress test that brings up real secondaries to hammer the mutators concurrently while a shared lock-protected counter checks for lost updates - without the lock the concurrent mutation corrupts the list and loses counter updates; with it the queue stays well-formed and the counter is exact.
 
