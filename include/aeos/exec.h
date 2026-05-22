@@ -55,4 +55,16 @@ uint64_t usermode_map_end(void);
  */
 process_t *current_user_proc_get(void);
 
+#ifdef TEST_BUILD
+/**
+ * Point the EL0 kill seam at a process directly, bypassing a full elf_exec_file
+ * run. test_process_kill_reap registers a user PCB, sets it here, arms its kill
+ * flag via process_kill(pid), and enters EL0 with a getpid-first payload so the
+ * seam (which reads current_user_proc->kill_requested) reaps the run before the
+ * getpid dispatches. The test clears it (NULL) afterward. TEST_BUILD only - the
+ * production loader sets/clears current_user_proc itself across usermode_enter.
+ */
+void current_user_proc_set(process_t *proc);
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_EXEC_H */
