@@ -33,6 +33,7 @@
 #include <aeos/exec.h>
 #include <aeos/elf.h>
 #include <aeos/spinlock.h>
+#include <aeos/smp.h>
 
 /* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
  * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
@@ -1089,6 +1090,84 @@ static void test_sec_editor_growth_overflow(void)
 }
 
 /* ============================================================================
+ * SMP cross-core runqueue lock proof (criterion 2)
+ * ============================================================================ */
+
+/* Iterations each stress secondary runs. Matched to the validated probe shape
+ * (the 07-RESEARCH 30000/30000 proof used 10000 per core). The proof is the
+ * EXACT equality counter == online * ITERS, not the magnitude. */
+#define SMP_STRESS_ITERS 10000
+
+static void test_smp_runqueue_lock(void)
+{
+    /* The GENUINELY cross-core proof of the runqueue lock (criterion 2). Brings
+     * up REAL secondaries that concurrently hammer scheduler_add_process /
+     * scheduler_remove_process (the self-locking mutators) on their own per-core
+     * dummy PCBs AND bump a shared lock-protected counter. We assert:
+     *   (a) the shared counter == participating_cores * ITERS EXACTLY (zero lost
+     *       updates - the cross-core proof; a missing lock loses updates under
+     *       real contention), and
+     *   (b) the runqueue is well-formed afterward: the running count is back to
+     *       the pre-stress baseline (each core's adds and removes balanced, so a
+     *       lost/duplicated node would drift the count) AND the ready queue
+     *       drains empty (schedule() returns idle, i.e. ready_head is NULL).
+     * It is non-vacuous: if NO secondary comes up (online == 0) it FAILS rather
+     * than silently passing - the cross-core proof could not run. */
+
+    scheduler_stats_t before;
+    scheduler_get_stats(&before);
+
+    uint32_t online = 0;
+    uint64_t counter = 0;
+    smp_run_runqueue_stress(SMP_STRESS_ITERS, &online, &counter);
+
+    /* Non-vacuity: a zero-core run is NOT a pass. The proof requires genuine
+     * cross-core contention. */
+    if (online == 0) {
+        test_fail("smp_runqueue_lock",
+                  "no secondary participated - cross-core proof could not run");
+        return;
+    }
+
+    /* (a) The shared counter must be EXACT: every one of online*ITERS bumps
+     * landed. A non-serializing (missing) lock loses updates here. */
+    uint64_t expected = (uint64_t)online * (uint64_t)SMP_STRESS_ITERS;
+    if (counter != expected) {
+        test_fail("smp_runqueue_lock",
+                  "lost counter updates - the runqueue lock did not serialize");
+        return;
+    }
+
+    /* (b1) The running count must be back to baseline: the per-core add/remove
+     * pairs balanced, so a lost or duplicated node would drift it. */
+    scheduler_stats_t after;
+    scheduler_get_stats(&after);
+    if (after.running_processes != before.running_processes) {
+        test_fail("smp_runqueue_lock",
+                  "runqueue corrupted - running count drifted from baseline");
+        return;
+    }
+
+    /* (b2) The ready queue must drain empty. On the primary scheduler.current is
+     * idle (RUNNING) and the queue should be empty after the balanced stress, so
+     * schedule() hits the ready_head==NULL early-return and returns idle without
+     * mutating the queue - a non-destructive drain check. A dangling/duplicated
+     * node would leave ready_head non-NULL and schedule() would return it. */
+    process_t *drained = schedule();
+    process_t *cur = process_current();
+    if (drained != cur) {
+        test_fail("smp_runqueue_lock",
+                  "runqueue not drained - a dangling node remained in the queue");
+        return;
+    }
+
+    /* The per-core dummy PCBs are static (no kfree). The registry and the
+     * current process are untouched by the stress (it only used the scheduler
+     * runqueue, never the registry). */
+    test_pass("smp_runqueue_lock");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -1177,6 +1256,14 @@ void kernel_main(void *dtb_addr)
      * register a user process, arm its kill flag by pid, enter EL0, and assert
      * the seam reaped the run at the first svc before getpid dispatched. */
     test_process_kill_reap();
+
+    /* FEAT-04 criterion 2 (the headline). Brings up REAL secondaries that
+     * concurrently hammer the self-locking runqueue mutators + a shared counter,
+     * and asserts the counter is exact (zero lost updates) AND the runqueue stays
+     * well-formed - the genuinely cross-core proof of the runqueue lock. Runs
+     * after the process scenarios; the stress secondaries park (wfe) afterward so
+     * the remaining scenarios run on the primary undisturbed. */
+    test_smp_runqueue_lock();
 
     test_shell_parse_basic();
     test_shell_parse_whitespace();
