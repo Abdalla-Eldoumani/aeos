@@ -181,11 +181,22 @@ uint32_t smp_is_online(uint32_t cpu)
 void smp_register_core_idle(uint32_t cpu)
 {
     char name[16];
+    process_t *marker;
 
     snprintf(name, sizeof(name), "idle/cpu%u", cpu);
-    if (process_register_system(name) == NULL) {
+    marker = process_register_system(name);
+    if (marker == NULL) {
         klog_warn("smp: per-core idle marker for cpu %u not registered", cpu);
+        return;
     }
+
+    /* last_cpu is the REPRESENTED core, NOT the registrar's (this runs on the
+     * primary, so process_register_system set last_cpu = 0). Overriding it to
+     * the cpu being represented is what makes ps's CPU column meaningful: the
+     * idle/cpuN marker shows core N, so ps lists cores 0..3 in the bounded
+     * scope. (The secondary itself parks in wfe and never touches its PCB; the
+     * marker stands in for it.) */
+    marker->last_cpu = cpu;
 }
 
 /* Bring up secondaries 1..SMP_MAX_CPUS-1 with the BOUNDED handshake. For each
