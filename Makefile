@@ -361,6 +361,13 @@ debug: all
 # instead of main.c), boots it under QEMU with semihosting, captures stdout
 # to build/test.log, and greps the test runner's "TEST RESULTS: P PASSED, F
 # FAILED" line. Exit code is 0 only when the runner reports zero failures.
+#
+# The greps that read build/test.log use grep -a (treat as text). An EL0 program
+# the runner execs (e.g. the embedded ELF in test_elf_load_run) can write ANY
+# byte to the UART - the embedded hello binary writes "hello, EL0!\n\0\0", whose
+# trailing NULs land in the log - and without -a GNU grep switches to binary mode
+# and prints nothing to stdout, leaving PASS/FAIL empty so the gate misreports a
+# green suite as a failure. -a keeps the ASCII verdict/PASS lines parseable.
 # ----------------------------------------------------------------------------
 test:
 	@echo "Building test kernel..."
@@ -375,9 +382,9 @@ test:
 	@echo "----- test output -----"
 	@cat $(BUILD_DIR)/test.log
 	@echo "----- summary -----"
-	@if grep -q 'TEST RESULTS:' $(BUILD_DIR)/test.log; then \
-		PASS=$$(grep -oE '[0-9]+ PASSED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
-		FAIL=$$(grep -oE '[0-9]+ FAILED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
+	@if grep -aq 'TEST RESULTS:' $(BUILD_DIR)/test.log; then \
+		PASS=$$(grep -aoE '[0-9]+ PASSED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
+		FAIL=$$(grep -aoE '[0-9]+ FAILED' $(BUILD_DIR)/test.log | grep -oE '[0-9]+'); \
 		echo "Passed: $$PASS"; \
 		echo "Failed: $$FAIL"; \
 		if [ "$$FAIL" = "0" ]; then \
@@ -412,7 +419,7 @@ audit: test
 	@echo "----- security scenario check -----"
 	@missing=0; \
 	for s in $(SEC_SCENARIOS); do \
-		if grep -q "PASS: $$s" $(BUILD_DIR)/test.log; then \
+		if grep -aq "PASS: $$s" $(BUILD_DIR)/test.log; then \
 			echo "present: $$s"; \
 		else \
 			echo "MISSING or not PASS: $$s"; \
