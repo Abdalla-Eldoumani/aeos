@@ -186,6 +186,39 @@ static uint64_t sys_exit_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
     return 0;
 }
 
+#ifdef TEST_BUILD
+/* Records the most recent EL0 sys_write's length, buffer pointer, and first byte
+ * (set inside sys_write_impl, gated on el0_oneshot_active() so EL1 direct-call
+ * writes never clobber it). test_elf_load_run resets these, runs the embedded
+ * ELF, and asserts the length equals the binary's write length (14) - a vacuous
+ * pass would leave the length at 0. Mirrors the last_el0_getpid observable. */
+static uint64_t      last_el0_write_len;
+static uint64_t      last_el0_write_buf;
+static unsigned char last_el0_write_first;
+
+uint64_t syscall_test_last_write_len(void)
+{
+    return last_el0_write_len;
+}
+
+uint64_t syscall_test_last_write_buf(void)
+{
+    return last_el0_write_buf;
+}
+
+unsigned char syscall_test_last_write_first(void)
+{
+    return last_el0_write_first;
+}
+
+void syscall_test_reset_last_write(void)
+{
+    last_el0_write_len   = 0;
+    last_el0_write_buf   = 0;
+    last_el0_write_first = 0;
+}
+#endif /* TEST_BUILD */
+
 /**
  * sys_write - Write to a file descriptor
  *
@@ -230,6 +263,16 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
                        buf, (uint32_t)count);
             return (uint64_t)-1;
         }
+
+#ifdef TEST_BUILD
+        /* Record this EL0 write so test_elf_load_run can assert the loaded
+         * binary's sys_write reached the dispatcher with the expected length.
+         * Recorded AFTER the user-range check passes and ONLY for the one-shot,
+         * so the EL1 direct-call writes the GUI/shell make never clobber it. */
+        last_el0_write_len   = count;
+        last_el0_write_buf   = (uint64_t)buf;
+        last_el0_write_first = (count > 0) ? (unsigned char)str[0] : 0;
+#endif
     }
 
     /* Write each character */
