@@ -69,6 +69,21 @@ typedef struct process {
                                      * killable. process_create leaves this false
                                      * so process_kill refuses idle (PID 1) and
                                      * kernel threads (WR-03). */
+    uint32_t last_cpu;              /* The cpu id this process last ran on / was
+                                     * last touched on, set from smp_cpu_id()
+                                     * (0 = the primary). Initialized in
+                                     * process_create / user_proc_register /
+                                     * process_register_system and refreshed in
+                                     * process_set_current. A DISPLAY/diagnostic
+                                     * field (cmd_ps reads it); no invariant
+                                     * depends on its precise value, so the
+                                     * cross-core write needs no lock (an aligned
+                                     * uint32_t store is atomic on AArch64).
+                                     * EXCEPTION: for the per-core idle markers
+                                     * (idle/cpuN) last_cpu is the REPRESENTED
+                                     * core (cpuN's marker = N), not the
+                                     * registrar's core, so ps's CPU column shows
+                                     * cores 0..3 in the bounded scope. */
 
 } process_t;
 
