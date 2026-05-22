@@ -51,6 +51,20 @@ void syscall_init(void);
  * reached the dispatcher. Compiled only under TEST_BUILD, like the editor seam.
  */
 uint64_t syscall_test_last_getpid(void);
+
+/*
+ * The most recent EL0 sys_write observable, recorded inside sys_write_impl after
+ * the user-pointer range check passes and gated on el0_oneshot_active() (so the
+ * EL1 direct-call writes the GUI/shell/test_runner make never clobber it).
+ * test_elf_load_run resets these, runs the embedded ELF, and asserts the loaded
+ * binary's write reached the dispatcher with the expected length (14). The buf
+ * and first-byte getters let a scenario tighten the assertion further. Compiled
+ * only under TEST_BUILD, like the getpid observable above.
+ */
+uint64_t      syscall_test_last_write_len(void);
+uint64_t      syscall_test_last_write_buf(void);
+unsigned char syscall_test_last_write_first(void);
+void          syscall_test_reset_last_write(void);
 #endif /* TEST_BUILD */
 
 /*
