@@ -133,6 +133,32 @@ void kprintf_ring_walk(kprintf_ring_sink_fn sink)
     }
 }
 
+#ifdef TEST_BUILD
+/* A sink that discards. The panic-bypass gate only needs to prove
+ * kprintf_ring_walk RETURNS while the ring lock is held; it does not validate
+ * the dump contents, so a no-op sink keeps the seam free of any semihosting
+ * crash-file write (backtrace.c's real sink) while still driving the full
+ * trylock-or-bypass path (the trylock attempt, the read, the unlock-if-got). */
+static void kprintf_test_discard_sink(const char *buf, uint32_t len)
+{
+    (void)buf;
+    (void)len;
+}
+
+int kprintf_test_panic_bypass_returns(void)
+{
+    /* Hold the ring lock on THIS core, then enter the panic reader. Its trylock
+     * fails on the held lock and it bypasses (reads anyway, returns). If it used
+     * a blocking spin_lock it would never return here - this same core already
+     * holds the lock - and the runner would hang to its timeout (the gate's RED
+     * behavior). Reaching `return 1` is the proof the bypass does not deadlock. */
+    spin_lock(&kprintf_ring_lock);
+    kprintf_ring_walk(kprintf_test_discard_sink);
+    spin_unlock(&kprintf_ring_lock);
+    return 1;
+}
+#endif /* TEST_BUILD */
+
 /* Helper function to print a string */
 static int putstring(const char *s)
 {
