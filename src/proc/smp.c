@@ -12,9 +12,95 @@
 #include <aeos/types.h>
 #include <aeos/string.h>     /* snprintf() - the per-core idle name */
 #include <aeos/process.h>    /* process_register_system() - the registry marker */
+#include <aeos/scheduler.h>  /* scheduler_add_process/scheduler_remove_process - the stress mutators */
 #include <aeos/vmm.h>        /* vmm_enable_secondary() - per-core MMU */
 #include <aeos/gic.h>        /* gic_init_secondary() - per-core GICC */
 #include <aeos/interrupts.h> /* exception_vector_table - the shared vector base */
+
+/* ===========================================================================
+ * TEST_BUILD cross-core runqueue stress (criterion 2 proof). Compiled in ONLY
+ * under TEST=1; production smp.c carries none of this. It brings up REAL
+ * secondaries that concurrently hammer the self-locking runqueue mutators
+ * (scheduler_add_process/scheduler_remove_process from scheduler.c) on their own
+ * per-core dummy PCBs AND bump a shared lock-protected counter. The primary
+ * (test_smp_runqueue_lock) then asserts the counter is EXACT (zero lost updates)
+ * and the runqueue is well-formed. Without the lock the genuine concurrency
+ * corrupts the list and loses counter updates - a REAL RED gate, not a
+ * single-core tautology.
+ *
+ * The stress secondary path SKIPS gic_init_secondary: the TEST kernel_main does
+ * NOT configure the GICD distributor (no gic_init/timer_init there), so a
+ * secondary running the production GICC init would attach to an unconfigured
+ * distributor - a multi-core-init hazard. A pure-memory stress needs no
+ * interrupts. It DOES enable the MMU (vmm_enable_secondary) before taking any
+ * lock, because the ldaxr/stlxr exclusive monitor + the Inner-Shareable barriers
+ * are only correct cross-core with the MMU on against the shared tables.
+ * =========================================================================== */
+#ifdef TEST_BUILD
+
+/* Stress mode flag. Set TRUE by smp_run_runqueue_stress BEFORE the stress
+ * CPU_ON, so the shared secondary_main takes the stress branch instead of the
+ * production VBAR/GICC/online path. Production secondary_main is byte-identical
+ * when TEST_BUILD is not set (this whole block compiles out). */
+static volatile uint32_t smp_stress_mode = 0;
+
+/* The go/done handshake. The primary sets smp_stress_go after all stress CPU_ONs
+ * succeed; each stress secondary spins on it (isb in the spin) then runs the
+ * loop and sets its own smp_stress_done[id]. The primary waits BOUNDEDLY on the
+ * done flags (the same log-and-continue discipline as smp_init), then parks the
+ * secondaries by leaving them in wfe. */
+static volatile uint32_t smp_stress_go = 0;
+static volatile uint32_t smp_stress_done[SMP_MAX_CPUS];
+
+/* The shared lost-update proof: every secondary bumps this under
+ * stress_counter_lock ITERS times. If the lock genuinely serializes the bumps
+ * the final value is participating_cores * ITERS exactly; a missing/no-op lock
+ * loses updates under real contention. Guarded by its OWN lock (NOT
+ * scheduler_lock) so the counter proof is independent of the runqueue mutators -
+ * the runqueue well-formedness (balanced per-core add/remove) is the separate
+ * list proof. */
+static volatile uint64_t smp_stress_counter = 0;
+static spinlock_t stress_counter_lock = SPINLOCK_INIT;
+
+/* How many iterations each stress secondary runs (set by the primary before go
+ * so every core reads the same count). */
+static volatile uint32_t smp_stress_iters = 0;
+
+/* Per-core dummy PCBs. Each stress secondary mutates its OWN PCB so the add and
+ * the remove are balanced PER CORE and the runqueue returns to baseline (empty)
+ * - sharing one PCB would make "is the list empty at the end" ambiguous. STATIC
+ * so the secondary never kmallocs (the heap is not thread-safe). Minimal: a
+ * distinct pid + a name + state, enough for the mutators to link/unlink them. */
+static process_t sec_stress_pcb[SMP_MAX_CPUS];
+
+/* The stress loop, run by each stress secondary AFTER vmm_enable_secondary and
+ * AFTER smp_stress_go is observed. Hammers the self-locking runqueue mutators on
+ * THIS core's dummy PCB and bumps the shared counter. The mutators take
+ * scheduler_lock internally (Task 1) - do NOT take it here, or this self-
+ * deadlocks. The counter bump takes its own stress_counter_lock. */
+static void smp_stress_loop(uint32_t id)
+{
+    uint32_t iters = smp_stress_iters;
+    for (uint32_t i = 0; i < iters; i++) {
+        /* Balanced per-core add/remove under scheduler_lock (the list proof). */
+        scheduler_add_process(&sec_stress_pcb[id]);
+        scheduler_remove_process(&sec_stress_pcb[id]);
+
+        /* Shared counter bump under its own lock (the lost-update proof). */
+        spin_lock(&stress_counter_lock);
+        smp_stress_counter++;
+        spin_unlock(&stress_counter_lock);
+    }
+
+    /* Publish completion: barrier so the bumps + the list state are observable
+     * before the primary sees done, then set the per-core done flag. */
+    __asm__ volatile("dmb ish" ::: "memory");
+    if (id < SMP_MAX_CPUS) {
+        smp_stress_done[id] = 1;
+    }
+}
+
+#endif /* TEST_BUILD */
 
 /* PSCI CPU_ON via the HVC conduit (QEMU virt has no EL3; PSCI is provided at
  * EL2 and reached by HVC from EL1). x0 is the SMC64 CPU_ON function id
@@ -169,6 +255,38 @@ void secondary_main(void)
 {
     uint32_t id = smp_cpu_id();
 
+#ifdef TEST_BUILD
+    /* TEST_BUILD cross-core stress branch. When the stress bringup armed
+     * smp_stress_mode, this core runs the runqueue stress instead of the
+     * production VBAR/GICC/online path: enable the MMU (REQUIRED for the
+     * exclusive monitor + Inner-Shareable barriers to be correct cross-core),
+     * wait for the go signal, run the locked loop, then park. It does NOT
+     * install VBAR (DAIF stays masked from the asm drop; no exceptions are taken
+     * in the tight memory loop), does NOT call gic_init_secondary (the TEST GICD
+     * is unconfigured; a memory stress needs no interrupts), and does NOT emit
+     * the online marker. This branch compiles out entirely in production, so the
+     * production secondary_main below is byte-identical when TEST_BUILD is not
+     * set. */
+    if (smp_stress_mode) {
+        vmm_enable_secondary();
+
+        /* Spin on the go-flag (isb each pass so the value is re-read) until the
+         * primary releases the stress. */
+        while (!smp_stress_go) {
+            __asm__ volatile("isb");
+        }
+
+        smp_stress_loop(id);
+
+        /* Park - the teardown. PSCI has no clean CPU_OFF wired here; the stress
+         * secondaries hold no lock and touch no shared state after this, so the
+         * remaining scenarios run on the primary undisturbed. */
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    }
+#endif /* TEST_BUILD */
+
     /* Install the SHARED exception vector table in THIS core's VBAR_EL1 before
      * anything that could fault. Same table the primary installed (exceptions.c
      * via interrupts_init); only the per-core VBAR register is written here - no
@@ -206,6 +324,88 @@ void secondary_main(void)
         __asm__ volatile("wfe");
     }
 }
+
+#ifdef TEST_BUILD
+/* The cross-core runqueue stress bringup (TEST_BUILD only). Brings up the
+ * secondaries in stress mode, releases them, waits BOUNDEDLY for them to finish,
+ * and reports how many participated + the shared counter. Mirrors smp_init's
+ * loop but uses the go/done handshake and arms smp_stress_mode so the shared
+ * secondary_main takes the stress branch (MMU on, NO gic_init_secondary).
+ *
+ * The same bounded, log-and-continue discipline as smp_init: a CPU_ON that fails
+ * is logged and skipped; a secondary that never reports done within
+ * SMP_BRINGUP_TIMEOUT spins is logged and skipped. NEVER infinite - a stuck
+ * secondary must not hang the suite (the dominant non-negotiable). The scenario
+ * asserts only against the cores that actually reported, and fails non-vacuously
+ * (online == 0) if no secondary came up. */
+void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out_counter)
+{
+    int started = 0;
+
+    /* Reset the handshake state, the counter, and each core's dummy PCB. Done
+     * BEFORE arming stress mode / CPU_ON so a secondary that starts fast sees a
+     * coherent initial state. */
+    smp_stress_go = 0;
+    smp_stress_counter = 0;
+    smp_stress_iters = iters;
+    for (uint32_t i = 0; i < SMP_MAX_CPUS; i++) {
+        smp_stress_done[i] = 0;
+        sec_stress_pcb[i].pid = 1000 + i;     /* distinct, never 0 */
+        sec_stress_pcb[i].state = PROCESS_READY;
+        sec_stress_pcb[i].next = NULL;
+        snprintf(sec_stress_pcb[i].name, sizeof(sec_stress_pcb[i].name),
+                 "sec_stress%u", i);
+    }
+
+    /* Arm stress mode and barrier it out before any CPU_ON, so the secondary
+     * observes smp_stress_mode == 1 when it runs secondary_main. */
+    smp_stress_mode = 1;
+    __asm__ volatile("dmb ish" ::: "memory");
+
+    /* Bring up each secondary at secondary_entry (the SAME asm drop as the
+     * production path; the stress branch is taken inside secondary_main). */
+    for (uint64_t target = 1; target < SMP_MAX_CPUS; target++) {
+        uint64_t stk = (uint64_t)&sec_stacks[target][SMP_SECONDARY_STACK_SIZE];
+        long rc = psci_cpu_on(target, (uint64_t)&secondary_entry, stk);
+        if (rc != 0) {
+            klog_warn("smp: stress CPU_ON core %u rc=%d - skipping",
+                      (uint32_t)target, (int)rc);
+            continue;
+        }
+        started++;
+    }
+
+    /* Release the secondaries: barrier, then set go. */
+    __asm__ volatile("dmb ish" ::: "memory");
+    smp_stress_go = 1;
+
+    /* Wait BOUNDEDLY for each core to report done, count the participants. */
+    uint32_t participating = 0;
+    for (uint32_t target = 1; target < SMP_MAX_CPUS; target++) {
+        uint64_t spins = 0;
+        while (!smp_stress_done[target] && spins < SMP_BRINGUP_TIMEOUT) {
+            spins++;
+            __asm__ volatile("isb");
+        }
+        if (smp_stress_done[target]) {
+            participating++;
+        } else {
+            klog_warn("smp: stress core %u TIMEOUT - skipping", target);
+        }
+    }
+
+    (void)started;
+    klog_info("smp: runqueue stress - %u cores participated, counter=%u",
+              participating, (uint32_t)smp_stress_counter);
+
+    if (out_online != NULL) {
+        *out_online = participating;
+    }
+    if (out_counter != NULL) {
+        *out_counter = smp_stress_counter;
+    }
+}
+#endif /* TEST_BUILD */
 
 /* ============================================================================
  * End of smp.c
