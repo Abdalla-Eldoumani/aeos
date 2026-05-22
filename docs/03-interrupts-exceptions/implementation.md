@@ -206,7 +206,7 @@ void handle_exception(uint32_t source, uint32_t type, cpu_context_t *context)
 }
 ```
 
-**DAIF mask**: `msr DAIFSet, #0xF` runs first so a timer FIQ cannot recurse into the non-reentrant `kprintf` while the crash dump is printing. This is the BUG-15 fix; the mask is scoped to the handler entry, not to normal operation (the timer runs unmasked otherwise).
+**DAIF mask**: `msr DAIFSet, #0xF` runs first so a timer FIQ cannot recurse into the non-reentrant `kprintf` while the crash dump is printing. This is the BUG-15 fix; the mask is scoped to the handler entry, not to normal operation (the timer runs unmasked otherwise). The DAIF mask is the same-core exclusion; the cross-core exclusion (so two cores in `putchar` cannot splice a torn ring index) is `kprintf_ring_lock` in kprintf.c. The panic reader (`kprintf_ring_walk`) takes that lock with `spin_trylock`-or-bypass and reads the ring whether or not it acquires, so a wedged core holding the lock can never deadlock the dump.
 
 **stack_guard_check**: Called immediately after the mask, before the first `kprintf`. If a kernel stack overflow clobbered the sentinel at `__stack_limit`, this reports a deterministic `klog_fatal` naming `context->pc` (the saved `ELR_EL1`) and halts, rather than letting the backtrace walk a corrupt stack. The same check runs on every timer tick from `timer_handle_fiq` with a PC argument of 0. See `src/kernel/stack_guard.c`.
 
