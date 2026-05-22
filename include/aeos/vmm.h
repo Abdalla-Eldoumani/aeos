@@ -23,6 +23,19 @@
 void vmm_init(void);
 
 /**
+ * Enable the MMU + caches on a SECONDARY core against the SHARED Phase-4 tables.
+ * Factored from vmm_enable: it programs only the per-core enabling registers
+ * (MAIR/TCR/TTBR0/TTBR1/SCTLR) and reuses the global L1 tables the primary built
+ * in vmm_init - it does NOT rebuild them. The TCR (including the load-bearing
+ * TG1=0b10) is written from the same shared helper as the primary, so a
+ * secondary cannot reintroduce the TG1=0b00 level-0 fault. Called by
+ * secondary_main on each secondary AFTER the EL2->EL1 drop. Do NOT call on the
+ * primary - vmm_init already enabled it; calling it there would re-enable an
+ * already-running MMU.
+ */
+void vmm_enable_secondary(void);
+
+/**
  * Print the headless proof to serial: one klog_info line containing the
  * literal token "MMU enabled" with the read-back SCTLR_EL1.M/C/I bits, and a
  * second line confirming the TTBR1 high-half alias of _kernel_start matches
