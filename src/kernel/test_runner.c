@@ -209,6 +209,30 @@ static void test_spinlock_uncontended(void)
     test_pass("spinlock_uncontended");
 }
 
+/* test_kprintf_ring_panic_bypass: the automated gate for the subtlest Phase 7
+ * safety claim - a panic never deadlocks on the kprintf ring lock under SMP.
+ *
+ * The TEST_BUILD seam kprintf_test_panic_bypass_returns (kprintf.c) takes
+ * kprintf_ring_lock and then, on THIS core, drives kprintf_ring_walk. Because
+ * kprintf_ring_walk uses spin_trylock-or-bypass, its trylock fails on the held
+ * lock and it reads/returns anyway, so the seam reaches `return 1`. If a
+ * regression swapped that trylock for a blocking spin_lock, kprintf_ring_walk
+ * would never return (the lock is held by this same core), the seam would never
+ * reach `return 1`, and this scenario would hang to the 30s runner timeout - a
+ * detected failure (exit nonzero), NOT a silent pass. So the no-deadlock claim
+ * is keyed on the bypass actually returning while the lock is held; it is not a
+ * tautology. NOT a sec_* scenario. */
+static void test_kprintf_ring_panic_bypass(void)
+{
+    if (kprintf_test_panic_bypass_returns() != 1) {
+        test_fail("kprintf_ring_panic_bypass",
+                  "kprintf_ring_walk blocked while the ring lock was held - "
+                  "the trylock-or-bypass deadlocks");
+        return;
+    }
+    test_pass("kprintf_ring_panic_bypass");
+}
+
 /* ============================================================================
  * VFS scenarios
  * ============================================================================ */
@@ -1290,6 +1314,12 @@ void kernel_main(void *dtb_addr)
     /* Spinlock acquire/release RED gate. Needs no subsystem beyond the lock
      * itself, so it runs right after the heap block. */
     test_spinlock_uncontended();
+
+    /* The kprintf ring-lock panic-path bypass gate (FEAT-04). Takes the ring
+     * lock then drives kprintf_ring_walk on this core and asserts it RETURNS -
+     * proving the panic path's trylock-or-bypass does not deadlock behind a held
+     * lock. Needs only kprintf (uart_init ran above). NOT a sec_* scenario. */
+    test_kprintf_ring_panic_bypass();
 
     /* Security smoke scenarios that only need the heap, the stack-guard
      * sentinel, and the editor seam run alongside the heap tests. */
