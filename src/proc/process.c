@@ -79,6 +79,7 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     proc->next = NULL;
     proc->reg_next = NULL;
     proc->kill_requested = false;
+    proc->killable = false;   /* idle and kernel threads cannot be killed (WR-03) */
 
     /* Set up initial context. Stack grows downward, so SP points to top */
     stack_top = (uint64_t *)((uint64_t)proc->stack_base + PROCESS_STACK_SIZE);
@@ -236,6 +237,7 @@ process_t *user_proc_register(const char *name)
     proc->name[PROCESS_NAME_MAX - 1] = '\0';
     proc->state = PROCESS_RUNNING;
     proc->kill_requested = false;
+    proc->killable = true;   /* an EL0 run is the only thing process_kill may arm (WR-03) */
     proc->next = NULL;
 
     /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
@@ -245,8 +247,12 @@ process_t *user_proc_register(const char *name)
 }
 
 /**
- * Set the kill flag on a registered process by pid. Honored at the next EL0
- * syscall boundary via the loader's current_user_proc pointer.
+ * Set the kill flag on a registered, KILLABLE process by pid. Honored at the
+ * next EL0 syscall boundary via the loader's current_user_proc pointer. Refuses
+ * a non-killable PCB (idle PID 1, kernel threads): only a user_proc_register'd
+ * EL0 run sets killable, so `kill 1` cannot arm a stale flag on a long-lived
+ * system PCB and the shell reports failure instead of a misleading success
+ * (WR-03).
  */
 int process_kill(uint64_t pid)
 {
@@ -254,6 +260,10 @@ int process_kill(uint64_t pid)
 
     while (p != NULL) {
         if (p->pid == pid) {
+            if (!p->killable) {
+                klog_warn("kill: pid %u is not killable", (uint32_t)pid);
+                return -1;
+            }
             p->kill_requested = true;
             return 0;
         }

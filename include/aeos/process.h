@@ -65,6 +65,10 @@ typedef struct process {
      * EL0 syscall boundary via the loader's current_user_proc pointer. */
     struct process *reg_next;       /* Next process in the enumeration registry */
     bool kill_requested;            /* Kill flag, honored at the next EL0 svc */
+    bool killable;                  /* Only a user_proc_register'd EL0 run is
+                                     * killable. process_create leaves this false
+                                     * so process_kill refuses idle (PID 1) and
+                                     * kernel threads (WR-03). */
 
 } process_t;
 
@@ -136,9 +140,12 @@ process_t *user_proc_register(const char *name);
 /**
  * Look up a registered process by pid and set its kill_requested flag, honored
  * at the next EL0 syscall boundary (via the loader's current_user_proc pointer).
- * Returns 0 if a process with that pid is registered, negative otherwise. Scope
- * B: this reaps a synchronously-running EL0 program at its next svc, NOT a
- * concurrently-running one (no preemption until Phase 7).
+ * Returns 0 if a KILLABLE process with that pid is registered, negative
+ * otherwise. A PCB is killable only if user_proc_register minted it (an EL0
+ * run); idle (PID 1) and kernel threads are not killable, so `kill 1` is refused
+ * rather than reported as a misleading success (WR-03). Scope B: this reaps a
+ * synchronously-running EL0 program at its next svc, NOT a concurrently-running
+ * one (no preemption until Phase 7).
  */
 int process_kill(uint64_t pid);
 
