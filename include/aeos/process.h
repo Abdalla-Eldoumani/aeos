@@ -138,6 +138,16 @@ process_t *process_registry_head(void);
 process_t *user_proc_register(const char *name);
 
 /**
+ * Mint a REGISTRY-ONLY system marker PCB (heap PCB, fresh pid, name,
+ * state=PROCESS_RUNNING, prepended on the registry, NOT enqueued so ready_head
+ * stays NULL). Like user_proc_register but killable=false, so process_kill
+ * refuses it - the same as idle (PID 1) and kernel threads (WR-03). Used by the
+ * SMP per-core idle markers ("idle/cpuN") so they appear in ps without being
+ * arm-able by `kill`. Returns the PCB, or NULL on allocation failure.
+ */
+process_t *process_register_system(const char *name);
+
+/**
  * Look up a registered process by pid and set its kill_requested flag, honored
  * at the next EL0 syscall boundary (via the loader's current_user_proc pointer).
  * Returns 0 if a KILLABLE process with that pid is registered, negative
