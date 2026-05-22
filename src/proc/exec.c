@@ -29,10 +29,20 @@
  * heap allocation an attacker-influenced file size could drive. */
 #define EXEC_MAX_ELF_SIZE   (16u * 1024u * 1024u)
 
-/* The single EL0 user window backed by vmm_map_user_page: TTBR0 L1 index 2
- * (0x80000000) covers one 1GB region; every PT_LOAD must fall inside it. */
+/* The EL0 user window base: TTBR0 L1 index 2 (0x80000000). The L1 entry covers
+ * a 1GB region, but the loader's REAL mappable region is much smaller: see
+ * USER_L3_TOP below. */
 #define USER_WINDOW_BASE    0x80000000ULL
-#define USER_WINDOW_TOP     0xC0000000ULL
+
+/* The single 2MB region the loader can actually map. vmm_map_user_page backs the
+ * window with ONE static user_l3[512] = 512 pages = 2MB at [0x80000000,
+ * 0x80200000). Two VAs in different 2MB regions collapse onto the same L3 leaf
+ * (CR-01/CR-03), so the loader rejects any segment or stack page reaching past
+ * this ceiling. The 1GB L1 window is NOT the mappable extent - only this 2MB L3
+ * is. The advertised USER_WINDOW_TOP (0xC0000000) was a correctness trap: it let
+ * the validator accept p_memsz the mapper could not honor. It is retired; all
+ * bounds checks below validate against USER_L3_TOP. */
+#define USER_L3_TOP         (USER_WINDOW_BASE + 0x200000ULL)   /* 0x80200000 */
 
 /* Extent of the currently-mapped EL0 window, published for the syscall layer's
  * user-pointer bound check. Set by elf_exec_file when it maps segments + stack;
@@ -49,11 +59,13 @@ static process_t *current_user_proc;
 
 /* Physical pages backing the EL0 mapping (segments + stack), tracked so they
  * are returned to the pmm after the run - closing the page leak across repeated
- * exec calls. A static AArch64 test binary is a few pages; the cap bounds the
- * tracking array. Pages mapped beyond the cap (a pathologically large segment)
- * are not tracked for free, matching the pre-cap behavior - not a new leak. */
-#define EXEC_MAX_TRACKED_PAGES 256
-static uint64_t mapped_pas[EXEC_MAX_TRACKED_PAGES];
+ * exec calls. With the USER_L3_TOP 2MB ceiling the whole mapped extent is at
+ * most 512 segment pages + 1 stack page, so the array is sized to the real
+ * capacity and the tracker FAILS CLOSED (rejects the run) if it would ever
+ * overflow, rather than silently dropping a page off the free list (the old
+ * cap-and-drop leaked every page past the cap, CR-02). */
+#define EXEC_MAX_USER_PAGES 512
+static uint64_t mapped_pas[EXEC_MAX_USER_PAGES + 1];   /* +1 for the stack page */
 static unsigned mapped_count;
 
 process_t *current_user_proc_get(void)
@@ -83,19 +95,48 @@ uint64_t usermode_map_end(void)
     return user_map_end;
 }
 
-/* Record a PA so it is freed after the EL0 run. Over the cap, the page stays
- * mapped and is simply not tracked (no fault, no new leak vs. the prior code). */
-static void track_pa(uint64_t pa)
+/* Return every tracked page to the pmm and reset the count. Called on every
+ * error path after the first page is mapped, and after a completed run, so a
+ * reject never leaks the segment/stack pages it already allocated (CR-02). */
+static void free_mapped_pages(void)
 {
-    if (mapped_count < EXEC_MAX_TRACKED_PAGES) {
-        mapped_pas[mapped_count++] = pa;
+    for (unsigned k = 0; k < mapped_count; k++) {
+        pmm_free_page(mapped_pas[k]);
     }
+    mapped_count = 0;
 }
 
 /* Round a VA up to the next 4KB boundary. */
 static inline uint64_t round_up_page(uint64_t va)
 {
     return (va + 0xFFFULL) & ~0xFFFULL;
+}
+
+/* One-at-a-time guard (WR-02). The loader's window/page state (user_map_base/
+ * end, mapped_pas[], mapped_count, current_user_proc) is file-static and not
+ * re-entrancy safe: a nested elf_exec_file would reset mapped_count and the
+ * outer cleanup would then free the inner run's pages and leak its own. The
+ * Scope B model is documented one-at-a-time; this flag fails closed on re-entry
+ * instead of silently corrupting that state. Set/cleared at a SINGLE point by
+ * the elf_exec_file wrapper around elf_exec_file_inner so every inner return
+ * path clears it. */
+static bool exec_in_flight;
+
+static int elf_exec_file_inner(const char *path);
+
+/**
+ * Public entry: enforce the one-at-a-time guard, then run the loader. See exec.h.
+ */
+int elf_exec_file(const char *path)
+{
+    if (exec_in_flight) {
+        klog_error("exec: refusing re-entrant load of %s (one EL0 program at a time)", path);
+        return -9;
+    }
+    exec_in_flight = true;
+    int rc = elf_exec_file_inner(path);
+    exec_in_flight = false;
+    return rc;
 }
 
 /**
@@ -105,7 +146,7 @@ static inline uint64_t round_up_page(uint64_t va)
  * stack -> usermode_enter. Every reject path frees what it allocated and
  * returns negative without entering EL0; no path dereferences user memory.
  */
-int elf_exec_file(const char *path)
+static int elf_exec_file_inner(const char *path)
 {
     /* 1. Open the file read-only. */
     int fd = vfs_open(path, O_RDONLY, 0);
@@ -123,7 +164,7 @@ int elf_exec_file(const char *path)
     }
     uint64_t size = file->inode->size;
     if (size < sizeof(Elf64_Ehdr) || size > EXEC_MAX_ELF_SIZE) {
-        klog_error("exec: %s size %u out of bounds", path, (uint32_t)size);
+        klog_error("exec: %s size %llu out of bounds", path, (unsigned long long)size);
         vfs_close(fd);
         return -2;
     }
@@ -131,14 +172,16 @@ int elf_exec_file(const char *path)
     /* 3. Read the whole file into a heap buffer, then close the fd. */
     unsigned char *buf = (unsigned char *)kmalloc(size);
     if (buf == NULL) {
-        klog_error("exec: out of memory loading %s (%u bytes)", path, (uint32_t)size);
+        klog_error("exec: out of memory loading %s (%llu bytes)", path,
+                   (unsigned long long)size);
         vfs_close(fd);
         return -3;
     }
     ssize_t got = vfs_read(fd, buf, size);
     vfs_close(fd);
     if (got < 0 || (uint64_t)got < size) {
-        klog_error("exec: short read on %s (%d of %u)", path, (int)got, (uint32_t)size);
+        klog_error("exec: short read on %s (%d of %llu)", path, (int)got,
+                   (unsigned long long)size);
         kfree(buf);
         return -4;
     }
@@ -172,29 +215,48 @@ int elf_exec_file(const char *path)
         /* File-extent bounds (overflow-safe). */
         if (off + filesz < off || off + filesz > size) {
             klog_error("exec: %s segment %u file range out of bounds", path, i);
+            free_mapped_pages();
             kfree(buf);
             return -11;
         }
         /* memsz must cover filesz (the BSS tail is [filesz, memsz)). */
         if (memsz < filesz) {
             klog_error("exec: %s segment %u memsz < filesz", path, i);
+            free_mapped_pages();
             kfree(buf);
             return -12;
         }
-        /* Window bounds (overflow-safe). T-06-05: a crafted segment must not
-         * map below the window or past its top. */
+        /* Window bounds (overflow-safe). The mappable region is the single 2MB
+         * L3 [USER_WINDOW_BASE, USER_L3_TOP), NOT the 1GB L1 window: a segment
+         * crossing USER_L3_TOP would alias an earlier 2MB band's L3 leaf and run
+         * a corrupt mapping at EL0 (CR-01). Reject below the base or past the
+         * real ceiling, and reject the vaddr+memsz unsigned overflow. */
         if (vaddr < USER_WINDOW_BASE || vaddr + memsz < vaddr ||
-            vaddr + memsz > USER_WINDOW_TOP) {
-            klog_error("exec: %s segment %u vaddr out of user window", path, i);
+            vaddr + memsz > USER_L3_TOP) {
+            klog_error("exec: %s segment %u exceeds the mapped 2MB user window", path, i);
+            free_mapped_pages();
             kfree(buf);
             return -13;
+        }
+        /* Segments must be strictly ascending and non-overlapping (WR-01).
+         * top_seg_end is the rounded-up end of the previous mapped segment
+         * (starts at USER_WINDOW_BASE). Rejecting vaddr < top_seg_end stops two
+         * PT_LOADs from double-mapping a page (the second leaf would clobber the
+         * first's PA + permissions, leaking the first PA in place and defeating
+         * the USER_TEXT W^X intent) and bounds the total page count. */
+        if (vaddr < top_seg_end) {
+            klog_error("exec: %s segment %u overlaps a prior segment", path, i);
+            free_mapped_pages();
+            kfree(buf);
+            return -14;
         }
         /* Page-aligned p_vaddr only this phase (the in-scope binary is aligned;
          * the unaligned general case is deferred per RESEARCH). */
         if ((vaddr & 0xFFFULL) != 0) {
             klog_error("exec: %s segment %u unaligned vaddr unsupported this phase", path, i);
+            free_mapped_pages();
             kfree(buf);
-            return -13;
+            return -15;
         }
 
         user_prot_t prot = (ph[i].p_flags & PF_X) ? USER_TEXT : USER_DATA;
@@ -213,15 +275,26 @@ int elf_exec_file(const char *path)
          * write into the wrong physical page. */
         uint64_t copied = 0;
         for (uint64_t p = 0; p < pages; p++) {
+            /* Fail closed if tracking would overflow (CR-02): the 2MB ceiling
+             * caps a valid run at 512 segment pages + 1 stack page, so reaching
+             * the array bound means a check above was bypassed. Reject and free
+             * rather than allocate a page we could not record and would leak. */
+            if (mapped_count >= EXEC_MAX_USER_PAGES) {
+                klog_error("exec: %s segment %u exceeds the page-tracking capacity", path, i);
+                free_mapped_pages();
+                kfree(buf);
+                return -16;
+            }
             uint64_t pa = pmm_alloc_page();
             if (pa == 0) {
                 klog_error("exec: %s out of physical pages mapping segment %u", path, i);
+                free_mapped_pages();
                 kfree(buf);
                 return -6;
             }
             memset((void *)pa, 0, 0x1000);
             vmm_map_user_page(page_va + p * 0x1000, pa, prot);
-            track_pa(pa);
+            mapped_pas[mapped_count++] = pa;
 
             /* Copy this page's slice of the file bytes (page-aligned in-scope,
              * so in_page == 0; the general in-page offset is folded in for the
@@ -243,17 +316,28 @@ int elf_exec_file(const char *path)
     }
 
     /* 6. EL0 stack one page ABOVE the highest segment (computed, never the
-     * hardcoded 0x80001000 which would collide with a data segment). */
+     * hardcoded 0x80001000 which would collide with a data segment). The stack
+     * page must also fit inside the single 2MB L3 (CR-03): if the top segment
+     * reached USER_L3_TOP the stack would land in a different 2MB band and alias
+     * a segment's L3 leaf, so SP_EL0's first push would clobber code/data or
+     * fault. Reject before mapping it. */
     uint64_t stack_va = top_seg_end;
+    if (stack_va + 0x1000 > USER_L3_TOP) {
+        klog_error("exec: %s EL0 stack would exceed the mapped 2MB user window", path);
+        free_mapped_pages();
+        kfree(buf);
+        return -17;
+    }
     uint64_t stack_pa = pmm_alloc_page();
     if (stack_pa == 0) {
         klog_error("exec: %s out of physical pages for EL0 stack", path);
+        free_mapped_pages();
         kfree(buf);
         return -7;
     }
     memset((void *)stack_pa, 0, 0x1000);
     vmm_map_user_page(stack_va, stack_pa, USER_DATA);
-    track_pa(stack_pa);
+    mapped_pas[mapped_count++] = stack_pa;   /* always fits: array is +1 over the cap */
     user_map_end = stack_va + 0x1000;
 
     /* 7. Enter EL0. The segments are copied into pmm pages, so the heap buffer
@@ -282,10 +366,7 @@ int elf_exec_file(const char *path)
     process_t *proc = user_proc_register(path);
     if (proc == NULL) {
         klog_error("exec: cannot register PCB for %s", path);
-        for (unsigned k = 0; k < mapped_count; k++) {
-            pmm_free_page(mapped_pas[k]);
-        }
-        mapped_count = 0;
+        free_mapped_pages();
         return -8;
     }
     current_user_proc = proc;
@@ -295,10 +376,7 @@ int elf_exec_file(const char *path)
     current_user_proc = NULL;
     process_unregister(proc);
     kfree(proc);
-    for (unsigned k = 0; k < mapped_count; k++) {
-        pmm_free_page(mapped_pas[k]);
-    }
-    mapped_count = 0;
+    free_mapped_pages();
 
     klog_info("exec: %s returned", path);
     return 0;
