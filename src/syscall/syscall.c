@@ -313,6 +313,17 @@ uint64_t syscall_test_last_getpid(void)
 {
     return last_el0_getpid;
 }
+
+/* Pre-set the getpid observable to a sentinel so test_process_kill_reap can
+ * prove the seam reaped a kill-armed run BEFORE sys_getpid_impl ran: it sets a
+ * value getpid never returns (a real pid is a small integer), enters EL0 with a
+ * getpid-first payload, and asserts the observable is STILL the sentinel. If the
+ * seam had NOT fired the getpid svc would overwrite the sentinel with the idle
+ * pid, failing the assertion - which is what makes the kill proof non-vacuous. */
+void syscall_test_set_last_getpid(uint64_t value)
+{
+    last_el0_getpid = value;
+}
 #endif /* TEST_BUILD */
 
 /**
