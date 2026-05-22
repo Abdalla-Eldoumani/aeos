@@ -127,6 +127,32 @@ void gic_init(void)
 }
 
 /**
+ * Initialize the per-core GIC CPU interface (GICC) on a SECONDARY core. The
+ * GICC registers (CTLR/PMR/BPR/IAR/EOIR) are banked per-core, so each secondary
+ * enables its own interface with the same three writes gic_init does for the
+ * primary: unmask all priorities (PMR=0xFF), no sub-priority grouping (BPR=0),
+ * enable both groups (CTLR=GRP0|GRP1, the timer PPI rides Group 0 here).
+ *
+ * It deliberately touches NO GICD (distributor) register. The distributor -
+ * group assignments, the INTID-27-to-Group-0 move, priorities, SPI targeting,
+ * and the distributor enable - is GLOBAL and configured exactly once by the
+ * primary's gic_init. A secondary re-running any distributor write would
+ * re-disable/reconfigure it mid-flight and break the primary's timer and device
+ * IRQs (RESEARCH Pitfall 5). Call from secondary_main on each secondary.
+ */
+void gic_init_secondary(void)
+{
+    /* Allow all priorities through this core's interface. */
+    MMIO_WRITE(GICC_PMR, 0xFF);
+
+    /* No sub-priority grouping. */
+    MMIO_WRITE(GICC_BPR, 0);
+
+    /* Enable this core's CPU interface for both groups. */
+    MMIO_WRITE(GICC_CTLR, GICC_CTLR_ENABLE_GRP0 | GICC_CTLR_ENABLE_GRP1);
+}
+
+/**
  * Enable a specific IRQ
  */
 void gic_enable_irq(uint32_t irq)
