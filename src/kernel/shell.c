@@ -634,8 +634,12 @@ static int cmd_ps(int argc, char **argv)
 
     /* Per-process listing from the SCHEDULER-INDEPENDENT registry (reg_next),
      * so it shows kernel threads/idle and any loaded EL0 process without
-     * touching the run queue. */
-    kprintf("\n  PID  STATE      NAME\n");
+     * touching the run queue. The CPU column is p->last_cpu (the core a process
+     * last ran on / was last touched on): core 0 for the primary's processes,
+     * cores 1..3 for the per-core idle markers (idle/cpuN, which carry their
+     * represented core). It records the LAST core to touch a PCB, NOT live
+     * cross-core scheduling (bounded scope). */
+    kprintf("\n  PID  CPU  STATE      NAME\n");
     for (process_t *p = process_registry_head(); p != NULL; p = p->reg_next) {
         const char *st;
         switch (p->state) {
@@ -645,7 +649,8 @@ static int cmd_ps(int argc, char **argv)
             case PROCESS_ZOMBIE:  st = "ZOMBIE";  break;
             default:              st = "?";        break;
         }
-        kprintf("  %-4u %-10s %s\n", (uint32_t)p->pid, st, p->name);
+        kprintf("  %-4u %-3u %-10s %s\n",
+                (uint32_t)p->pid, (uint32_t)p->last_cpu, st, p->name);
     }
     kprintf("\n");
 
