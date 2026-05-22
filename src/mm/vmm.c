@@ -109,11 +109,18 @@ static void vmm_build_tables(void)
 }
 
 /**
- * Program MAIR/TCR/TTBR0/TTBR1, invalidate the TLB, then set SCTLR_EL1.M|C|I.
- * Runs from an identity-mapped low PC, so the instruction after the enabling
- * isb is fetched 1:1 and execution continues with no jump.
+ * Program the per-core enabling registers against the SHARED tables: MAIR, TCR,
+ * TTBR0, TTBR1, invalidate this core's TLB, then set SCTLR_EL1.M|C|I together.
+ * The two ttbr0_l1/ttbr1_l1 statics are global - built once by vmm_build_tables
+ * (the primary's vmm_init) and Inner-Shareable, so the same walk is coherent on
+ * every core. This helper does NOT build the tables; it only points this core's
+ * registers at them and enables translation. Runs from an identity-mapped low
+ * PC, so the instruction after the enabling isb is fetched 1:1 and execution
+ * continues with no jump. Shared by vmm_enable (primary) and vmm_enable_secondary
+ * (each secondary) so the TCR - including the load-bearing TG1=0b10 - is written
+ * from one place and a per-core copy cannot reintroduce the TG1=0b00 trap.
  */
-static void vmm_enable(void)
+static void vmm_program_translation_regs(void)
 {
     /* IPS = ID_AA64MMFR0_EL1.PARange[3:0] (low 3 bits): self-correcting rather
      * than hardcoding the cortex-a57 44-bit (0b100) value. */
@@ -159,10 +166,36 @@ static void vmm_enable(void)
     __asm__ volatile("isb");
 }
 
+/**
+ * Build the tables (primary only) then enable the MMU on the primary. The
+ * table build runs once; the per-core enable lives in
+ * vmm_program_translation_regs.
+ */
+static void vmm_enable(void)
+{
+    vmm_program_translation_regs();
+}
+
 void vmm_init(void)
 {
     vmm_build_tables();
     vmm_enable();
+}
+
+/**
+ * Enable the MMU + caches on a SECONDARY core against the SHARED Phase-4 tables.
+ * The L1 tables were built once by the primary's vmm_init (vmm_build_tables);
+ * this does NOT rebuild them - it only programs this core's MAIR/TCR/TTBR0/TTBR1
+ * and sets SCTLR.M|C|I, reusing the global ttbr0_l1/ttbr1_l1 statics. The shared
+ * TCR keeps TG1=0b10 (written by vmm_program_translation_regs, not retyped here),
+ * so a secondary cannot reintroduce the documented TG1=0b00 level-0 fault. The
+ * tables are Inner-Shareable, so the walk is coherent across cores; the helper's
+ * tlbi vmalle1 + dsb sy drops this core's stale TLB. Called by secondary_main on
+ * each secondary; do NOT call on the primary (vmm_init already enabled it).
+ */
+void vmm_enable_secondary(void)
+{
+    vmm_program_translation_regs();
 }
 
 /**
