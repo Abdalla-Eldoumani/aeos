@@ -256,14 +256,14 @@ clean:
 run: all
 	@echo "Starting QEMU (text mode with semihosting)..."
 	@echo "Filesystem will be saved to 'aeos_fs.img' on host when you run 'save' command"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-nographic -kernel $(KERNEL_ELF) \
 		-semihosting-config enable=on,target=native
 
 # Run without semihosting (no persistence)
 run-nopersist: all
 	@echo "Starting QEMU (text mode, no persistence)..."
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-nographic -kernel $(KERNEL_ELF)
 
 # Run with graphics (using VirtIO GPU MMIO device)
@@ -271,7 +271,7 @@ run-ramfb: all
 	@echo "Starting QEMU with graphics window..."
 	@echo "Graphics will appear in a separate window"
 	@echo "Click in window to grab mouse, Ctrl+Alt+G to release"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device virtio-gpu-device \
 		-device virtio-keyboard-device \
 		-device virtio-mouse-device \
@@ -282,7 +282,7 @@ run-ramfb: all
 # Alternative: Try with simpler ramfb device (works with fw_cfg if available)
 run-simple: all
 	@echo "Starting QEMU with simple framebuffer (experimental)..."
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device ramfb \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
@@ -306,7 +306,7 @@ run-vnc: all
 	@echo "Starting QEMU with ramfb (VNC output)..."
 	@echo "Connect VNC client to localhost:5900"
 	@echo "Serial output will appear in terminal"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device ramfb \
 		-vnc :0 \
 		-serial stdio \
@@ -318,7 +318,7 @@ run-virtio: all
 	@echo "Starting QEMU with virtio-gpu..."
 	@echo "Graphics will appear in a separate window"
 	@echo "Press Ctrl+Alt+G to release mouse/keyboard"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device virtio-gpu-device \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
@@ -328,7 +328,7 @@ run-virtio: all
 run-all-gpu: all
 	@echo "Starting QEMU with ALL GPU devices..."
 	@echo "Graphics will appear in a separate window"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device ramfb \
 		-device virtio-gpu-device \
 		-serial stdio \
@@ -344,14 +344,14 @@ run-clean:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(CFLAGS) -DFS_NO_LOAD"
 	@echo "Starting QEMU (fresh filesystem, no saved state)..."
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-nographic -kernel $(KERNEL_ELF)
 
 # Run with GDB debugging
 debug: all
 	@echo "Starting QEMU with GDB server..."
 	@echo "Connect with: aarch64-linux-gnu-gdb kernel.elf -ex 'target remote :1234'"
-	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-nographic -kernel $(KERNEL_ELF) -S -s
 
 # ----------------------------------------------------------------------------
@@ -375,7 +375,7 @@ test:
 	@$(MAKE) --no-print-directory TEST=1 >/dev/null
 	@mkdir -p $(BUILD_DIR)
 	@echo "Running test kernel under QEMU..."
-	@timeout 30 qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M \
+	@timeout 30 qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-nographic -kernel $(KERNEL_ELF) \
 		-semihosting-config enable=on,target=native \
 		> $(BUILD_DIR)/test.log 2>&1 || true
