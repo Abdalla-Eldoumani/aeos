@@ -10,6 +10,8 @@
 #include <aeos/spinlock.h>   /* smp_cpu_id() */
 #include <aeos/kprintf.h>
 #include <aeos/types.h>
+#include <aeos/string.h>     /* snprintf() - the per-core idle name */
+#include <aeos/process.h>    /* process_register_system() - the registry marker */
 #include <aeos/vmm.h>        /* vmm_enable_secondary() - per-core MMU */
 #include <aeos/gic.h>        /* gic_init_secondary() - per-core GICC */
 #include <aeos/interrupts.h> /* exception_vector_table - the shared vector base */
@@ -72,6 +74,32 @@ void smp_mark_online(uint32_t cpu)
 uint32_t smp_is_online(uint32_t cpu)
 {
     return (cpu < SMP_MAX_CPUS) ? smp_online_flags[cpu] : 0;
+}
+
+/* Register a per-core idle marker on the enumeration registry so ps lists a
+ * process for each online core (criterion-3 visibility; the CPU column itself is
+ * a later plan). The marker is a registry-only PCB ("idle/cpuN", killable=false)
+ * minted by process_register_system: NOT enqueued (no scheduler_add_process), so
+ * ready_head stays NULL and the dormant scheduler is never woken.
+ *
+ * CALLED FROM THE PRIMARY ONLY. process_register_system calls kmalloc, and the
+ * heap is not thread-safe (src/mm/CLAUDE.md); a secondary calling it would race
+ * the free list. So the primary registers each online core's idle marker on its
+ * behalf - the secondary itself only parks in wfe and never allocates. This is
+ * the bounded-scope simplification: the per-core idle is a registry marker the
+ * primary creates, not a scheduled process.
+ *
+ * A kmalloc failure is logged and ignored (returns without registering) - a
+ * missing per-core idle marker must NOT be fatal, the same do-not-block
+ * discipline as the bringup handshake. */
+void smp_register_core_idle(uint32_t cpu)
+{
+    char name[16];
+
+    snprintf(name, sizeof(name), "idle/cpu%u", cpu);
+    if (process_register_system(name) == NULL) {
+        klog_warn("smp: per-core idle marker for cpu %u not registered", cpu);
+    }
 }
 
 /* Bring up secondaries 1..SMP_MAX_CPUS-1 with the BOUNDED handshake. For each
