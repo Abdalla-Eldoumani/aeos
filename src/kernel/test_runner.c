@@ -281,11 +281,31 @@ static void test_process_create_remove(void)
     if (strcmp(p->name, "test_proc") != 0) {
         test_fail("process_create_remove", "PCB name aliased the caller buffer");
         scheduler_remove_process(p);
+        process_unregister(p);
+        kfree(p);
         return;
     }
 
-    /* Detach so the test runner's exit path doesn't try to schedule it. */
+    /* Capture the pid before freeing so the registry-clean check below does not
+     * read the freed PCB (a use-after-free, the same class of bug 06-04 fixed). */
+    uint64_t freed_pid = p->pid;
+
+    /* Detach from BOTH lists. process_create (06-04) auto-registers the PCB on
+     * the enumeration registry in addition to the scheduler run queue, so
+     * scheduler_remove_process alone would leave a DETACHED PCB on registry_head
+     * (and a later scenario walking the registry would touch freed memory once
+     * we kfree it). Unregister, then free the PCB the create allocated. */
     scheduler_remove_process(p);
+    process_unregister(p);
+    kfree(p);
+
+    /* The registry must hold no PCB with this pid now (no detached entry left). */
+    for (process_t *it = process_registry_head(); it != NULL; it = it->reg_next) {
+        if (it->pid == freed_pid) {
+            test_fail("process_create_remove", "PCB still on the registry after teardown");
+            return;
+        }
+    }
 
     test_pass("process_create_remove");
 }
@@ -607,6 +627,117 @@ static void test_elf_reject_malformed(void)
 }
 
 /* ============================================================================
+ * Process kill-reap scenario (FEAT-03 criterion 4, headless, NON-VACUOUS).
+ *
+ * Proves the kill mechanism the way Scope B can prove it without a display:
+ * register a user process via user_proc_register, point the loader's
+ * current_user_proc at it (the TEST hook), arm its kill flag via
+ * process_kill(thatpid) - by PID, NOT process_current()->pid (idle's pid, a
+ * tautology) - then enter EL0 with the getpid-first roundtrip payload. The kill
+ * seam sits at the TOP of syscall_handler and reads current_user_proc->
+ * kill_requested BEFORE the syscall dispatches (06-04), so the kill-armed run is
+ * reaped via usermode_return at the first svc BEFORE sys_getpid_impl runs.
+ *
+ * The non-vacuous distinguisher: pre-set the getpid observable to a sentinel a
+ * real pid can never equal, then assert it is STILL the sentinel after the run.
+ * If the seam had NOT fired, the getpid svc would overwrite the sentinel with
+ * the idle pid and the assertion would fail. This is distinct from
+ * test_el0_roundtrip, which runs the SAME payload with NO kill flag and asserts
+ * the observable DOES advance to the current pid - the two together prove the
+ * flag is what caused the early reap, not normal flow.
+ * ============================================================================ */
+
+static void test_process_kill_reap(void)
+{
+    /* A value sys_getpid can never return (real pids are small integers). */
+    const uint64_t GETPID_SENTINEL = 0xDEADBEEFULL;
+
+    /* 1. Register the process the kill applies to (registry-only, not enqueued). */
+    process_t *p = user_proc_register("killtest");
+    if (p == NULL) {
+        test_fail("process_kill_reap", "user_proc_register returned NULL");
+        return;
+    }
+    uint64_t kpid = p->pid;
+
+    /* The ps-visibility half of criterion 4: the registered PCB is enumerable on
+     * the registry by pid (what cmd_ps walks) before we reap it. */
+    bool found = false;
+    for (process_t *it = process_registry_head(); it != NULL; it = it->reg_next) {
+        if (it->pid == kpid) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        test_fail("process_kill_reap", "registered PCB not enumerable in the registry");
+        current_user_proc_set(NULL);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* 2. Point the kill seam at this PCB (NOT process_current(), which is idle). */
+    current_user_proc_set(p);
+
+    /* 3. Arm the kill by PID via the registry. */
+    int kr = process_kill(kpid);
+    if (kr != 0) {
+        test_fail("process_kill_reap", "process_kill did not find the registered pid");
+        current_user_proc_set(NULL);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* 4. Sentinel the getpid observable so the post-run check is non-vacuous. */
+    syscall_test_set_last_getpid(GETPID_SENTINEL);
+
+    /* 5. Enter EL0 with the getpid-first roundtrip payload. The seam should reap
+     * the first svc (getpid) before it dispatches, returning control here. */
+    volatile int returned = 0;
+    usermode_run_payload(USERMODE_PAYLOAD_ROUNDTRIP);
+    returned = 1;
+
+    /* 6. Assert (non-vacuous). */
+    if (returned != 1) {
+        test_fail("process_kill_reap", "kernel did not regain control after the reap");
+        current_user_proc_set(NULL);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+    if (syscall_test_last_getpid() != GETPID_SENTINEL) {
+        /* The getpid svc dispatched - the seam did NOT reap before it. */
+        test_fail("process_kill_reap", "getpid observable advanced - run was not reaped before dispatch");
+        current_user_proc_set(NULL);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+    if (process_kill(0xDEADBEEFULL) >= 0) {
+        test_fail("process_kill_reap", "process_kill accepted a bogus pid");
+        current_user_proc_set(NULL);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* 7. Cleanup: clear the seam pointer, unregister + free the test PCB so no
+     * dangling registered PCB remains, and confirm idle is still current. */
+    current_user_proc_set(NULL);
+    process_unregister(p);
+    kfree(p);
+
+    if (process_current() == NULL) {
+        test_fail("process_kill_reap", "process_current() became NULL after cleanup");
+        return;
+    }
+
+    test_pass("process_kill_reap");
+}
+
+/* ============================================================================
  * Framebuffer scenarios — exercise the graphics path (init, fill, getpixel)
  * end-to-end without booting the full GUI. The test runner doesn't have a
  * VirtIO GPU attached, but `fb_init` allocates an in-memory framebuffer and
@@ -887,6 +1018,11 @@ void kernel_main(void *dtb_addr)
     }
 
     test_process_create_remove();
+
+    /* FEAT-03 criterion 4 (headless, non-vacuous). Runs after the ELF scenarios:
+     * register a user process, arm its kill flag by pid, enter EL0, and assert
+     * the seam reaped the run at the first svc before getpid dispatched. */
+    test_process_kill_reap();
 
     test_shell_parse_basic();
     test_shell_parse_whitespace();
