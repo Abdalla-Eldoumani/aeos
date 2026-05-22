@@ -59,4 +59,13 @@ void secondary_main(void);
 void smp_mark_online(uint32_t cpu);
 uint32_t smp_is_online(uint32_t cpu);
 
+/* Register a per-core idle marker ("idle/cpuN", a registry-only killable=false
+ * PCB) on the enumeration registry so ps lists a process for each online core
+ * (criterion-3 visibility; the CPU column is a later plan). CALLED FROM THE
+ * PRIMARY ONLY - it kmallocs, and the heap is not thread-safe, so secondaries
+ * (which only park in wfe) never call it. Registry-only: NOT enqueued, so
+ * ready_head stays NULL and the dormant scheduler is not woken. A kmalloc
+ * failure is logged and ignored - a missing marker is never fatal. */
+void smp_register_core_idle(uint32_t cpu);
+
 #endif /* AEOS_SMP_H */
