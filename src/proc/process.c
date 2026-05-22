@@ -247,6 +247,40 @@ process_t *user_proc_register(const char *name)
 }
 
 /**
+ * Mint a REGISTRY-ONLY system marker PCB. Mirrors user_proc_register (heap PCB,
+ * fresh pid, name, state=PROCESS_RUNNING, prepended on the registry, NOT
+ * enqueued so ready_head stays NULL) but sets killable=false so process_kill
+ * refuses it - like idle and the kernel threads (WR-03). The per-core SMP idle
+ * markers ("idle/cpuN") use this so they show in ps without being arm-able by
+ * `kill`. The caller (smp.c, on the primary) owns the lifetime; these markers
+ * persist for the kernel's life. Returns the PCB, or NULL on allocation failure.
+ */
+process_t *process_register_system(const char *name)
+{
+    process_t *proc = (process_t *)kmalloc(sizeof(process_t));
+    if (proc == NULL) {
+        klog_error("process_register_system: failed to allocate PCB");
+        return NULL;
+    }
+
+    /* Zero scalar PCB fields. memset is safe here (a heap PCB, no vector data);
+     * the fields the registry path reads are then set explicitly below. */
+    memset(proc, 0, sizeof(process_t));
+    proc->pid = next_pid++;
+    strncpy(proc->name, (name != NULL) ? name : "(unnamed)", PROCESS_NAME_MAX - 1);
+    proc->name[PROCESS_NAME_MAX - 1] = '\0';
+    proc->state = PROCESS_RUNNING;
+    proc->kill_requested = false;
+    proc->killable = false;   /* a system marker is not killable (WR-03) */
+    proc->next = NULL;
+
+    /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
+    process_register(proc);
+
+    return proc;
+}
+
+/**
  * Set the kill flag on a registered, KILLABLE process by pid. Honored at the
  * next EL0 syscall boundary via the loader's current_user_proc pointer. Refuses
  * a non-killable PCB (idle PID 1, kernel threads): only a user_proc_register'd
