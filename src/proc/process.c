@@ -172,6 +172,15 @@ process_t *process_current(void)
 void process_set_current(process_t *proc)
 {
     current_process = proc;
+
+    /* The "last ran on" half of last_cpu: a process becoming current records
+     * the core it runs on. In the bounded scope the production path runs on the
+     * primary (core 0), but this correctly records a secondary if any path ever
+     * makes a process current there. A single aligned uint32_t store (atomic on
+     * AArch64); last_cpu is a display field, so no lock is needed. */
+    if (proc != NULL) {
+        proc->last_cpu = smp_cpu_id();
+    }
 }
 
 /**
