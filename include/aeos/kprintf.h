@@ -70,4 +70,17 @@ extern kprintf_hook_fn kprintf_output_hook;
 typedef void (*kprintf_ring_sink_fn)(const char *buf, uint32_t len);
 void kprintf_ring_walk(kprintf_ring_sink_fn sink);
 
+#ifdef TEST_BUILD
+/**
+ * TEST_BUILD-only panic-path bypass gate (Phase 7). Takes the file-static ring
+ * lock and then drives kprintf_ring_walk on this same core. Returns 1 if
+ * control reaches the end - which it can only do if kprintf_ring_walk's
+ * trylock-or-bypass returned despite the held lock. A regression to a blocking
+ * acquire on the panic path would never return here, hanging the test runner to
+ * its timeout. test_kprintf_ring_panic_bypass asserts this returns 1. Compiled
+ * out of production (kprintf_ring_lock stays private when TEST_BUILD is unset).
+ */
+int kprintf_test_panic_bypass_returns(void);
+#endif
+
 #endif /* AEOS_KPRINTF_H */
