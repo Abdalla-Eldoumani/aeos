@@ -12,6 +12,7 @@
 #include <aeos/types.h>
 #include <aeos/vfs.h>
 #include <aeos/string.h>
+#include <aeos/spinlock.h>   /* smp_cpu_id() - the core that creates/touches a PCB */
 
 /* Process ID counter */
 static uint64_t next_pid = 1;
@@ -80,6 +81,7 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     proc->reg_next = NULL;
     proc->kill_requested = false;
     proc->killable = false;   /* idle and kernel threads cannot be killed (WR-03) */
+    proc->last_cpu = smp_cpu_id();   /* the creating core (the primary at boot) */
 
     /* Set up initial context. Stack grows downward, so SP points to top */
     stack_top = (uint64_t *)((uint64_t)proc->stack_base + PROCESS_STACK_SIZE);
@@ -239,6 +241,7 @@ process_t *user_proc_register(const char *name)
     proc->kill_requested = false;
     proc->killable = true;   /* an EL0 run is the only thing process_kill may arm (WR-03) */
     proc->next = NULL;
+    proc->last_cpu = smp_cpu_id();   /* the registering core (the primary at boot) */
 
     /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
     process_register(proc);
@@ -273,6 +276,11 @@ process_t *process_register_system(const char *name)
     proc->kill_requested = false;
     proc->killable = false;   /* a system marker is not killable (WR-03) */
     proc->next = NULL;
+    /* The registering core (the primary). For the per-core idle markers
+     * (idle/cpuN) the caller smp_register_core_idle OVERRIDES this to the
+     * REPRESENTED core, so ps's CPU column shows cores 0..3 - the represented
+     * core, not the registrar. */
+    proc->last_cpu = smp_cpu_id();
 
     /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
     process_register(proc);
