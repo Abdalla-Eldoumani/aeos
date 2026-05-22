@@ -37,6 +37,15 @@
 void gic_init(void);
 
 /**
+ * Initialize the per-core GIC CPU interface (GICC) on a secondary core.
+ * Writes only this core's banked GICC_PMR/BPR/CTLR - it touches NO GICD
+ * distributor register. The distributor is global and configured once by the
+ * primary's gic_init; a secondary must never re-touch it (that would break the
+ * primary's timer/device IRQs). Called by secondary_main on each secondary.
+ */
+void gic_init_secondary(void);
+
+/**
  * Enable a specific IRQ
  *
  * @param irq IRQ number to enable
