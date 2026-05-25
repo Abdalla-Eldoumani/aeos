@@ -325,11 +325,14 @@ void secondary_main(void)
      * would break the primary's timer/device IRQs). */
     gic_init_secondary();
 
-    /* One-shot online marker, one line per secondary (NOT looped). Under SMP this
-     * kprintf races the primary's; the kprintf ring lock that orders concurrent
-     * prints is a later plan, and the secondaries are not actually brought up
-     * until smp_init is wired into kernel_main (also a later plan) - so the race
-     * is not live in THIS plan. Do NOT add a lock here. */
+    /* One-shot online marker, one line per secondary (NOT looped). Under SMP
+     * this kprintf races the primary's, and the race IS live now (smp_init is
+     * wired into kernel_main and the secondaries do come up). It is correctly
+     * serialized one layer down: putchar takes kprintf_ring_lock (shipped in
+     * this phase) across the ring store, so concurrent secondary prints cannot
+     * splice a torn line against the primary - which is why the markers are
+     * coherent under -smp 4. No additional lock is needed at this call site;
+     * kprintf owns the serialization. */
     klog_info("smp: core %u online", id);
 
     /* Signal online AFTER setup completes. smp_mark_online already issues the
