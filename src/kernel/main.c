@@ -26,6 +26,7 @@
 #include <aeos/dtb.h>
 #include <aeos/ramfb.h>
 #include <aeos/virtio_gpu.h>
+#include <aeos/virtio_net.h>
 #include <aeos/pflash.h>
 #include <aeos/semihosting.h>
 #include <aeos/shell.h>
@@ -442,6 +443,20 @@ void kernel_main(void *dtb_addr)
     kprintf("\n");
     klog_info("Initializing System Calls...");
     syscall_init();
+
+    /* Probe the virtio-net device (FEAT-05 criterion 1: MAC on serial). It is
+     * POLL-DRIVEN (no IRQ): the criterion-3 TEST kernel_main has no GIC/timer,
+     * so an IRQ path could never fire there, and the same poll path runs in
+     * both builds. Placed after the heap + scheduler are up so its DMA ring
+     * buffers can be kmalloc'd; ordering vs gic/timer is irrelevant because no
+     * IRQ is registered. A -1 (no device) is logged and IGNORED so a boot
+     * WITHOUT -device virtio-net-device (e.g. text-mode make run) still reaches
+     * the WM loop - the dominant non-negotiable (RESEARCH Q2 + Pitfall 6). */
+    kprintf("\n");
+    klog_info("Probing virtio-net (FEAT-05)...");
+    if (virtio_net_init() < 0) {
+        klog_warn("virtio-net absent - continuing boot");
+    }
 
     /* Prove the EL0/EL1 boundary once on the production boot path (FEAT-02).
      * The payload runs at EL0, issues svc #0 for getpid then exit; the serial
