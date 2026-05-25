@@ -60,13 +60,23 @@ static inline void spin_unlock(spinlock_t *l) {
 /* Non-blocking acquire. Returns nonzero iff it took a free lock (0->1); returns
  * zero WITHOUT spinning if the lock was already held. Used where a path must
  * never block (a stress scenario, or the single-core RED gate's held-lock
- * check, which would self-deadlock on a blocking spin_lock). */
+ * check, which would self-deadlock on a blocking spin_lock).
+ *
+ * The held path clrex's before failing: ldaxr sets the local exclusive monitor,
+ * and branching past stlxr on a held lock would otherwise return with a live
+ * reservation. A dangling reservation can only make a subsequent UNRELATED stxr
+ * spuriously fail (never spuriously succeed), but the header promises a sane
+ * state on failure, so drop the reservation explicitly. The free path is
+ * unchanged: cur is 0 from ldaxr, stlxr writes cur=0 on success / cur=1 on a
+ * lost reservation, and the caller returns cur == 0. */
 static inline int spin_trylock(spinlock_t *l) {
     uint32_t cur, one;
     __asm__ volatile(
         "   ldaxr   %w0, [%2]\n"
-        "   cbnz    %w0, 1f\n"        /* already held -> fail (cur != 0) */
-        "   mov     %w1, #1\n"
+        "   cbz     %w0, 2f\n"        /* free -> try the store */
+        "   clrex\n"                  /* held -> drop the reservation, then fail */
+        "   b       1f\n"
+        "2: mov     %w1, #1\n"
         "   stlxr   %w0, %w1, [%2]\n" /* cur becomes 0 on success */
         "1:\n"
         : "=&r"(cur), "=&r"(one)
