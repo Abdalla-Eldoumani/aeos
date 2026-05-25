@@ -239,8 +239,10 @@ void smp_init(void)
         }
     }
     /* online counts the secondaries; the primary (core 0) is always online, so
-     * the total core count is online + 1. */
-    klog_info("smp: %d cores online", online + 1);
+     * the total core count is online + 1. Printed %u (the count is never
+     * negative) for consistency with the %u cpu-id prints in the loop above;
+     * klog has no l/ll modifier so the int is cast to uint32_t. */
+    klog_info("smp: %u cores online", (uint32_t)(online + 1));
 }
 
 /* The real secondary_entry now lives in src/boot/secondary.asm (the per-core
