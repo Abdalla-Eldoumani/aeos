@@ -19,6 +19,8 @@
 #include <aeos/editor.h>
 #include <aeos/gui.h>
 #include <aeos/exec.h>
+#include <aeos/net.h>
+#include <aeos/virtio_net.h>
 
 /* External symbols from vectors.asm */
 extern uint64_t exception_counters[16];
@@ -152,6 +154,7 @@ static int cmd_exit(int argc, char **argv);
 static int cmd_startx(int argc, char **argv);
 static int cmd_run_elf(int argc, char **argv);
 static int cmd_kill(int argc, char **argv);
+static int cmd_ping(int argc, char **argv);
 
 /* Built-in command table */
 typedef struct {
@@ -190,6 +193,7 @@ static const shell_cmd_t builtin_commands[] = {
     {"startx",  cmd_startx,  "Start graphical desktop environment"},
     {"exec",    cmd_run_elf, "Load and run a static ELF64 at EL0"},
     {"kill",    cmd_kill,    "Kill a process by PID"},
+    {"ping",    cmd_ping,    "Ping an IPv4 host (ICMP echo)"},
     {NULL,      NULL,        NULL}
 };
 
@@ -1682,6 +1686,85 @@ static int cmd_kill(int argc, char **argv)
 
     kprintf("kill: no process with pid %u\n", (uint32_t)pid);
     return -1;
+}
+
+/**
+ * ping - Send one ICMP echo to an IPv4 host and print the bounded result.
+ *
+ * Parses a dotted-quad (four 0-255 octets split on '.', no DNS/hostname) the
+ * way cmd_kill parses a pid: digit-only fields, range-guarded, malformed input
+ * rejected with an invalid-ip message and -1. With no argument it defaults to
+ * the slirp gateway 10.0.2.2 (the demo target; only 10.0.2.2 is guaranteed to
+ * reply in this build - any other parse-valid address may legitimately time
+ * out, which is fine).
+ *
+ * The bound lives entirely inside net_ping (a uptime-ms deadline in production,
+ * a spin-count under TEST_BUILD), so this command does NO waiting itself: it
+ * calls net_ping once and prints reply/timeout/no-device. It NEVER loops or
+ * hangs the prompt (T-08-11).
+ */
+static int cmd_ping(int argc, char **argv)
+{
+    uint8_t ip[IP_ADDR_LEN] = { GW_IP_0, GW_IP_1, GW_IP_2, GW_IP_3 };
+
+    if (argc >= 2) {
+        /* Parse exactly four octets split on '.', each digit-only and 0-255.
+         * Reject non-digits, an octet > 255, and a wrong dot count (missing or
+         * extra) - the cmd_kill range-guard idiom adapted to four fields, so a
+         * malformed arg can never produce a wrong address or overflow (T-08-14). */
+        const char *c = argv[1];
+        int octet_idx = 0;
+        for (;;) {
+            if (*c < '0' || *c > '9') {
+                kprintf("ping: invalid ip '%s'\n", argv[1]);
+                return -1;
+            }
+            uint32_t octet = 0;
+            while (*c >= '0' && *c <= '9') {
+                octet = octet * 10 + (uint32_t)(*c - '0');
+                if (octet > 255) {
+                    kprintf("ping: invalid ip '%s'\n", argv[1]);
+                    return -1;
+                }
+                c++;
+            }
+            if (octet_idx >= IP_ADDR_LEN) {
+                kprintf("ping: invalid ip '%s'\n", argv[1]);
+                return -1;
+            }
+            ip[octet_idx++] = (uint8_t)octet;
+
+            if (*c == '\0') {
+                break;
+            }
+            if (*c != '.') {
+                kprintf("ping: invalid ip '%s'\n", argv[1]);
+                return -1;
+            }
+            c++;        /* step over the dot to the next octet */
+        }
+        if (octet_idx != IP_ADDR_LEN) {
+            kprintf("ping: invalid ip '%s'\n", argv[1]);
+            return -1;
+        }
+    }
+
+    if (!virtio_net_available()) {
+        kprintf("ping: no network device\n");
+        return -1;
+    }
+
+    /* net_ping resolves the next hop, sends one echo, and bounded-polls for the
+     * matching reply. It is bounded internally; we never wait here. */
+    int rc = net_ping(ip);
+    if (rc == 0) {
+        kprintf("reply from %u.%u.%u.%u\n",
+                (uint32_t)ip[0], (uint32_t)ip[1], (uint32_t)ip[2], (uint32_t)ip[3]);
+    } else {
+        kprintf("ping %u.%u.%u.%u: timeout\n",
+                (uint32_t)ip[0], (uint32_t)ip[1], (uint32_t)ip[2], (uint32_t)ip[3]);
+    }
+    return rc;
 }
 
 /* ============================================================================
