@@ -47,6 +47,45 @@ The drivers stay isolated: they never call into `wm` or `desktop`. Decoded
 events go up the stack through `event_push`, and the window manager pulls them
 off the queue on its own loop.
 
+### VirtIO Net Driver (virtio_net.c)
+- **Location**: `src/drivers/virtio_net.c`
+- **Purpose**: Network frame transmit/receive over the QEMU `virtio-net-device` (slirp backend)
+- **Features**:
+  - Scans for `device_id == 1` (VIRTIO_ID_NETWORK); never hardcodes a slot (the slot shifts with the `-device` set)
+  - Legacy v1 init: the device reports version 1 and offers no `VIRTIO_F_VERSION_1`, so it uses the `QUEUE_ALIGN`/`QUEUE_PFN` path, not the v2 path
+  - Negotiates `VIRTIO_NET_F_MAC` only. That forces the 10-byte `virtio_net_hdr` and single-descriptor receive (accepting MRG_RXBUF would make the header 12 bytes and let a frame span descriptors)
+  - Two virtqueues: RX = queue 0 (write-only ~2KB buffers, posted before the device is notified), TX = queue 1 (device reads, posted on demand)
+  - Reads the 6-byte MAC from device config offset 0x100 and prints it at probe: `virtio-net: MAC 52:54:00:12:34:56`
+  - Poll-driven `net_tx` / `net_rx_poll` - there is no interrupt path. The `TEST=1` kernel has no GIC or timer, so an IRQ-driven driver could not work in the test build; the poll path runs identically in both builds
+  - A file-static spinlock guards the RX/TX queue indices (the shared state), reusing the Phase 7 `spinlock.h` primitive
+  - No-op when absent: if no net device is found the probe returns -1 and the kernel boots on (logs `virtio-net not found`)
+
+The Ethernet/ARP/IPv4/ICMP stack that sits on top of `net_tx`/`net_rx_poll` lives
+in `src/net/` (added in a later plan); this driver only moves bytes.
+
+### virtio_net_hdr
+
+With `VIRTIO_NET_F_MAC` the only accepted feature, the header is the legacy 10-byte
+layout, prepended to every transmitted frame and present at the front of every
+received frame:
+
+```c
+struct virtio_net_hdr {   /* 10 bytes */
+    uint8_t  flags;       /* 0 for plain frames */
+    uint8_t  gso_type;    /* 0 (no GSO) */
+    uint16_t hdr_len;     /* 0 */
+    uint16_t gso_size;    /* 0 */
+    uint16_t csum_start;  /* 0 (no checksum offload) */
+    uint16_t csum_offset; /* 0 */
+} __attribute__((packed));
+```
+
+On transmit the driver zeroes the 10 bytes and copies the frame after them in the
+same buffer. On receive it skips 10 bytes (the frame is at `buf + 10`, length
+`used.len - 10`). `net_rx_poll` checks `used.len >= 10` before subtracting and caps
+the copy at `NET_RX_BUF_SIZE` so a short or oversized inbound frame is dropped or
+truncated, never read or written past the buffer.
+
 ### Framebuffer Driver (framebuffer.c)
 - **Location**: `src/drivers/framebuffer.c`
 - **Purpose**: Graphics primitives
@@ -132,6 +171,7 @@ typedef struct {
 
 | ID | Device Type |
 |----|-------------|
+| 1  | Network |
 | 16 | GPU |
 | 18 | Input |
 
@@ -193,6 +233,29 @@ void virtio_input_poll(void);
 /* Check device availability */
 bool virtio_keyboard_available(void);
 bool virtio_mouse_available(void);
+```
+
+### VirtIO Net
+
+```c
+/* Probe the net device: scan, legacy MAC-only init, RX/TX queues, print MAC.
+ * Returns 0 on success, -1 when no net device is present (clean no-op). */
+int virtio_net_init(void);
+
+/* Transmit one Ethernet frame (the driver prepends the 10-byte header).
+ * Returns 0 on completion, -1 on timeout or when no device is present. */
+int net_tx(const uint8_t *frame, uint32_t len);
+
+/* Poll for one received frame; never blocks. Writes the frame (header skipped)
+ * into out, capped at NET_RX_BUF_SIZE. Returns 1 on a frame, 0 if nothing is
+ * ready, -1 when no device is present. */
+int net_rx_poll(uint8_t *out, uint32_t *len);
+
+/* Whether a net device was found and initialized. */
+bool virtio_net_available(void);
+
+/* Copy the 6-byte device MAC into out_mac. */
+void virtio_net_get_mac(uint8_t out_mac[6]);
 ```
 
 ### Framebuffer
