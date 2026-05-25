@@ -91,6 +91,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/fs/vfs.c \
               src/fs/ramfs.c \
               src/fs/fs_persist.c \
+              src/net/net.c \
               src/lib/string.c \
               src/lib/anim.c \
               src/apps/terminal.c \
@@ -161,6 +162,7 @@ directories:
 	@mkdir -p $(BUILD_DIR)/proc
 	@mkdir -p $(BUILD_DIR)/syscall
 	@mkdir -p $(BUILD_DIR)/fs
+	@mkdir -p $(BUILD_DIR)/net
 	@mkdir -p $(BUILD_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/apps
 
