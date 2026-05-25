@@ -423,14 +423,25 @@ void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out
     }
 
     (void)started;
+
+    /* Read the shared counter UNDER stress_counter_lock - the same lock the
+     * secondaries take for each ++ - so the primary's read pairs with the
+     * writers' release (the last unlocker's stlr) via this acquire. Snapshot
+     * once into a local and use it for both the log and the out-param so they
+     * agree and the cross-core read is soundly serialized, not just ordered by
+     * the WR-01 dmb ish. */
+    spin_lock(&stress_counter_lock);
+    uint64_t counter_snapshot = smp_stress_counter;
+    spin_unlock(&stress_counter_lock);
+
     klog_info("smp: runqueue stress - %u cores participated, counter=%u",
-              participating, (uint32_t)smp_stress_counter);
+              participating, (uint32_t)counter_snapshot);
 
     if (out_online != NULL) {
         *out_online = participating;
     }
     if (out_counter != NULL) {
-        *out_counter = smp_stress_counter;
+        *out_counter = counter_snapshot;
     }
 }
 #endif /* TEST_BUILD */
