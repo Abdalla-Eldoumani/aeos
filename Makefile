@@ -71,6 +71,7 @@ C_SOURCES   = $(KERNEL_ENTRY_C) \
               src/drivers/dtb.c \
               src/drivers/ramfb.c \
               src/drivers/virtio_gpu.c \
+              src/drivers/virtio_net.c \
               src/drivers/pflash.c \
               src/drivers/semihosting.c \
               src/mm/mm.c \
