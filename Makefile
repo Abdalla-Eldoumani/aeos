@@ -259,6 +259,7 @@ run: all
 	@echo "Starting QEMU (text mode with semihosting)..."
 	@echo "Filesystem will be saved to 'aeos_fs.img' on host when you run 'save' command"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-nographic -kernel $(KERNEL_ELF) \
 		-semihosting-config enable=on,target=native
 
@@ -266,7 +267,12 @@ run: all
 run-nopersist: all
 	@echo "Starting QEMU (text mode, no persistence)..."
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-nographic -kernel $(KERNEL_ELF)
+
+# virtio-net device (the FEAT-05 target). RESEARCH Q1: slirp gives the guest
+# 10.0.2.15 and a gateway 10.0.2.2 that answers ARP and ICMP echo. The same flags
+# go on the test: line so the criterion-3 ICMP round-trip scenario has a NIC.
 
 # Run with graphics (using VirtIO GPU MMIO device)
 run-ramfb: all
@@ -277,6 +283,7 @@ run-ramfb: all
 		-device virtio-gpu-device \
 		-device virtio-keyboard-device \
 		-device virtio-mouse-device \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
@@ -322,6 +329,7 @@ run-virtio: all
 	@echo "Press Ctrl+Alt+G to release mouse/keyboard"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device virtio-gpu-device \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
@@ -333,6 +341,7 @@ run-all-gpu: all
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device ramfb \
 		-device virtio-gpu-device \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
 		-kernel $(KERNEL_ELF)
@@ -354,6 +363,7 @@ debug: all
 	@echo "Starting QEMU with GDB server..."
 	@echo "Connect with: aarch64-linux-gnu-gdb kernel.elf -ex 'target remote :1234'"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-nographic -kernel $(KERNEL_ELF) -S -s
 
 # ----------------------------------------------------------------------------
@@ -378,6 +388,7 @@ test:
 	@mkdir -p $(BUILD_DIR)
 	@echo "Running test kernel under QEMU..."
 	@timeout 30 qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-nographic -kernel $(KERNEL_ELF) \
 		-semihosting-config enable=on,target=native \
 		> $(BUILD_DIR)/test.log 2>&1 || true
