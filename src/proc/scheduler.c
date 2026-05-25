@@ -404,9 +404,19 @@ void scheduler_get_stats(scheduler_stats_t *stats)
         return;
     }
 
+    /* Read the three counters under scheduler_lock. running_processes is
+     * mutated under this lock by add_inner/remove_inner, so an unlocked read
+     * is racy. The cross-core stress proof (test_smp_runqueue_lock) reads
+     * running_processes right after secondaries hammered it under the lock;
+     * taking the lock here orders this read against their last decrement.
+     * Uncontended on every production path: scheduler_get_stats is a pure
+     * reader called from cmd_ps and the proof, neither of which holds
+     * scheduler_lock, so there is no deadlock. */
+    spin_lock(&scheduler_lock);
     stats->total_processes = scheduler.total_processes;
     stats->running_processes = scheduler.running_processes;
     stats->context_switches = scheduler.context_switches;
+    spin_unlock(&scheduler_lock);
 }
 
 /* ============================================================================
