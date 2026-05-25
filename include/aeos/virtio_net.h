@@ -83,4 +83,20 @@ bool virtio_net_available(void);
  */
 void virtio_net_get_mac(uint8_t out_mac[6]);
 
+/**
+ * Acquire / release the driver's net_lock - the SAME file-static spinlock that
+ * net_tx and net_rx_poll take internally over the queue cursors. The src/net/
+ * stack (08-03) updates its pending-ping state through this pair so that state
+ * and the queue cursors move under one lock (FEAT-05 criterion 4) - NOT a
+ * second ad hoc lock.
+ *
+ * The lock is NON-RECURSIVE (spin_lock blocks forever on a held lock). A caller
+ * holding it must NOT call net_tx or net_rx_poll while it is held, or it
+ * self-deadlocks (those primitives re-take the same lock). Hold it only for the
+ * brief read/compare/set of the shared pending-ping state, then release before
+ * any net_tx/net_rx_poll.
+ */
+void net_lock_acquire(void);
+void net_lock_release(void);
+
 #endif /* AEOS_VIRTIO_NET_H */

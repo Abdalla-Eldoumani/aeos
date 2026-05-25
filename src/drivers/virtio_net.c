@@ -394,6 +394,21 @@ void virtio_net_get_mac(uint8_t out_mac[6])
     }
 }
 
+/* The net_lock seam for src/net/ (08-03). The stack updates its pending-ping
+ * state (the awaited id+seq, got_reply, the cached gateway MAC) under this SAME
+ * lock so that state and the queue cursors move atomically (criterion 4). The
+ * lock is non-recursive: a holder must release before any net_tx/net_rx_poll
+ * (those re-take it) or it self-deadlocks. */
+void net_lock_acquire(void)
+{
+    spin_lock(&net_lock);
+}
+
+void net_lock_release(void)
+{
+    spin_unlock(&net_lock);
+}
+
 /* ============================================================================
  * End of virtio_net.c
  * ============================================================================ */
