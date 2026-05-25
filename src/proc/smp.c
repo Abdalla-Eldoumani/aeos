@@ -287,6 +287,16 @@ void secondary_main(void)
             __asm__ volatile("isb");
         }
 
+        /* Acquire barrier AFTER the go-flag is observed. isb is a
+         * context-synchronization barrier; it does NOT order two data-memory
+         * loads on the weak ARM model, so without this the loads of
+         * smp_stress_iters and the sec_stress_pcb[] fields (written by the
+         * primary BEFORE its dmb ish; smp_stress_go=1 release) could float
+         * ahead of the go observation and read stale/torn values. dmb ish
+         * pairs with the primary's release so the dependent reads are ordered
+         * after the flag. */
+        __asm__ volatile("dmb ish" ::: "memory");
+
         smp_stress_loop(id);
 
         /* Park - the teardown. PSCI has no clean CPU_OFF wired here; the stress
@@ -398,6 +408,13 @@ void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out
             spins++;
             __asm__ volatile("isb");
         }
+        /* Acquire barrier AFTER the done-flag is observed. The isb in the spin
+         * only re-reads the flag; it does NOT order the later load of
+         * smp_stress_counter (and the scheduler stats read in the test) after
+         * the flag on the weak ARM model. dmb ish pairs with the secondary's
+         * dmb ish; smp_stress_done[id]=1 release (smp_stress_loop) so the
+         * counter/stats reads cannot be satisfied from before done was seen. */
+        __asm__ volatile("dmb ish" ::: "memory");
         if (smp_stress_done[target]) {
             participating++;
         } else {
