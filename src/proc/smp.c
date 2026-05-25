@@ -427,7 +427,15 @@ void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out
         }
     }
 
-    (void)started;
+    /* Surface a secondary that powered on (CPU_ON returned 0) but never
+     * reported done within the spin bound - the bounded handshake skips it,
+     * but the started-vs-participated gap is a useful diagnostic the proof
+     * would otherwise discard. started is a non-negative count, so the
+     * uint32_t compare is exact. */
+    if (participating < (uint32_t)started) {
+        klog_warn("smp: %u stress cores started but did not report done",
+                  (uint32_t)started - participating);
+    }
 
     /* Read the shared counter UNDER stress_counter_lock - the same lock the
      * secondaries take for each ++ - so the primary's read pairs with the
