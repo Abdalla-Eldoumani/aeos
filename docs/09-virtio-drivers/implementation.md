@@ -515,6 +515,80 @@ void fb_draw_line(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t color
 }
 ```
 
+## Network Stack Implementation
+
+`src/net/net.c` is the protocol half on top of the driver's `net_tx`/`net_rx_poll`.
+It is greenfield and minimal: ARP, IPv4, and ICMP echo, no TCP/UDP/DHCP/routing.
+
+### Wire byte order
+
+Network order is big-endian; the kernel is little-endian. Every multi-byte field
+goes through byte-at-a-time helpers so a packed frame is never the target of an
+unaligned 16-bit store:
+
+```c
+static inline void wbe16(uint8_t *p, uint16_t v) { p[0] = v >> 8; p[1] = v & 0xff; }
+static inline uint16_t rbe16(const uint8_t *p) { return (p[0] << 8) | p[1]; }
+```
+
+The `htons`/`htonl` helpers in `net.h` are integer-only for the same reason (the
+build is `-mgeneral-regs-only`; FP/SIMD traps at EL1).
+
+### The bounds-safe parser (the dominant non-negotiable)
+
+`net_rx_dispatch` parses attacker-influenceable bytes. A fault breaks the boot, so
+the rule is: bounds-check BEFORE indexing at every layer, and DROP on any
+inconsistency. The IPv4 path is the subtle one - the IHL and total-length must be
+validated against `len` before they are used to locate the ICMP payload:
+
+```c
+if (len < ETH_HDR_LEN + IP_HDR_MIN_LEN) return;          /* 14 + 20 */
+uint32_t ihl_bytes = (ip[IP_OFF_VER_IHL] & 0x0f) * 4;
+if (ihl_bytes < IP_HDR_MIN_LEN) return;                  /* a sane header */
+if (ETH_HDR_LEN + ihl_bytes > len) return;               /* header fits */
+uint32_t total_length = rbe16(ip + IP_OFF_TOTAL_LEN);
+if (ETH_HDR_LEN + total_length > len) return;            /* claimed <= received */
+if (ip[IP_OFF_PROTO] != IP_PROTO_ICMP) return;
+if (ETH_HDR_LEN + ihl_bytes + ICMP_HDR_LEN > len) return; /* ICMP header fits */
+/* only now is icmp = ip + ihl_bytes safe to index */
+```
+
+Single-descriptor RX (MRG_RXBUF not negotiated) means the device cannot split a
+frame, so `len` is the whole frame.
+
+### The checksum
+
+```c
+uint16_t inet_csum(const uint8_t *data, uint32_t len) {
+    uint32_t sum = 0;
+    while (len > 1) { sum += (data[0] << 8) | data[1]; data += 2; len -= 2; }
+    if (len) sum += data[0] << 8;
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)(~sum);
+}
+```
+
+Zero the checksum field, compute over the span, store the result big-endian. The
+same function covers the 20-byte IPv4 header and the 8-byte ICMP message.
+
+### Lock discipline
+
+The pending-ping state (the awaited id+seq, the got-reply flag, the cached gateway
+MAC) is guarded by the driver's `net_lock` via `net_lock_acquire`/`net_lock_release`
+- the SAME lock the queue cursors use, not a second lock. `net_lock` is
+non-recursive (it spins forever on a held lock), so no flow holds it across a
+`net_tx`/`net_rx_poll` call. `net_rx_dispatch` locks only the brief reply match;
+the ARP/echo sends and the ping poll loop run with the lock released. Wrapping the
+whole dispatch in one critical section would deadlock the moment the echo-request
+branch calls `net_tx` (which re-takes the lock).
+
+### Bounded waits
+
+`arp_resolve` and `net_ping` poll with a bound, never an infinite loop. Production
+uses a `timer_get_uptime_ms()` deadline (CNTVCT-backed; advances even with starved
+ticks); the TEST build has no timer, so it uses a spin-count bound. On expiry both
+return -1.
+
 ## Memory Barriers
 
 Memory barriers are critical for VirtIO:

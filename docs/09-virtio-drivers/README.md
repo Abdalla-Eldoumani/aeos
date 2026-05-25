@@ -61,7 +61,43 @@ off the queue on its own loop.
   - No-op when absent: if no net device is found the probe returns -1 and the kernel boots on (logs `virtio-net not found`)
 
 The Ethernet/ARP/IPv4/ICMP stack that sits on top of `net_tx`/`net_rx_poll` lives
-in `src/net/` (added in a later plan); this driver only moves bytes.
+in `src/net/` (see "The network stack" below); this driver only moves bytes. The
+driver exposes `net_lock_acquire`/`net_lock_release` so the stack can update its
+pending-ping state under the SAME lock the queue cursors use.
+
+### The network stack (src/net/net.c)
+
+- **Location**: `src/net/net.c`, interface in `include/aeos/net.h`
+- **Purpose**: the minimal Ethernet/ARP/IPv4/ICMP framing on top of the driver's
+  `net_tx`/`net_rx_poll`. No TCP/UDP/DHCP/routing.
+- **Byte order**: big-endian on the wire, little-endian kernel. Every multi-byte
+  field is written/read big-endian byte-at-a-time (the `wbe16`/`rbe16` helpers,
+  or the `htons`/`htonl` helpers in `net.h`) - never a packed-struct store.
+- **Integer-only**: no FP/SIMD anywhere (the build is `-mgeneral-regs-only`).
+- **Static config** (slirp defaults): our IP `10.0.2.15`, gateway `10.0.2.2`.
+- **`inet_csum`**: the one's-complement Internet checksum, used for both the
+  20-byte IPv4 header and the ICMP message. Pure (no I/O).
+- **`arp_build_reply`**: a pure builder - given a valid inbound ARP request for
+  our IP it writes a 42-byte opcode-2 reply; it returns 0 without writing if the
+  input is too short, not a request, or for some other IP.
+- **`net_rx_dispatch`**: the bounds-safe parser. It bounds-checks at every layer
+  (`len >= 14` before the ethertype; `len >= 42` for ARP; for IPv4 the IHL and
+  total-length are validated against `len` before the ICMP payload is indexed)
+  and DROPS any malformed/short/inconsistent frame - it never reads past `len`
+  or faults. It answers an ARP request for our IP, answers an ICMP echo request
+  with a type-0 reply (both checksums recomputed), and matches an ICMP echo
+  reply against the pending ping.
+- **`arp_resolve` / `net_ping`**: both bounded - a `timer_get_uptime_ms()`
+  deadline in production, a spin-count under `TEST_BUILD` (no timer there). They
+  return -1 on the bounded-wait expiry, never an infinite loop.
+- **Lock discipline**: the pending-ping state is guarded by the driver's
+  `net_lock` (criterion 4), not a second lock. `net_lock` is non-recursive, so
+  no flow holds it across a `net_tx`/`net_rx_poll` call (those re-take it and
+  would self-deadlock). `net_rx_dispatch` locks only the brief reply-match; the
+  ARP/echo sends and the ping poll loop run with the lock released.
+
+Not yet wired into the boot path or the shell (that is a later plan); the code
+links into both kernels but is not called on boot.
 
 ### virtio_net_hdr
 
@@ -256,6 +292,40 @@ bool virtio_net_available(void);
 
 /* Copy the 6-byte device MAC into out_mac. */
 void virtio_net_get_mac(uint8_t out_mac[6]);
+
+/* Acquire/release the driver's net_lock - the SAME lock net_tx/net_rx_poll use.
+ * The src/net/ stack guards its pending-ping state through this (criterion 4).
+ * Non-recursive: do not call net_tx/net_rx_poll while holding it. */
+void net_lock_acquire(void);
+void net_lock_release(void);
+```
+
+### Network stack (src/net/net.c)
+
+```c
+/* One's-complement Internet checksum over data[0..len). Pure. Used for both the
+ * IPv4 header and the ICMP message. */
+uint16_t inet_csum(const uint8_t *data, uint32_t len);
+
+/* Pure ARP-reply builder: writes a 42-byte opcode-2 reply into out for a valid
+ * inbound request for our_ip; returns 42, or 0 without writing on a mismatch. */
+int arp_build_reply(const uint8_t *req, uint32_t req_len,
+                    const uint8_t our_mac[6], const uint8_t our_ip[4],
+                    uint8_t *out);
+
+/* Bounds-safe parse of one inbound Ethernet frame: answer ARP for our IP,
+ * answer an ICMP echo request, match an echo reply. Drops malformed frames. */
+void net_rx_dispatch(const uint8_t *frame, uint32_t len);
+
+/* Broadcast an ARP request and bounded-poll for the reply (0 + out_mac, or -1). */
+int arp_resolve(const uint8_t target_ip[4], uint8_t out_mac[6]);
+
+/* Build + send an ICMP echo request (type 8) with correct checksums. */
+int icmp_send_echo(const uint8_t dst_ip[4], const uint8_t dst_mac[6],
+                   uint16_t id, uint16_t seq);
+
+/* Bounded ping driver: resolve, send, poll for the matching reply (0 or -1). */
+int net_ping(const uint8_t dst_ip[4]);
 ```
 
 ### Framebuffer
