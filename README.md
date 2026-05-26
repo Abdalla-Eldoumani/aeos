@@ -14,7 +14,7 @@ AEOS is **deliberately small**. It is meant to be readable end-to-end in a few s
 - **An EL0/EL1 privilege boundary.** A static ELF64 loaded from a file runs at EL0 and reaches the kernel only through `svc #0` traps decoded by the EL1 vector table. A privileged instruction from EL0 faults to EL1. The loaded program is mapped with per-segment W^X (executable segments are read-only at EL0).
 - **SMP.** `smp_init` brings up secondary cores 1 through 3 via PSCI CPU_ON with a bounded handshake; `ps` shows a CPU column and the boot serial reports four cores online.
 - **Networking.** A minimal in-kernel stack (Ethernet, ARP, IPv4, ICMP echo) over a poll-driven virtio-net driver answers ARP for its own address and the `ping` command gets an ICMP echo reply from the QEMU slirp gateway.
-- **A wall clock.** A PL031 RTC driver reads UTC seconds and drives the taskbar clock and the boot log.
+- **A wall clock.** A PL031 RTC driver reads the host wall-clock seconds and drives the taskbar clock and the boot log. `run-ramfb` runs QEMU with `-rtc base=localtime`, so the taskbar shows local time (the host timezone, with DST), not UTC.
 
 The remaining gaps are deliberate, and AEOS stays honest about them:
 
