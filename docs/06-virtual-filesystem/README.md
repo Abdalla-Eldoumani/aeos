@@ -279,6 +279,10 @@ Files limited to 1MB (RAMFS_MAX_FILE_SIZE) to prevent memory exhaustion.
 
 Mode bits are stored but not enforced. All processes can read/write all files.
 
+### Writes Need a Current Process with an fd Table
+
+`vfs_open` allocates the file descriptor through `process_current()`'s fd table, which only exists once the idle process is created in `scheduler_init`. A write attempted before that fails at fd allocation. This is why the embedded `/hello` ELF (the static program the ELF loader runs at EL0, see Section 04) is written into ramfs from `main.c` after `scheduler_init`, not during the early VFS setup; the file would be zero-length if written before the idle fd table exists.
+
 ### Memory Usage
 
 Entire filesystem lives in RAM. Large files consume heap space.
