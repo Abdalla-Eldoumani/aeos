@@ -442,9 +442,11 @@ const char *shell_test_history_get(int rel_idx)
  */
 void shell_init(void)
 {
-    /* Clear history */
-    history_count = 0;
-    history_start = 0;
+    /* Load persisted history from aeos_hist.img if present. history_load itself
+     * starts from an empty ring and falls back to empty on a missing, foreign,
+     * or malformed image, so this both restores prior history and replaces the
+     * old unconditional clear. It is bounded and never faults the boot path. */
+    history_load();
 
     klog_info("Shell subsystem initialized (with history)");
 }
