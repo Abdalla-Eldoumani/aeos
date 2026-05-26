@@ -15,6 +15,7 @@
 #include <aeos/vfs.h>
 #include <aeos/ramfs.h>
 #include <aeos/fs_persist.h>
+#include <aeos/semihosting.h>
 #include <aeos/timer.h>
 #include <aeos/editor.h>
 #include <aeos/gui.h>
@@ -43,10 +44,34 @@ extern uint64_t exception_counters[16];
 #define HISTORY_SIZE    32
 #define HISTORY_LINE_LEN SHELL_MAX_LINE
 
+/* Persistent-history blob identity. A distinct 32-bit magic (NOT FS_MAGIC, so a
+ * filesystem image can never be mistaken for a history image) and a format
+ * version so a future layout change rejects a stale file cleanly. 'AEHS'. */
+#define HIST_MAGIC      0x41454853u
+#define HIST_VERSION    1u
+
+/* Host file the history ring persists to, alongside aeos_fs.img. It is the
+ * shell's own small file, not part of the filesystem image. */
+#define HIST_IMAGE_FILENAME "aeos_hist.img"
+
+/* On-disk history blob header. The header is followed by `count` fixed-width
+ * records of `line_len` bytes each, written oldest-first. */
+typedef struct hist_header {
+    uint32_t magic;     /* HIST_MAGIC */
+    uint32_t version;   /* HIST_VERSION */
+    uint32_t count;     /* live entries that follow (<= HISTORY_SIZE) */
+    uint32_t line_len;  /* bytes per record (== HISTORY_LINE_LEN) */
+} hist_header_t;
+
 /* Command history circular buffer */
 static char history[HISTORY_SIZE][HISTORY_LINE_LEN];
 static int history_count = 0;      /* Total commands ever entered */
 static int history_start = 0;      /* Oldest entry index */
+
+/* Serialization scratch for the history blob: the header plus the full ring.
+ * File-static (about 8 KB) so it is not a large stack frame; the save/load path
+ * is single-threaded on the boot/`save` path. */
+static char hist_blob[sizeof(hist_header_t) + HISTORY_SIZE * HISTORY_LINE_LEN];
 
 /* Extended key codes for escape sequences (shell-specific, avoid editor.h conflicts) */
 #define SHELL_KEY_UP          2000
@@ -245,6 +270,171 @@ static const char *history_get(int rel_idx)
     int idx = (history_start + count - 1 - rel_idx) % HISTORY_SIZE;
     return history[idx];
 }
+
+/**
+ * Persist the history ring to aeos_hist.img via the raw semihosting primitives.
+ *
+ * Writes the magic-versioned header followed by the live entries oldest-first.
+ * The oldest entry is at history_start; walking forward modulo HISTORY_SIZE for
+ * `count` entries yields chronological order, so a reload reconstructs the ring
+ * with history_start = 0. Gated on semihost_available so a non-semihosting boot
+ * is a clean no-op. A failed open/write is logged and returns -1 (never hangs);
+ * cmd_save treats that as non-fatal so the FS save still reports success.
+ */
+int history_save(void)
+{
+    hist_header_t *hdr;
+    uint32_t count;
+    uint32_t i;
+    size_t blob_len;
+    size_t not_written;
+    int fd;
+
+    if (!semihost_available()) {
+        klog_warn("history: semihosting unavailable - history not saved");
+        return -1;
+    }
+
+    count = (history_count < HISTORY_SIZE) ? (uint32_t)history_count : HISTORY_SIZE;
+
+    hdr = (hist_header_t *)hist_blob;
+    hdr->magic = HIST_MAGIC;
+    hdr->version = HIST_VERSION;
+    hdr->count = count;
+    hdr->line_len = HISTORY_LINE_LEN;
+
+    /* Records oldest-first: start at history_start, walk the ring forward. */
+    for (i = 0; i < count; i++) {
+        int idx = (history_start + (int)i) % HISTORY_SIZE;
+        char *rec = hist_blob + sizeof(hist_header_t) + (size_t)i * HISTORY_LINE_LEN;
+        memcpy(rec, history[idx], HISTORY_LINE_LEN);
+    }
+
+    blob_len = sizeof(hist_header_t) + (size_t)count * HISTORY_LINE_LEN;
+
+    fd = semihost_open(HIST_IMAGE_FILENAME, SEMIHOST_OPEN_WB);
+    if (fd < 0) {
+        klog_warn("history: cannot open '%s' for writing", HIST_IMAGE_FILENAME);
+        return -1;
+    }
+
+    not_written = semihost_write(fd, hist_blob, blob_len);
+    semihost_close(fd);
+    if (not_written != 0) {
+        klog_warn("history: write failed (%u bytes not written)", (uint32_t)not_written);
+        return -1;
+    }
+
+    klog_info("history: saved %u entries to '%s'", count, HIST_IMAGE_FILENAME);
+    return 0;
+}
+
+/**
+ * Load the history ring from aeos_hist.img at boot, validating before trusting.
+ *
+ * Mirrors fs_load_from_disk's discipline: gate on semihosting, open read-only,
+ * bound by the file length and the blob buffer, then validate magic + version +
+ * bounds (count <= HISTORY_SIZE, line_len == HISTORY_LINE_LEN) BEFORE indexing
+ * any record. Any failure (missing/foreign/malformed image) falls back to an
+ * empty ring - a bad image must never hang or fault the path to the WM loop
+ * (the dominant non-negotiable). The read is bounded by HISTORY_SIZE, never a
+ * loop driven by an attacker-supplied count.
+ */
+void history_load(void)
+{
+    hist_header_t *hdr;
+    ssize_t file_len;
+    size_t want;
+    size_t not_read;
+    uint32_t count;
+    uint32_t i;
+    int fd;
+
+    /* Start empty; every early return below leaves the ring cleared. */
+    history_count = 0;
+    history_start = 0;
+
+    if (!semihost_available()) {
+        return;
+    }
+
+    fd = semihost_open(HIST_IMAGE_FILENAME, SEMIHOST_OPEN_RB);
+    if (fd < 0) {
+        /* No saved history - the missing-file path, not an error. */
+        return;
+    }
+
+    file_len = semihost_flen(fd);
+    if (file_len <= (ssize_t)sizeof(hist_header_t) ||
+        (size_t)file_len > sizeof(hist_blob)) {
+        /* Too small to hold a header+record, or larger than the buffer. */
+        semihost_close(fd);
+        return;
+    }
+
+    not_read = semihost_read(fd, hist_blob, (size_t)file_len);
+    semihost_close(fd);
+    if (not_read != 0) {
+        return;
+    }
+
+    hdr = (hist_header_t *)hist_blob;
+    if (hdr->magic != HIST_MAGIC ||
+        hdr->version != HIST_VERSION ||
+        hdr->count > HISTORY_SIZE ||
+        hdr->line_len != HISTORY_LINE_LEN) {
+        /* Foreign or malformed image - reject to empty (Pitfall 10). */
+        klog_warn("history: ignoring foreign or malformed '%s'", HIST_IMAGE_FILENAME);
+        return;
+    }
+
+    /* The header is trusted now, but still require the file to actually hold the
+     * records it claims before reading them. */
+    count = hdr->count;
+    want = sizeof(hist_header_t) + (size_t)count * HISTORY_LINE_LEN;
+    if ((size_t)file_len < want) {
+        klog_warn("history: truncated '%s' - ignoring", HIST_IMAGE_FILENAME);
+        return;
+    }
+
+    /* Populate oldest-first into a ring that starts at 0. The bound is the
+     * validated count (<= HISTORY_SIZE), never unbounded. */
+    for (i = 0; i < count; i++) {
+        char *rec = hist_blob + sizeof(hist_header_t) + (size_t)i * HISTORY_LINE_LEN;
+        memcpy(history[i], rec, HISTORY_LINE_LEN);
+        history[i][HISTORY_LINE_LEN - 1] = '\0';  /* defensive NUL terminate */
+    }
+    history_count = (int)count;
+    history_start = 0;
+
+    klog_info("history: loaded %u entries from '%s'", count, HIST_IMAGE_FILENAME);
+}
+
+#ifdef TEST_BUILD
+/* History test seam - thin wrappers over the file-static ring so
+ * test_history_persist_roundtrip can seed and inspect it. Compiled out of
+ * production. */
+void shell_test_history_reset(void)
+{
+    history_count = 0;
+    history_start = 0;
+}
+
+void shell_test_history_seed(const char *line)
+{
+    history_add(line);
+}
+
+int shell_test_history_count(void)
+{
+    return (history_count < HISTORY_SIZE) ? history_count : HISTORY_SIZE;
+}
+
+const char *shell_test_history_get(int rel_idx)
+{
+    return history_get(rel_idx);
+}
+#endif /* TEST_BUILD */
 
 
 /**
