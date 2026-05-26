@@ -226,6 +226,13 @@ static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
     if (ETH_HDR_LEN + total_length > len) {
         return;
     }
+    /* total_length must also cover at least the IPv4 header plus the 8-byte
+     * ICMP header. Without this, a crafted total_length < ihl_bytes makes the
+     * unsigned icmp_len = total_length - ihl_bytes (below) underflow to ~2^32,
+     * and inet_csum then walks ~4 GB off the reply stack buffer and faults. */
+    if (total_length < ihl_bytes + ICMP_HDR_LEN) {
+        return;
+    }
 
     /* Only ICMP is in scope. */
     if (ip[IP_OFF_PROTO] != IP_PROTO_ICMP) {
