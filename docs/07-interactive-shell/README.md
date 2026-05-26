@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements an interactive command-line shell and a vim-like text editor for AEOS. The shell provides 24 built-in commands with colorized output, command history, and filesystem operations. The text editor supports modal editing for creating and modifying files.
+This section implements an interactive command-line shell and a vim-like text editor for AEOS. The shell provides 30 built-in commands with colorized output, command history, and filesystem operations. The text editor supports modal editing for creating and modifying files.
 
 ## Components
 
@@ -10,7 +10,7 @@ This section implements an interactive command-line shell and a vim-like text ed
 - **Location**: `src/kernel/shell.c`
 - **Purpose**: Command-line interface
 - **Features**:
-  - 24 built-in commands
+  - 30 built-in commands
   - Colorized output (ANSI escape codes)
   - Command history storage
   - Line editing with backspace
@@ -55,6 +55,10 @@ This section implements an interactive command-line shell and a vim-like text ed
 | time | Time command execution |
 | uname | Show system information |
 | save | Save filesystem to host |
+| exec | Load and run a static ELF64 at EL0 |
+| kill | Kill a registered process by PID |
+| ping | Ping an IPv4 host with a bounded ICMP echo |
+| startx | Start the graphical desktop |
 | exit | Exit shell and halt system |
 
 ## Shell Features
@@ -73,6 +77,11 @@ This section implements an interactive command-line shell and a vim-like text ed
 
 ### Pipes
 The shell splits a command line on `|` and runs the stages serially. Built-ins always print through `kprintf`, so a pipe stage installs a `kprintf` output hook that appends each character into a small fixed ring (256 bytes); the next stage reads that captured output back through `shell_pipe_readline` instead of opening a file. There are no real processes or kernel pipes behind this; the stages run one after another, up to a small fixed number of stages. A built-in opts into pipe input by reading `shell_pipe_readline` when its argv has no filename, as `grep` does.
+
+### Loaded Programs and Networking
+- `exec <path>` loads a static ELF64 off the VFS and runs it at EL0 (see Section 04). The embedded `/hello` is the in-tree example; a negative load is reported and the shell continues.
+- `kill <pid>` looks the pid up in the process registry and arms its kill flag, honored at the program's next `svc`. It refuses a non-killable pid (idle and the kernel threads), so `kill 1` reports failure rather than a misleading success.
+- `ping <ip>` sends one ICMP echo. The address is a dotted-quad (four 0-255 octets, parsed the way `kill` parses a pid; no DNS); with no argument it defaults to the slirp gateway `10.0.2.2`. The round trip is bounded inside `net_ping`, so `ping` never hangs the prompt; it prints the reply, a timeout, or "no network device". Only `10.0.2.2` is guaranteed to reply in this build.
 
 ### Path Resolution
 - Absolute paths start with `/`
