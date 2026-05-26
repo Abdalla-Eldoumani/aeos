@@ -132,6 +132,34 @@ truncated, never read or written past the buffer.
   - Two bitmap fonts: 8x8 (`fb_putchar`/`fb_puts`) and 8x16 (`fb_putchar_large`/`fb_puts_large`)
   - All primitives accept signed coordinates and clip to the framebuffer internally
 
+### PL031 RTC Driver (pl031.c)
+
+Not a VirtIO device, but a plain MMIO driver that lives alongside the others in
+`src/drivers/`.
+
+- **Location**: `src/drivers/pl031.c`, interface in `include/aeos/pl031.h`
+- **Purpose**: read the wall-clock time for the taskbar clock (FEAT-06)
+- **Device**: the PrimeCell PL031 RTC at base `0x09010000` (DTB-confirmed
+  `compatible = "arm,pl031"`). Its data register RTC_DR (offset 0x00) holds the
+  current time as UTC seconds since the Unix epoch - the only register read.
+  QEMU keeps the RTC running by default, so there is no enable write.
+- **MMIO access**: a single `volatile uint32_t` read, the same pattern as
+  `uart.c`. The base sits inside the kernel's identity-mapped Device-nGnRnE MMIO
+  block (`vmm.c` maps `0x00000000-0x3FFFFFFF` as one Device block), so there is
+  no separate mapping. It is a stateless global read; under `-smp` any core reads
+  the same value, so no lock is taken.
+- **H:M:S formatter**: `pl031_format_hms` does an integer-only breakdown
+  (`secs % 86400` into hours/minutes/seconds, wrapping at midnight UTC) and
+  formats `"HH:MM:SS"` via `snprintf("%02u:%02u:%02u", ...)`. Integer-only so it
+  is safe under `-mgeneral-regs-only`. UTC, no date (the date is out of scope).
+- **Boot proof**: `pl031_init` runs on the boot path (after the virtio-net
+  probe, before the EL0 demos) and logs `PL031: <secs> seconds, HH:MM:SS UTC` on
+  serial so the raw value is visible. A register read has no failure path that
+  hangs, so it log-and-continues like the other device probes.
+- **Taskbar**: `desktop_draw_taskbar` reads the RTC each frame via
+  `pl031_format_hms(pl031_now_seconds(), ...)`, replacing the old uptime counter,
+  so the clock shows the real time of day. The 30 FPS WM redraw refreshes it.
+
 ## VirtIO MMIO Transport
 
 VirtIO devices on QEMU's ARM virt board are exposed via MMIO (Memory-Mapped I/O). The MMIO region provides registers for device discovery, configuration, and virtqueue management.
