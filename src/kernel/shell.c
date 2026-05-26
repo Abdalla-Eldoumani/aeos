@@ -642,8 +642,17 @@ static int cmd_ps(int argc, char **argv)
      * last ran on / was last touched on): core 0 for the primary's processes,
      * cores 1..3 for the per-core idle markers (idle/cpuN, which carry their
      * represented core). It records the LAST core to touch a PCB, NOT live
-     * cross-core scheduling (bounded scope). */
-    kprintf("\n  PID  CPU  STATE      NAME\n");
+     * cross-core scheduling (bounded scope).
+     *
+     * TICKS is the REAL p->total_time, incremented on every 100 Hz timer tick by
+     * scheduler_tick. In the bounded scope the scheduler is dormant and idle
+     * (PID 1) is current throughout, so the ticks accrue on idle - honest: idle
+     * IS the running process most of the time. HEAP_B is p->heap_bytes, the bytes
+     * ATTRIBUTABLE to the PCB (its struct + stack + fd table), NOT a global heap
+     * profile - the kernel heap is shared and kmalloc has no owner. Both columns
+     * are (uint32_t)-cast: the values are small (ticks count slowly, attributed
+     * bytes are a few KB) and the kprintf has no l/ll length modifier. */
+    kprintf("\n  PID  CPU  STATE      TICKS    HEAP_B   NAME\n");
     for (process_t *p = process_registry_head(); p != NULL; p = p->reg_next) {
         const char *st;
         switch (p->state) {
@@ -653,8 +662,9 @@ static int cmd_ps(int argc, char **argv)
             case PROCESS_ZOMBIE:  st = "ZOMBIE";  break;
             default:              st = "?";        break;
         }
-        kprintf("  %-4u %-3u %-10s %s\n",
-                (uint32_t)p->pid, (uint32_t)p->last_cpu, st, p->name);
+        kprintf("  %-4u %-3u %-10s %-8u %-8u %s\n",
+                (uint32_t)p->pid, (uint32_t)p->last_cpu, st,
+                (uint32_t)p->total_time, (uint32_t)p->heap_bytes, p->name);
     }
     kprintf("\n");
 
