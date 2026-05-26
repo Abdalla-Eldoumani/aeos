@@ -724,11 +724,22 @@ void wm_run(void)
         /* Reap any closing windows whose fade-out has completed */
         reap_closing_windows();
 
-        /* Update display periodically (30 FPS) */
+        /* Render at ~30 FPS. The frame tick forces a full content redraw so
+         * live content advances WITHOUT an input event: the PL031 wall clock,
+         * window open/close animations, and the sysmon graph. The old code only
+         * re-rendered when an event had set needs_redraw, so between events the
+         * loop re-pushed a stale framebuffer - the clock froze and a freshly
+         * opened window sat on the first frame of its slide-in (the deep-blue
+         * open overlay at full alpha) until a drag set the flag again. A
+         * needs_redraw set by an event in between still updates immediately, so
+         * clicks stay sub-frame responsive. */
         now = timer_get_uptime_ms();
-        if (now - last_update >= 33 || wm.needs_redraw) {
-            wm_update_display();
+        if (now - last_update >= 33) {
+            wm.needs_redraw = true;
             last_update = now;
+        }
+        if (wm.needs_redraw) {
+            wm_update_display();
         }
 
         /* Small delay to prevent busy looping */
