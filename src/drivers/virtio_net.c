@@ -362,8 +362,15 @@ int net_rx_poll(uint8_t *out, uint32_t *len)
         rc = 0;
     } else {
         uint32_t frame_len = wlen - NET_HDR_LEN;
-        if (frame_len > NET_RX_BUF_SIZE) {
-            frame_len = NET_RX_BUF_SIZE;  /* cap to the caller's buffer */
+        /* Cap to the actual frame capacity of one descriptor buffer
+         * (NET_BUF_SIZE - NET_HDR_LEN = 2038), NOT NET_RX_BUF_SIZE (2048). The
+         * source slice is only NET_BUF_SIZE bytes and the header consumes the
+         * first NET_HDR_LEN; capping at 2048 would let a device-reported
+         * oversized wlen read up to NET_HDR_LEN bytes past this descriptor's
+         * slice (off the bufs allocation for the last id). 2038 keeps the read
+         * inside the slice for every id, and stays within the caller buffer. */
+        if (frame_len > NET_BUF_SIZE - NET_HDR_LEN) {
+            frame_len = NET_BUF_SIZE - NET_HDR_LEN;
         }
         memcpy(out, rxq.bufs + (size_t)id * NET_BUF_SIZE + NET_HDR_LEN, frame_len);
         *len = frame_len;
