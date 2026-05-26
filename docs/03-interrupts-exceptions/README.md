@@ -180,7 +180,12 @@ void gic_set_priority(uint32_t irq, uint8_t priority);
 /* Acknowledge and end interrupt */
 uint32_t gic_acknowledge_irq(void);
 void gic_end_of_irq(uint32_t irq);
+
+/* Per-core CPU interface init for an SMP secondary (Phase 7) */
+void gic_init_secondary(void);
 ```
+
+`gic_init` owns the global distributor and is run once by the primary. `gic_init_secondary` (Phase 7) is the per-core half: each secondary core enables its own banked GICC (priority mask, binary point, CPU-interface enable) and touches no distributor register, so it cannot reconfigure the primary's group assignments or IRQ targeting mid-flight. It is called from `secondary_main` during SMP bringup.
 
 ### Timer Functions
 
