@@ -23,8 +23,20 @@ jobs:
       - name: Build kernel
         run: make
 
+      # The `make` step above leaves production objects in build/ (compiled
+      # without -DTEST_BUILD). A bare `make TEST=1` would not rebuild them - make
+      # tracks file mtimes, not changed flags - so the TEST_BUILD seam symbols
+      # (scheduler_test_current, shell_test_history_*, syscall_test_*, ...) are
+      # undefined at link. Clean first so every object is rebuilt with -DTEST_BUILD.
       - name: Build test runner
-        run: make TEST=1
+        run: make clean && make TEST=1
+
+      # The virtio-net round-trip scenario (test_net_icmp_echo) needs QEMU slirp
+      # to answer ICMP echo to the gateway 10.0.2.2, which requires an
+      # unprivileged ICMP socket. Make the group range permissive or slirp
+      # silently drops the echo and the scenario times out.
+      - name: Allow unprivileged ICMP for the net round-trip test
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
 
       - name: Run test suite
         run: make test
