@@ -141,7 +141,11 @@ Not a VirtIO device, but a plain MMIO driver that lives alongside the others in
 - **Purpose**: read the wall-clock time for the taskbar clock (FEAT-06)
 - **Device**: the PrimeCell PL031 RTC at base `0x09010000` (DTB-confirmed
   `compatible = "arm,pl031"`). Its data register RTC_DR (offset 0x00) holds the
-  current time as UTC seconds since the Unix epoch - the only register read.
+  current time as wall-clock seconds since the Unix epoch, fed from the QEMU
+  host clock - the only register read. `run-ramfb` runs QEMU with
+  `-rtc base=localtime`, so RTC_DR carries the host's LOCAL time (the host
+  timezone, which handles DST), not UTC. There is no IP/GPS geolocation on a
+  bare-metal kernel; the host clock is the automatic local-time source.
   QEMU keeps the RTC running by default, so there is no enable write.
 - **MMIO access**: a single `volatile uint32_t` read, the same pattern as
   `uart.c`. The base sits inside the kernel's identity-mapped Device-nGnRnE MMIO
@@ -149,12 +153,14 @@ Not a VirtIO device, but a plain MMIO driver that lives alongside the others in
   no separate mapping. It is a stateless global read; under `-smp` any core reads
   the same value, so no lock is taken.
 - **H:M:S formatter**: `pl031_format_hms` does an integer-only breakdown
-  (`secs % 86400` into hours/minutes/seconds, wrapping at midnight UTC) and
+  (`secs % 86400` into hours/minutes/seconds, wrapping at midnight) and
   formats `"HH:MM:SS"` via `snprintf("%02u:%02u:%02u", ...)`. Integer-only so it
-  is safe under `-mgeneral-regs-only`. UTC, no date (the date is out of scope).
+  is safe under `-mgeneral-regs-only`. It is timezone-agnostic - it formats
+  whatever epoch seconds it is given, which is local time under
+  `-rtc base=localtime`. No date (the date is out of scope).
 - **Boot proof**: `pl031_init` runs on the boot path (after the virtio-net
-  probe, before the EL0 demos) and logs `PL031: <secs> seconds, HH:MM:SS UTC` on
-  serial so the raw value is visible. A register read has no failure path that
+  probe, before the EL0 demos) and logs `PL031: <secs> seconds, HH:MM:SS local`
+  on serial so the raw value is visible. A register read has no failure path that
   hangs, so it log-and-continues like the other device probes.
 - **Taskbar**: `desktop_draw_taskbar` reads the RTC each frame via
   `pl031_format_hms(pl031_now_seconds(), ...)`, replacing the old uptime counter,
