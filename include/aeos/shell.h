@@ -79,6 +79,40 @@ int shell_pipe_readline(char *buf, int max);
  */
 bool shell_has_pipe_input(void);
 
+/**
+ * Persist the command history ring to the host file aeos_hist.img via the raw
+ * semihosting primitives (a magic-versioned blob, not the VFS serializer).
+ * Triggered from cmd_save after the FS save so one deliberate `save` persists
+ * both. Gated on semihost_available; a write failure is logged and returns -1
+ * rather than hanging, so it never turns a successful FS save into a failure.
+ *
+ * @return 0 on success, -1 if semihosting is unavailable or the write failed
+ */
+int history_save(void);
+
+/**
+ * Load the command history ring from aeos_hist.img at boot (called from
+ * shell_init in place of the unconditional clear). Validates the magic,
+ * version, and bounds before reading any records and falls back to an empty
+ * buffer on a missing, foreign, or malformed image. Never loops unbounded and
+ * never faults the boot path.
+ */
+void history_load(void);
+
+#ifdef TEST_BUILD
+/*
+ * History buffer test seam (mirrors the editor_test_/syscall_test_/
+ * scheduler_test_ seams). The history ring and its counters are file-static in
+ * shell.c, so test_history_persist_roundtrip uses these thin wrappers to seed
+ * and inspect the buffer without it being private. Compiled out of production
+ * (no prod symbol, no -Werror unused warning).
+ */
+void shell_test_history_reset(void);             /* clear the ring to empty */
+void shell_test_history_seed(const char *line);  /* history_add a known line */
+int  shell_test_history_count(void);             /* live entry count */
+const char *shell_test_history_get(int rel_idx); /* history_get (0 = newest) */
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_SHELL_H */
 
 /* ============================================================================
