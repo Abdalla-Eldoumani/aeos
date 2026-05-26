@@ -85,7 +85,7 @@ VirtIO device drivers for graphics and input.
 #### Key Components:
 - **VirtIO GPU** (`virtio_gpu.c`): Creates display resources, transfers framebuffer to host
 - **VirtIO Input** (`virtio_input.c`): Polls keyboard and mouse devices for events
-- **Framebuffer** (`framebuffer.c`): Graphics primitives (putpixel, fill_rect, draw_rect, draw_line, putchar, puts) — all accept signed coordinates and clip internally
+- **Framebuffer** (`framebuffer.c`): Graphics primitives (putpixel, fill_rect, draw_rect, draw_line, putchar, puts), which all accept signed coordinates and clip internally
 
 ### 10. [GUI Applications](./10-gui-applications/)
 Built-in graphical applications.
