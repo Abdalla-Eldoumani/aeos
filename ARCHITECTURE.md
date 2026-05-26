@@ -97,16 +97,24 @@ are load-bearing.
 6. `vfs_init`, then ramfs creation, then mounting `/`.
 7. `init_graphics`, which runs `fb_init` then `virtio_gpu_init`. The framebuffer
    and GPU must be up before anything draws.
-8. `process_init` then `scheduler_init`.
-9. `syscall_init` to populate the syscall table, then two one-shot EL0 runs (both
-   before the shell, each run once, never looped). First a round trip
-   (`usermode_run_payload`) that drops to EL0, issues `svc #0` for getpid and exit,
-   and returns to the kernel - the serial shows "entered EL0", "svc N from EL0",
-   "returned to kernel"; SPSR=0x3C0 masks IRQ/FIQ so the running timer cannot
+8. `process_init` then `scheduler_init`. Then `smp_init` brings up secondary cores
+   1 through 3 via PSCI CPU_ON with a bounded handshake; a stuck or failed
+   secondary is logged and skipped so the primary always proceeds. The serial
+   shows `smp: core N online` per secondary and `smp: N cores online`.
+9. `syscall_init` to populate the syscall table, then `virtio_net_init` (probes the
+   virtio-net device and prints its MAC, no-ops if the device is absent) and
+   `pl031_init` (reads the PL031 RTC and logs the wall-clock time). Then two
+   one-shot EL0 runs (both before the shell, each run once, never looped). First a
+   round trip (`usermode_run_payload`) that drops to EL0, issues `svc #0` for getpid
+   and exit, and returns to the kernel - the serial shows "entered EL0", "svc N from
+   EL0", "returned to kernel"; SPSR=0x3C0 masks IRQ/FIQ so the running timer cannot
    preempt the brief EL0 lifetime. Then the embedded test ELF is written to ramfs
    `/hello` and `elf_exec_file("/hello")` loads and runs it at EL0 - the serial
    shows the loader mapping it and the binary printing "hello, EL0!". A failed load
-   is logged and ignored so boot always continues.
+   is logged and ignored so boot always continues. Last, when a net device is
+   present, a one-shot `ping 10.0.2.2` demo sends one ICMP echo to the slirp gateway
+   and logs the reply or a timeout; the bounded `net_ping` never hangs the boot, and
+   an absent device just logs that the demo was skipped.
 10. `shell_init`.
 11. `bootscreen_init`, stage updates, `gui_init`, then `gui_run` when graphical
     mode is available.
@@ -168,14 +176,45 @@ Semihosting blocks the kernel for the duration of the host I/O, which is why a
 save is run from the shell or a deliberate call site and not from inside an
 interrupt or the per-tick WM loop.
 
+## Data flow three: a ping to an ICMP echo reply
+
+This is what happens when a user runs `ping 10.0.2.2` (or the one-shot boot demo
+runs it).
+
+1. The shell dispatches `ping` to `cmd_ping` (`src/kernel/shell.c`), which parses
+   the dotted-quad argument and calls `net_ping` (`src/net/net.c`).
+2. `net_ping` resolves the gateway MAC with `arp_resolve` if needed, records the
+   awaited ICMP id and sequence under the driver's `net_lock`, releases the lock,
+   and sends the echo request with `icmp_send_echo`. The send goes out through
+   `net_tx` (`src/drivers/virtio_net.c`), which posts the frame on the TX queue.
+3. The poll loop calls `net_rx_poll`, which pulls a received frame off the RX
+   queue, and hands it to `net_rx_dispatch`. That parser bounds-checks every layer
+   (Ethernet, ARP or IPv4, ICMP) before indexing and drops on any inconsistency.
+4. On a type-0 ICMP reply whose id and sequence match the awaited pair, the pending
+   state flips its `got_reply` flag under `net_lock`, and `net_ping` returns success
+   to the shell, which prints the reply line. Both `arp_resolve` and `net_ping`
+   poll with a bound, so neither ever hangs the prompt.
+
+The driver is poll-driven, not interrupt-driven, so this whole path runs on the
+calling thread and the same code serves the production boot and the headless test
+runner (which has no GIC or timer).
+
+The taskbar reads the PL031 RTC directly: `desktop_draw_taskbar`
+(`src/kernel/desktop.c`) reads `RTC_DR` through the identity-mapped Device block
+each frame and formats it with `pl031_format_hms`, so the clock is real
+wall-clock time rather than an uptime counter.
+
 ## Constraints
 
 These follow from the properties above and are easy to violate by accident:
 
-- **Single CPU.** Only CPU 0 runs; secondary cores are parked at reset. The
-  single-CPU assumption is what makes several lock-free patterns correct today
-  (the kprintf crash-dump ring relies on the DAIF mask in the exception handler,
-  not a lock). That assumption is revisited when SMP lands.
+- **One scheduling CPU.** Secondary cores come online via PSCI but park in `wfe`;
+  only the primary runs scheduled work, so there is no cross-core preemption. The
+  shared state that two cores could touch is now lock-protected rather than relying
+  on a single-CPU assumption: the scheduler runqueue takes `scheduler_lock`, the
+  net RX/TX path takes `net_lock`, and the kprintf crash-dump ring takes
+  `kprintf_ring_lock` (additive to the exception handler's DAIF mask, which remains
+  the same-core exclusion). Cross-core preemptive scheduling is the next milestone.
 - **No floating point or SIMD at EL1.** The kernel is built with
   `-mgeneral-regs-only` because CPACR_EL1 does not enable Q-register access, so
   any float or vectorized integer code traps. Animations use Q0.8 fixed-point in
