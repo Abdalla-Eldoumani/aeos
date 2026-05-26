@@ -77,6 +77,12 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     proc->stack_size = PROCESS_STACK_SIZE;
     proc->time_slice = 0;
     proc->total_time = 0;
+    /* Bytes attributable to this PCB: the three kmalloc's above - its own struct,
+     * its kernel stack, and its fd table. struct vfs_fd_table is a complete type
+     * here (process.c includes <aeos/vfs.h>), so the fd table is counted. NOT a
+     * global heap profile (the kernel heap is shared); a display field for ps. */
+    proc->heap_bytes = sizeof(process_t) + PROCESS_STACK_SIZE +
+                       sizeof(struct vfs_fd_table);
     proc->next = NULL;
     proc->reg_next = NULL;
     proc->kill_requested = false;
@@ -251,6 +257,9 @@ process_t *user_proc_register(const char *name)
     proc->killable = true;   /* an EL0 run is the only thing process_kill may arm (WR-03) */
     proc->next = NULL;
     proc->last_cpu = smp_cpu_id();   /* the registering core (the primary at boot) */
+    /* Registry-only PCB: no stack, no fd table, so the attributable bytes are
+     * just the process_t struct itself. A display field for ps (see process.h). */
+    proc->heap_bytes = sizeof(process_t);
 
     /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
     process_register(proc);
@@ -290,6 +299,9 @@ process_t *process_register_system(const char *name)
      * REPRESENTED core, so ps's CPU column shows cores 0..3 - the represented
      * core, not the registrar. */
     proc->last_cpu = smp_cpu_id();
+    /* Registry-only marker PCB: no stack, no fd table, so the attributable bytes
+     * are just the process_t struct itself. A display field for ps. */
+    proc->heap_bytes = sizeof(process_t);
 
     /* Registry-only: prepend on the parallel list, do NOT scheduler_add_process. */
     process_register(proc);
