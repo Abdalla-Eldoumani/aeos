@@ -27,6 +27,7 @@
 #include <aeos/ramfb.h>
 #include <aeos/virtio_gpu.h>
 #include <aeos/virtio_net.h>
+#include <aeos/pl031.h>
 #include <aeos/net.h>
 #include <aeos/pflash.h>
 #include <aeos/semihosting.h>
@@ -458,6 +459,15 @@ void kernel_main(void *dtb_addr)
     if (virtio_net_init() < 0) {
         klog_warn("virtio-net absent - continuing boot");
     }
+
+    /* Probe the PL031 RTC (FEAT-06 criterion 1) and log the wall-clock time on
+     * serial. A single stateless read of an already-mapped register: no failure
+     * path hangs, so this log-and-continues like the other device probes and the
+     * kernel always reaches the WM loop. The taskbar reads the same RTC each
+     * frame. */
+    kprintf("\n");
+    klog_info("Probing PL031 RTC (FEAT-06)...");
+    pl031_init();
 
     /* Prove the EL0/EL1 boundary once on the production boot path (FEAT-02).
      * The payload runs at EL0, issues svc #0 for getpid then exit; the serial
