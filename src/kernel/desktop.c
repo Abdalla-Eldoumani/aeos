@@ -8,6 +8,7 @@
 #include <aeos/framebuffer.h>
 #include <aeos/wm.h>
 #include <aeos/timer.h>
+#include <aeos/pl031.h>
 #include <aeos/kprintf.h>
 #include <aeos/string.h>
 #include <aeos/gui.h>
@@ -178,8 +179,6 @@ void desktop_draw_taskbar(void)
     window_t *win;
     int32_t btn_x;
     char time_str[16];
-    uint64_t uptime_sec;
-    uint32_t hours, minutes;
 
     /* Taskbar background */
     fb_fill_rect(0, taskbar_y, FB_WIDTH, TASKBAR_HEIGHT, TASKBAR_BG);
@@ -227,18 +226,9 @@ void desktop_draw_taskbar(void)
         }
     }
 
-    /* Clock (using uptime) */
-    uptime_sec = timer_get_uptime_sec();
-    hours = (uptime_sec / 3600) % 24;
-    minutes = (uptime_sec / 60) % 60;
-
-    /* Format time string */
-    time_str[0] = '0' + (hours / 10);
-    time_str[1] = '0' + (hours % 10);
-    time_str[2] = ':';
-    time_str[3] = '0' + (minutes / 10);
-    time_str[4] = '0' + (minutes % 10);
-    time_str[5] = '\0';
+    /* Clock: the PL031 RTC wall-clock time (UTC H:M:S), refreshed each frame by
+     * the 30 FPS WM redraw. Replaces the old uptime counter. */
+    pl031_format_hms(pl031_now_seconds(), time_str, sizeof(time_str));
 
     fb_puts_large(FB_WIDTH - 48, taskbar_y + 8, time_str, CLOCK_COLOR, TASKBAR_BG);
 }
