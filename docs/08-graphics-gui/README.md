@@ -100,7 +100,7 @@ Handled in `wm.c::handle_key`:
   - Double-click to launch applications
   - Taskbar with Start button
   - Window buttons in taskbar
-  - System clock (uptime-based)
+  - System clock: the PL031 RTC wall-clock time (UTC H:M:S via `pl031_format_hms`), refreshed each frame
   - Start menu popup
 
 ### GUI Integration (gui.c)
@@ -108,7 +108,7 @@ Handled in `wm.c::handle_key`:
 - **Purpose**: Coordinate GUI subsystem initialization
 - **Features**:
   - Initialize all GUI components in order
-  - Register seven desktop icons (Terminal, Files, Settings, About, Calc, SysMon, Notes) with launch callbacks
+  - Register eight desktop icons (Terminal, Files, Settings, About, Calc, SysMon, Notes, Tetris) with launch callbacks
   - Provide application launch functions (`gui_launch_*`)
   - Main GUI entry point
 
@@ -358,6 +358,7 @@ void gui_launch_about(void);
 void gui_launch_calculator(void);
 void gui_launch_sysmon(void);
 void gui_launch_notes(void);
+void gui_launch_tetris(void);
 ```
 
 ## Boot Stages
