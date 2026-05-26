@@ -36,6 +36,7 @@
 #include <aeos/smp.h>
 #include <aeos/net.h>
 #include <aeos/virtio_net.h>
+#include <aeos/pl031.h>
 
 /* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
  * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
@@ -556,6 +557,47 @@ static void test_symbol_lookup_below_first(void)
         return;
     }
     test_pass("symbol_lookup_below_first");
+}
+
+/* ============================================================================
+ * PL031 RTC formatter scenario (FEAT-06 criterion 1)
+ *
+ * Pure-function proof of the seconds->H:M:S formatter: no device, no MMIO (it
+ * calls pl031_format_hms directly with literals), so it runs in the TEST kernel
+ * which has no GIC/timer. Non-vacuous: a wrong divisor, a missing %02u zero-pad,
+ * or a missing day wrap fails a specific assertion. The live RTC read is proven
+ * on the production boot serial, not here. NOT a sec_* scenario.
+ * ============================================================================ */
+
+static void test_pl031_time_format(void)
+{
+    char buf[16];
+
+    pl031_format_hms(0, buf, sizeof(buf));
+    if (strcmp(buf, "00:00:00") != 0) {
+        test_fail("pl031_time_format", "0 -> 00:00:00");
+        return;
+    }
+
+    pl031_format_hms(3661, buf, sizeof(buf));     /* 1h 1m 1s */
+    if (strcmp(buf, "01:01:01") != 0) {
+        test_fail("pl031_time_format", "3661 -> 01:01:01");
+        return;
+    }
+
+    pl031_format_hms(86399, buf, sizeof(buf));    /* 23:59:59, one second before the day rolls */
+    if (strcmp(buf, "23:59:59") != 0) {
+        test_fail("pl031_time_format", "86399 -> 23:59:59");
+        return;
+    }
+
+    pl031_format_hms(86400, buf, sizeof(buf));    /* day rolls back to 00:00:00 (secs % 86400) */
+    if (strcmp(buf, "00:00:00") != 0) {
+        test_fail("pl031_time_format", "86400 -> 00:00:00");
+        return;
+    }
+
+    test_pass("pl031_time_format");
 }
 
 /* ============================================================================
@@ -1785,6 +1827,12 @@ void kernel_main(void *dtb_addr)
 
     test_symbol_lookup_known();
     test_symbol_lookup_below_first();
+
+    /* FEAT-06 criterion 1 (the PL031 wall-clock formatter, headless non-vacuous).
+     * Pure function over literals - asserts the seconds->H:M:S breakdown for
+     * 0/3661/86399/86400. The live RTC read is proven on the production boot
+     * serial. NOT a sec_* scenario. */
+    test_pl031_time_format();
 
     /* FEAT-06 criterion 3 (persistent shell history, headless non-vacuous). Seeds
      * the ring, saves to aeos_hist.img over semihosting, clears the in-memory
