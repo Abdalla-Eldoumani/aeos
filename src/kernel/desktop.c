@@ -226,8 +226,10 @@ void desktop_draw_taskbar(void)
         }
     }
 
-    /* Clock: the PL031 RTC wall-clock time (UTC H:M:S), refreshed each frame by
-     * the 30 FPS WM redraw. Replaces the old uptime counter. */
+    /* Clock: the PL031 RTC wall-clock time (H:M:S; local time, since run-ramfb
+     * runs QEMU with -rtc base=localtime so the host timezone drives it),
+     * refreshed each frame by the 30 FPS WM redraw. Replaces the old uptime
+     * counter. */
     pl031_format_hms(pl031_now_seconds(), time_str, sizeof(time_str));
 
     /* "HH:MM:SS" is 8 glyphs and fb_puts_large advances 8 px each, so the string
