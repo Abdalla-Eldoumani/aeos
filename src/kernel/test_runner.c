@@ -1444,10 +1444,10 @@ static void test_net_rx_bounds(void)
      * net_rx_dispatch a battery of malformed inbound frames and assert each call
      * RETURNS (drops) without faulting. A missing bounds guard would read past
      * the buffer and fault, so control would never reach the test_pass below -
-     * reaching it after the whole battery IS the proof the guards hold. The drop
-     * signal is exactly "control returns and no reply was sent": all three
-     * frames are dropped before any answer logic (before any net_tx), so no
-     * reply is even attempted. (No device needed - synthetic buffers.) */
+     * reaching it after the whole battery IS the proof the guards hold. Frames
+     * 1-3 drop before any answer logic; frame 4 (CR-01) reaches the echo
+     * responder and is dropped there by the total_length-underflow guard before
+     * the ~4 GB inet_csum over-read. (No device needed - synthetic buffers.) */
     volatile int returned = 0;
 
     /* 1. A 13-byte sub-Ethernet frame: shorter than the 14-byte Ethernet
@@ -1482,10 +1482,31 @@ static void test_net_rx_bounds(void)
     ip[IP_OFF_PROTO]         = IP_PROTO_ICMP;
     net_rx_dispatch(f3, sizeof(f3));
 
-    /* Reaching here means all three calls returned with no fault. */
+    /* 4. The UNDERSIZED-underflow case (CR-01): ver/IHL = 0x4F (IHL=15 ->
+     * ihl_bytes=60) but total_length = 20 (< ihl_bytes), an ICMP type-8 echo
+     * request at offset 14+60=74, frame length 82. Every upper-bound guard
+     * passes (14+20 <= 82, 14+60 <= 82, 14+60+8 <= 82), so control reaches the
+     * echo responder. Without the total_length >= ihl_bytes + ICMP_HDR_LEN
+     * guard, icmp_len = 20 - 60 underflows to ~0xFFFFFFD8, reply_len wraps back
+     * under the sizeof(reply) drop, and inet_csum walks ~4 GB off the stack and
+     * FAULTS. With the guard the frame drops here. This is the non-vacuous gate
+     * for CR-01 (the oversized frame 3 never reaches the subtraction). */
+    uint8_t f4[ETH_HDR_LEN + 60 + ICMP_HDR_LEN];   /* 14 + ihl_bytes(60) + 8 = 82 */
+    memset(f4, 0, sizeof(f4));
+    f4[ETH_OFF_ETHERTYPE]     = (uint8_t)(ETHERTYPE_IPV4 >> 8);
+    f4[ETH_OFF_ETHERTYPE + 1] = (uint8_t)(ETHERTYPE_IPV4 & 0xff);
+    uint8_t *ip4 = f4 + ETH_HDR_LEN;
+    ip4[IP_OFF_VER_IHL]       = 0x4F;    /* version 4, IHL 15 -> 60 bytes */
+    ip4[IP_OFF_TOTAL_LEN]     = 0x00;    /* total_length = 20, below ihl_bytes */
+    ip4[IP_OFF_TOTAL_LEN + 1] = 0x14;
+    ip4[IP_OFF_PROTO]         = IP_PROTO_ICMP;
+    f4[ETH_HDR_LEN + 60 + ICMP_OFF_TYPE] = ICMP_TYPE_ECHO_REQUEST;   /* type 8 */
+    net_rx_dispatch(f4, sizeof(f4));
+
+    /* Reaching here means all four calls returned with no fault. */
     returned = 1;
     if (returned != 1) {
-        test_fail("net_rx_bounds", "net_rx_dispatch did not return from a malformed frame");
+        test_fail("net_rx_bounds", "net_rx_dispatch did not return from a malformed or underflow frame");
         return;
     }
 
