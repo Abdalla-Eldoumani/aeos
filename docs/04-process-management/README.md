@@ -36,9 +36,15 @@ This section implements preemptive multitasking for AEOS with a round-robin sche
 ## Process Model
 
 ### Kernel Threads
-- Scheduled processes run at EL1 (kernel mode); there is no scheduled EL0 process yet
-- EL0 IS reachable as a one-shot in-kernel payload (the Phase 5 privilege boundary): it runs at EL0, reaches the kernel only via trapped `svc`, and a privileged instruction from EL0 faults to EL1. Running an EL0 process loaded from a file under the scheduler is Phase 6
+- Scheduled processes run at EL1 (kernel mode); the scheduler itself only ever runs EL1 kernel threads
 - No memory protection between EL1 kernel threads; they share one address space
+
+### Loaded EL0 Programs
+A loaded ELF runs at EL0, synchronously, one at a time. `elf_exec_file` reads a static ELF off the VFS, maps its segments into the EL0 user window (executable segments read-only for per-segment W^X, see Section 02), maps an EL0 stack, and enters the program at EL0. The program reaches the kernel only through a trapped `svc`, and a privileged instruction from EL0 faults to EL1.
+
+While it runs, the program holds a registry PCB: it shows up in `ps`, and `kill <pid>` arms a flag that the next `svc` honors, reaping the run. The first EL0 path was the Phase 5 one-shot in-kernel payload that proved the privilege boundary; the loaded-from-a-file program is the Phase 6 ELF loader built on the same `usermode_enter` mechanism.
+
+The honest scope: the loaded program runs on the current EL1 stack and is never enqueued in the scheduler, so the dormant scheduler stays asleep. `kill` reaps a registered process at its next `svc`, which the headless test suite proves; interactive "kill from a second prompt while the program runs mid-flight" is not delivered, because the program runs to completion before the prompt returns. Cross-core scheduling stays out of scope (see the SMP section).
 
 ### Preemptive Scheduling
 - Timer tick at 100 Hz triggers `scheduler_tick()`
@@ -72,9 +78,17 @@ typedef struct process {
     uint64_t total_time;        /* Real CPU ticks (ps TICKS column) */
     uint64_t heap_bytes;        /* Bytes attributable to this PCB (ps HEAP_B) */
 
-    struct process *next;       /* Ready queue link */
+    struct process *next;       /* Ready queue link (scheduler) */
+
+    /* Enumeration registry (scheduler-independent) */
+    struct process *reg_next;   /* Registry link, distinct from next */
+    bool kill_requested;        /* Set by process_kill, honored at the next EL0 svc */
+    bool killable;              /* Only a loaded EL0 run is killable */
+    uint32_t last_cpu;          /* Core last touched on (ps CPU column) */
 } process_t;
 ```
+
+`reg_next`, `kill_requested`, and `killable` are the registry fields that back `ps` and `kill` (see "Enumeration registry and kill" below). `last_cpu` is the CPU column described in the SMP section. The registry list threads through `reg_next`, distinct from the scheduler's `next`, so enumeration never touches the run queue.
 
 ### Name Ownership
 
@@ -256,8 +270,15 @@ There's no mechanism to clean up zombie processes. They remain in memory forever
 ### Single-Threaded Initialization
 The current implementation assumes single-threaded execution during initialization. Race conditions could occur if multiple CPUs were active.
 
-### No PID Lookup
-`process_get_by_pid` was removed. There is no global PCB table, only the run queue and `current_process`, and nothing called the lookup. A future command that needs PID lookup (for example `kill`) should add a parallel list with its own field on `process_t` rather than reusing the run queue's `next` pointer.
+## Enumeration registry and kill
+
+`ps` and `kill` need to enumerate and look up processes, but the scheduler exposes only the run queue and `current_process`. The registry is a scheduler-independent parallel list: the `reg_next` field threads each PCB through a file-static `registry_head`, distinct from the scheduler's `next`, so the registry never touches the run queue.
+
+- `process_create` registers every process it creates, so idle and every kernel thread show in `ps`; `process_exit` unregisters a reaped process.
+- A loaded EL0 program is minted a registry-only PCB (a fresh pid, `RUNNING`, `killable = true`) that is never enqueued in the scheduler, so `ready_head` stays NULL and the dormant scheduler is not woken. The loader frees it after the run.
+- `process_kill(pid)` walks the registry, sets `kill_requested` on the matching PCB, and returns 0. It refuses a non-killable PCB: only a loaded EL0 run sets `killable = true`, so `kill 1` (idle) and the kernel threads are refused rather than reported as a misleading success.
+
+The kill flag is honored at the EL0 syscall boundary, against the loaded program's PCB rather than `process_current()` (which is idle throughout the synchronous one-shot). A kill-armed run is reaped at its next `svc`, before that syscall dispatches.
 
 ## SMP bringup (Phase 7)
 
