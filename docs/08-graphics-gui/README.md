@@ -47,13 +47,19 @@ The behavior below is the current compositor. The snippet sections under
 `docs/08-graphics-gui/implementation.md` and the in-tree `src/kernel/CLAUDE.md`
 carry the function-level detail.
 
-- **Redraw trigger.** `wm_update_display` repaints when `wm.needs_redraw` is true
-  OR `notify_active()` is true. `window_invalidate(win)` sets that window's
-  `WINDOW_FLAG_DIRTY` AND calls `wm_request_redraw()` so the next compositor tick
-  takes the redraw branch instead of skipping it. Apps call `window_invalidate`
-  from their `on_mouse` / `on_key` handlers after mutating state. Live-content
-  apps that need a frame without an input event (the System Monitor heap graph,
-  the Notes caret blink) call `wm_request_redraw()` directly each tick.
+- **Redraw cadence.** `wm_run` sets `wm.needs_redraw` on every 33 ms frame tick,
+  so `wm_update_display` re-renders the full desktop (`wm_redraw` -> desktop
+  paint + every window's `on_paint`) at a true 30 FPS even with no input. This is
+  load-bearing for live content: the PL031 wall clock advancing, window
+  open/close animations playing, the System Monitor graph. (Earlier the redraw
+  was gated only on `needs_redraw`, set by input events; between events the loop
+  re-pushed a stale framebuffer, so the clock froze and a freshly opened window
+  sat on the first frame of its slide-in until a drag - that was BUG-20, fixed by
+  the per-frame tick.) An event that sets `needs_redraw` between frames still
+  updates immediately for click responsiveness: `window_invalidate(win)` sets the
+  window's `WINDOW_FLAG_DIRTY` AND calls `wm_request_redraw()`; apps call it from
+  their `on_mouse` / `on_key` handlers after mutating state. `window_draw` calls
+  `on_paint` unconditionally, so each frame draws fresh content.
 - **Open animation.** `wm_register_window` stamps `open_anim_start_ms`.
   `window_draw` slides the draw position down by `WINDOW_OPEN_SLIDE_PX` and eases
   it up over `WINDOW_OPEN_ANIM_MS`, blending a `THEME_BG_DEEP` overlay at
@@ -100,7 +106,7 @@ Handled in `wm.c::handle_key`:
   - Double-click to launch applications
   - Taskbar with Start button
   - Window buttons in taskbar
-  - System clock: the PL031 RTC wall-clock time (UTC H:M:S via `pl031_format_hms`), refreshed each frame
+  - System clock: the PL031 RTC wall-clock time (H:M:S via `pl031_format_hms`), refreshed each frame; local time, since `run-ramfb` runs QEMU with `-rtc base=localtime`
   - Start menu popup
 
 ### GUI Integration (gui.c)
