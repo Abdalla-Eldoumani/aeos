@@ -32,6 +32,12 @@ The DAIF mask is the same-core exclusion: it stops a timer IRQ on this core from
 
 The panic reader does not block on that lock. `kprintf_ring_walk` uses `spin_trylock`-or-bypass: it tries the lock and reads the ring whether or not it gets it. A faulted core could hold the lock forever, and a blocking acquire there would deadlock the panic so the crash dump prints nothing - so the dump always reads, accepting a slightly-torn read over a silent panic. The same short lock window in `putchar` keeps the same-core sequence (`handle_exception` -> `kprintf` -> `putchar` lock/unlock, then `kprintf_ring_walk`) from self-deadlocking on the non-recursive lock.
 
+## DWARF file:line backtrace
+
+The backtrace on the panic path (reached from `handle_exception` through `crash_dump_save` in `backtrace.c`) resolves each saved link register to a function name through the symbol table (`scripts/gen-symbols.sh` -> `aeos_symbols[]`). It also resolves the address to a source `file:line` through a second embedded table, the addr->file:line sibling of the symbol table.
+
+That table cannot be read from the ELF at runtime. `.debug_line` has VMA 0 and sits past the single PT_LOAD extent, so `qemu -kernel kernel.elf` loads none of it; an in-kernel parser would read zeros. So the table is extracted at build time: `scripts/gen-lines.py` runs `readelf --debug-dump=decodedline` on `kernel-stage1.elf`, sorts the rows by address, collapses consecutive same-(file,line) runs, and emits a packed `aeos_lines[]` (an 8-byte `{addr_off, file_off, line}` entry plus a NUL-separated file-name pool) as a `.rodata` translation unit. The table IS the decoded output of the toolchain's own DWARF line program. It rides the existing symbol-table two-pass and lives in `.rodata` (after `.text` in `linker.ld`), so growing it by ~137 KB never shifts a function address - the same stability the symbol table relies on. This plan provides the embedded table; the per-frame `(file:line)` print is added alongside the symbol lookup in a follow-on plan.
+
 ## Stack-Guard Sentinel
 
 The kernel has no MMU yet, so there is no faulting guard page below the boot stack. Instead `boot.asm` stamps a sentinel value, `STACK_GUARD_MAGIC` (0xAE057ACC), at `__stack_limit` (the bottom of the boot stack) before `kernel_main` runs. A stack overflow grows past that address and clobbers the sentinel.
