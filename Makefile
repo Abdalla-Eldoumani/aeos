@@ -130,6 +130,14 @@ SYMBOLS_OBJ     = $(BUILD_DIR)/kernel/symbol_data.o
 SYMBOLS_STUB_O  = $(BUILD_DIR)/kernel/symbol_data_stub.o
 KERNEL_STAGE1   = $(BUILD_DIR)/kernel-stage1.elf
 
+# Generated addr->file:line table for the in-kernel backtrace, the line sibling
+# of the symbol table. It rides the SAME two-pass: generated from
+# kernel-stage1.elf and linked into kernel.elf in pass 2.
+LINES_C         = $(BUILD_DIR)/kernel/line_data.c
+LINES_STUB_C    = $(BUILD_DIR)/kernel/line_data_stub.c
+LINES_OBJ       = $(BUILD_DIR)/kernel/line_data.o
+LINES_STUB_O    = $(BUILD_DIR)/kernel/line_data_stub.o
+
 # Output files
 KERNEL_ELF = kernel.elf
 KERNEL_BIN = kernel.bin
@@ -184,16 +192,20 @@ directories:
 # Function addresses are stable across the two passes because the symbol
 # table lives in .rodata, which sits AFTER .text in linker.ld; growing it
 # does not shift any code.
+#
+# The addr->file:line table (line_data.c, scripts/gen-lines.py) rides the same
+# two-pass for the same reason: it is also a .rodata table generated from
+# kernel-stage1.elf, so its ~137 KB does not move a function address either.
 # ----------------------------------------------------------------------------
 
-$(KERNEL_ELF): $(ALL_OBJECTS) $(SYMBOLS_OBJ)
-	@echo "Linking kernel (pass 2 - with symbol table)..."
-	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_OBJ) -o $@
+$(KERNEL_ELF): $(ALL_OBJECTS) $(SYMBOLS_OBJ) $(LINES_OBJ)
+	@echo "Linking kernel (pass 2 - with symbol and line tables)..."
+	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_OBJ) $(LINES_OBJ) -o $@
 	@echo "Kernel linked successfully: $@"
 
-$(KERNEL_STAGE1): $(ALL_OBJECTS) $(SYMBOLS_STUB_O)
-	@echo "Linking kernel (pass 1 - empty symbol table)..."
-	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_STUB_O) -o $@
+$(KERNEL_STAGE1): $(ALL_OBJECTS) $(SYMBOLS_STUB_O) $(LINES_STUB_O)
+	@echo "Linking kernel (pass 1 - empty symbol and line tables)..."
+	$(LD) $(LDFLAGS) $(ALL_OBJECTS) $(SYMBOLS_STUB_O) $(LINES_STUB_O) -o $@
 
 $(SYMBOLS_C): $(KERNEL_STAGE1) scripts/gen-symbols.sh
 	@echo "Generating symbol table from $<..."
@@ -208,6 +220,22 @@ $(SYMBOLS_OBJ): $(SYMBOLS_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(SYMBOLS_STUB_O): $(SYMBOLS_STUB_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(LINES_C): $(KERNEL_STAGE1) scripts/gen-lines.py
+	@echo "Generating line table from $<..."
+	@python3 scripts/gen-lines.py $< $@
+
+$(LINES_STUB_C):
+	@mkdir -p $(dir $@)
+	@printf '/* Auto-generated stub used only for the stage-1 link. */\n#include <aeos/lines.h>\nconst aeos_line_entry_t aeos_lines[1] = { {0,0,0} };\nconst uint32_t aeos_lines_count = 0u;\nconst char aeos_line_files[1] = {0};\n' > $@
+
+$(LINES_OBJ): $(LINES_C)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(LINES_STUB_O): $(LINES_STUB_C)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
