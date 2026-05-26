@@ -24,6 +24,7 @@
 #include <aeos/semihosting.h>
 #include <aeos/shell.h>
 #include <aeos/symbols.h>
+#include <aeos/lines.h>
 #include <aeos/framebuffer.h>
 #include <aeos/string.h>
 #include <aeos/stack_guard.h>
@@ -557,6 +558,43 @@ static void test_symbol_lookup_below_first(void)
         return;
     }
     test_pass("symbol_lookup_below_first");
+}
+
+/* ============================================================================
+ * line_lookup scenario (FEAT-06 criterion 2 part 2)
+ *
+ * Non-vacuous proof of the addr->file:line lookup over the embedded DWARF line
+ * table: resolve a KNOWN text address (&backtrace, which lives in backtrace.c
+ * with DWARF) and assert the result is a real "<file>.c:<digit>" form. An empty
+ * or wrong table writes "" (no ".c", no ':'), failing this; the RED gate was
+ * observed by scratch-breaking line_lookup to always write "". The TEST kernel
+ * links the same real aeos_lines[] table (the symbol/line two-pass is run for
+ * TEST too), not the stub. NOT a sec_* scenario.
+ * ============================================================================ */
+static void test_backtrace_fileline(void)
+{
+    char buf[64];
+    uint64_t addr = (uint64_t)(uintptr_t)&backtrace;
+
+    line_lookup(addr, buf, sizeof(buf));
+
+    if (buf[0] == '\0') {
+        test_fail("backtrace_fileline", "empty - no line entry resolved");
+        return;
+    }
+    if (strstr(buf, ".c") == NULL) {
+        test_fail("backtrace_fileline", "no .c filename in result");
+        return;
+    }
+
+    /* The colon separates file from line; a digit must follow it. */
+    char *colon = strchr(buf, ':');
+    if (colon == NULL || colon[1] < '0' || colon[1] > '9') {
+        test_fail("backtrace_fileline", "not a file.c:line form");
+        return;
+    }
+
+    test_pass("backtrace_fileline");
 }
 
 /* ============================================================================
@@ -1827,6 +1865,11 @@ void kernel_main(void *dtb_addr)
 
     test_symbol_lookup_known();
     test_symbol_lookup_below_first();
+
+    /* FEAT-06 criterion 2 part 2 (the addr->file:line backtrace lookup, headless
+     * non-vacuous). Resolves &backtrace through line_lookup and asserts a real
+     * .c:line form; an empty/wrong table fails. NOT a sec_* scenario. */
+    test_backtrace_fileline();
 
     /* FEAT-06 criterion 1 (the PL031 wall-clock formatter, headless non-vacuous).
      * Pure function over literals - asserts the seconds->H:M:S breakdown for
