@@ -334,6 +334,11 @@ int net_rx_poll(uint8_t *out, uint32_t *len)
     if (!net_initialized) {
         return -1;
     }
+    /* Define the out-param on every non-(-1) return. The rc=1 path overwrites
+     * it with the real frame length; the nothing-ready / dropped-short-frame /
+     * bad-id paths all return 0 and leave it 0, so a caller that reads *len
+     * after a 0 return never sees an uninitialized stack value. */
+    *len = 0;
 
     spin_lock(&net_lock);
 
