@@ -230,7 +230,11 @@ void desktop_draw_taskbar(void)
      * the 30 FPS WM redraw. Replaces the old uptime counter. */
     pl031_format_hms(pl031_now_seconds(), time_str, sizeof(time_str));
 
-    fb_puts_large(FB_WIDTH - 48, taskbar_y + 8, time_str, CLOCK_COLOR, TASKBAR_BG);
+    /* "HH:MM:SS" is 8 glyphs and fb_puts_large advances 8 px each, so the string
+     * is 64 px wide. The old uptime clock was "HH:MM" (40 px) and fit at
+     * FB_WIDTH - 48; the 8-char wall clock needs FB_WIDTH - 72 to keep the same
+     * 8 px right margin, otherwise the seconds run past FB_WIDTH and clip. */
+    fb_puts_large(FB_WIDTH - 72, taskbar_y + 8, time_str, CLOCK_COLOR, TASKBAR_BG);
 }
 
 /**
