@@ -4,7 +4,7 @@ AEOS is an educational kernel. Patches that improve clarity, correctness, or cov
 
 ## Before you start
 
-- Read `README.md` for what AEOS is and what it deliberately is not (no MMU, no userspace, no SMP, no networking).
+- Read `README.md` for what AEOS is and the bounded form each subsystem takes (MMU on, an EL0/EL1 boundary running a loaded ELF, SMP cores online, a minimal ARP/ICMP net stack, a PL031 wall clock) plus the honest remaining gaps (no kernel W^X, no cross-core preemptive scheduling, no TCP/UDP/DHCP/DNS).
 - Read the `CLAUDE.md` at the repo root and the one in the subdirectory you plan to touch. They describe the current architecture as it actually is.
 - Read the matching section under `docs/` for a code walkthrough.
 
@@ -17,6 +17,8 @@ make run        # text mode over UART
 make test       # build TEST=1, run the in-kernel test runner, exit 0 only on all-pass
 make clean
 ```
+
+The `run*` targets launch QEMU with `-smp 4` and a virtio-net device (`-netdev user,id=net0 -device virtio-net-device,netdev=net0`), so the SMP bringup and the `ping 10.0.2.2` path are live; the kernel also boots without the net device (the probe no-ops).
 
 `make test` is the gate. CI runs `make`, `make TEST=1`, `make test`, and a `grep` that fails the build on any new `TODO`/`FIXME`/`XXX`/`HACK` marker in tracked source.
 
@@ -36,7 +38,7 @@ make clean
 - One file per commit. One logically inseparable change per commit.
 - Lowercase commit messages, imperative mood, brief.
 - No batched diffs. CI will merge a one-file commit; review will not merge a 10-file refactor.
-- Never `--amend` after a hook fails — make a new commit.
+- Never `--amend` after a hook fails; make a new commit.
 - Never push `--force` to `master`/`main`.
 
 ## Documentation
@@ -48,7 +50,7 @@ make clean
 ## Pull request checklist
 
 - [ ] `make` succeeds clean.
-- [ ] `make test` reports `8 PASSED, 0 FAILED` (or however many scenarios exist when you read this).
+- [ ] `make test` reports `39 PASSED, 0 FAILED` (or however many scenarios exist when you read this).
 - [ ] No new `TODO`/`FIXME`/`XXX`/`HACK` markers.
 - [ ] Subsystem `CLAUDE.md` and matching `docs/` section reflect the change.
 - [ ] Commit history is one-file-per-commit, lowercase imperative messages.
