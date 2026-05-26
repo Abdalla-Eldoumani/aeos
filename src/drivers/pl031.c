@@ -1,8 +1,12 @@
 /* ============================================================================
  * AEOS - Abdalla's Educational Operating System
  * File: src/drivers/pl031.c
- * Description: PrimeCell PL031 RTC driver. Reads RTC_DR (UTC seconds since the
- *              Unix epoch) and formats wall-clock H:M:S for the taskbar.
+ * Description: PrimeCell PL031 RTC driver. Reads RTC_DR (wall-clock seconds
+ *              since the Unix epoch) and formats H:M:S for the taskbar. QEMU
+ *              feeds RTC_DR the host clock; run-ramfb passes -rtc base=localtime
+ *              so the value (and the displayed time) is the host's local time,
+ *              not UTC. The kernel cannot tell the two apart; it just formats
+ *              whatever epoch seconds the RTC returns.
  * ============================================================================ */
 
 #include <aeos/pl031.h>
@@ -37,7 +41,8 @@ void pl031_format_hms(uint32_t secs, char *buf, uint32_t buf_size)
     }
 
     /* Integer-only so it survives -mgeneral-regs-only (no FP/SIMD). The seconds
-     * are taken modulo a day so the value wraps at midnight UTC. */
+     * are taken modulo a day so the value wraps at midnight in whatever zone the
+     * RTC base is set to (local time under run-ramfb's -rtc base=localtime). */
     uint32_t rem = secs % SECS_PER_DAY;
     uint32_t h   = rem / 3600;
     uint32_t m   = (rem % 3600) / 60;
@@ -55,7 +60,7 @@ void pl031_init(void)
      * (a plausible epoch is after 2023), and the formatted time is what the
      * taskbar shows. A register read cannot hang, so there is no failure path. */
     pl031_format_hms(secs, buf, sizeof(buf));
-    klog_info("PL031: %u seconds, %s UTC", secs, buf);
+    klog_info("PL031: %u seconds, %s local", secs, buf);
 }
 
 /* ============================================================================

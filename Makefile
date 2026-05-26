@@ -318,7 +318,13 @@ run-ramfb: all
 		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
+		-rtc base=localtime \
 		-kernel $(KERNEL_ELF)
+
+# base=localtime feeds the PL031 RTC the host's local wall-clock time (the host
+# timezone is the user's location and handles DST), so the taskbar clock shows
+# local time, not UTC. There is no IP/GPS geolocation on a bare-metal kernel;
+# the host clock is the automatic source.
 
 # Alternative: Try with simpler ramfb device (works with fw_cfg if available)
 run-simple: all
