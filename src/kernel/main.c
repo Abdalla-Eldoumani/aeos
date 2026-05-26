@@ -27,6 +27,7 @@
 #include <aeos/ramfb.h>
 #include <aeos/virtio_gpu.h>
 #include <aeos/virtio_net.h>
+#include <aeos/net.h>
 #include <aeos/pflash.h>
 #include <aeos/semihosting.h>
 #include <aeos/shell.h>
@@ -483,6 +484,27 @@ void kernel_main(void *dtb_addr)
     int hello_rc = elf_exec_file("/hello");
     if (hello_rc < 0) {
         klog_warn("exec /hello failed (%d) - continuing boot", hello_rc);
+    }
+
+    /* One-shot boot-path ICMP echo to the slirp gateway 10.0.2.2 (FEAT-05
+     * criterion 3, the production serial proof). Mirrors the /hello EL0 demo
+     * above: it runs ONCE, never looped, and is gated on the device being
+     * present so a normal boot is not spammy (the MAC line from the probe + this
+     * one result line, no per-frame trace). net_ping is bounded internally, so
+     * this cannot block; a timeout or an absent device is klog_warn'd and
+     * IGNORED so boot ALWAYS reaches the WM loop (T-08-12, the dominant
+     * non-negotiable - BOOT-GATE 2 proves the absent path). */
+    kprintf("\n");
+    if (virtio_net_available()) {
+        uint8_t gw_ip[IP_ADDR_LEN] = { GW_IP_0, GW_IP_1, GW_IP_2, GW_IP_3 };
+        klog_info("Pinging gateway 10.0.2.2 (FEAT-05)...");
+        if (net_ping(gw_ip) == 0) {
+            klog_info("ping 10.0.2.2: reply");
+        } else {
+            klog_warn("ping 10.0.2.2: no reply - continuing boot");
+        }
+    } else {
+        klog_info("ping demo skipped - no network device");
     }
 
     /* Initialize Shell */
