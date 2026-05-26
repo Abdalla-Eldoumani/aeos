@@ -27,6 +27,15 @@ uint32_t pl031_now_seconds(void)
 
 void pl031_format_hms(uint32_t secs, char *buf, uint32_t buf_size)
 {
+    /* "HH:MM:SS" needs 9 bytes with the NUL. A shorter buffer would let snprintf
+     * silently truncate to a plausible-but-wrong time, so refuse instead of
+     * misleading a future caller; emit an empty string when there is room. */
+    if (buf == NULL || buf_size < 9) {
+        if (buf != NULL && buf_size > 0)
+            buf[0] = '\0';
+        return;
+    }
+
     /* Integer-only so it survives -mgeneral-regs-only (no FP/SIMD). The seconds
      * are taken modulo a day so the value wraps at midnight UTC. */
     uint32_t rem = secs % SECS_PER_DAY;
