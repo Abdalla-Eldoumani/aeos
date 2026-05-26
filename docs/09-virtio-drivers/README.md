@@ -19,10 +19,10 @@ This section implements VirtIO device drivers for AEOS, enabling graphics displa
 
 ### VirtIO Input Driver (virtio_input.c)
 - **Location**: `src/drivers/virtio_input.c`
-- **Purpose**: Keyboard and mouse input
+- **Purpose**: Keyboard and pointer input
 - **Features**:
   - Automatic device detection
-  - Mouse movement (relative) and button handling
+  - Pointer movement (both `EV_REL` relative deltas and `EV_ABS` absolute, scaled from 0-32767 to the framebuffer) and button handling. `run-ramfb` attaches `virtio-tablet-device` (absolute), so the guest cursor tracks the host pointer with no drift (BUG-01); the relative `EV_REL` path remains for a `virtio-mouse-device`
   - Keyboard scancode translation through a 128-entry table (see below)
   - Pushes every decoded event into the `kernel/event.c` queue via `event_push`
   - No per-click console logging: the polling loop is silent on the normal path (the per-event mouse-button log line was removed in the BUG-10 cleanup)
