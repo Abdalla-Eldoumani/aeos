@@ -8,15 +8,22 @@ AEOS is a bare-metal AArch64 kernel that runs in QEMU's `virt` machine. It boots
 
 ### Scope
 
-AEOS is **deliberately small**. It is meant to be readable end-to-end in a few sittings, not to be a Unix clone. To keep that promise, several things you might expect from a "real" OS are intentionally absent:
+AEOS is **deliberately small**. It is meant to be readable end-to-end in a few sittings, not to be a Unix clone. It now carries the foundations you would expect from a "real" OS, each in a bounded form chosen to stay readable:
 
-- **No MMU.** All addresses are physical. There is no virtual memory, no page tables, no copy-on-write, no `mmap`.
-- **No userspace.** Everything runs at EL1. There are no EL0 processes, no per-process address spaces, no privilege boundary between the shell and the kernel. System calls are direct C function calls, not `SVC` traps.
-- **No SMP.** Secondary CPUs are parked at `_start`; only CPU 0 ever runs.
-- **No networking.** There is no IP stack, no socket layer, no network driver.
-- **No real clock.** Timestamps are 0 because there is no RTC driver.
+- **MMU on.** `src/mm/vmm.c` builds an identity map (RAM as a Normal-WB cacheable 1 GB block, the low MMIO window as a Device-nGnRnE block) plus a TTBR1 high-half alias of RAM, and enables the MMU and caches. The kernel runs identity-mapped, so virtual equals physical for kernel addresses.
+- **An EL0/EL1 privilege boundary.** A static ELF64 loaded from a file runs at EL0 and reaches the kernel only through `svc #0` traps decoded by the EL1 vector table. A privileged instruction from EL0 faults to EL1. The loaded program is mapped with per-segment W^X (executable segments are read-only at EL0).
+- **SMP.** `smp_init` brings up secondary cores 1 through 3 via PSCI CPU_ON with a bounded handshake; `ps` shows a CPU column and the boot serial reports four cores online.
+- **Networking.** A minimal in-kernel stack (Ethernet, ARP, IPv4, ICMP echo) over a poll-driven virtio-net driver answers ARP for its own address and the `ping` command gets an ICMP echo reply from the QEMU slirp gateway.
+- **A wall clock.** A PL031 RTC driver reads UTC seconds and drives the taskbar clock and the boot log.
 
-If you want any of those, AEOS is not the right starting point. If you want a small, hackable system you can read top-to-bottom and modify in an afternoon, it is.
+The remaining gaps are deliberate, and AEOS stays honest about them:
+
+- **No kernel W^X.** The kernel's code, rodata, data, heap, and stack share one RWX 1 GB block. Per-segment W^X exists only for loaded EL0 code, not the kernel image.
+- **No cross-core preemptive scheduling.** Cores come online and park in `wfe`; the round-robin scheduler runs on the primary. Interactive kill of a running EL0 program from a second prompt needs the preemption work that is the next milestone.
+- **No TCP, UDP, DHCP, or DNS.** The stack is ARP plus ICMP echo only, slirp-only, with no socket layer.
+- **Host-trusting persistence.** The filesystem and shell history persist through ARM semihosting, which trusts the host.
+
+If you want a production OS, AEOS is not it. If you want a small, hackable system you can read top-to-bottom and modify in an afternoon, it is.
 
 ## What's interesting
 
@@ -32,22 +39,25 @@ from a kernel this small.
   fixed-point in `src/lib/anim.c`. The animation system that would normally lean
   on floats does the same work in integers.
 
-- **System calls are direct C function calls.** With no EL0 and no privilege
-  boundary, there is nothing to trap to. `syscall(num, ...)` is a table lookup
-  and a direct call, not an `SVC`. This is the right design for an all-EL1 kernel
-  and a deliberate simplification; it is also the first thing that changes once
-  EL0 userspace lands and the boundary becomes real.
+- **Two ways to make a syscall, one dispatcher.** The kernel runs at EL1, where a
+  "system call" is a direct C call: `syscall(num, ...)` in `src/syscall/syscall.c`
+  is a table lookup, not an `SVC` trap, and the GUI and shell still use it. An EL0
+  program, by contrast, issues `svc #0`, which traps into the EL1 vector table and
+  is routed through the SAME `syscall_handler`. The EL0 path is additive; it did
+  not replace the direct-call path. Watching one dispatcher serve both a direct
+  call and a trapped `svc` is a compact way to see what a privilege boundary buys.
 
 - **Security invariants you can re-check with one command.** A hardening pass
   added defenses that `make audit` verifies on every run: a stack-guard sentinel
-  catches kernel stack overflow (there is no MMU yet for a faulting guard page, so
-  the boot stack carries a magic value that the exception path and the timer tick
-  both check), heap block headers carry a magic value re-stamped on every header
-  operation so `kfree` refuses a caller pointer whose magic is wrong, the editor
-  and VFS bound their attacker-influenced sizes and path lengths before
-  allocating, and the panic path masks DAIF on entry so a timer FIQ cannot corrupt
-  the crash dump. `make audit` runs the test suite and then asserts each security
-  scenario actually reported `PASS`, so silently dropping one fails the build.
+  catches kernel stack overflow (the kernel runs from one coarse RWX block with no
+  faulting guard page of its own, so the boot stack carries a magic value that the
+  exception path and the timer tick both check), heap block headers carry a magic
+  value re-stamped on every header operation so `kfree` refuses a caller pointer
+  whose magic is wrong, the editor and VFS bound their attacker-influenced sizes
+  and path lengths before allocating, and the panic path masks DAIF on entry so a
+  timer interrupt cannot corrupt the crash dump. `make audit` runs the test suite
+  and then asserts each security scenario actually reported `PASS`, so silently
+  dropping one fails the build.
 
 - **The filesystem survives a reboot through semihosting.** Files live in RAM at
   runtime, but `save` serializes the whole ramfs tree to a flat blob and writes it
@@ -55,15 +65,27 @@ from a kernel this small.
   back and the tree is reconstructed, so a file written in one session is there in
   the next without any block device or real disk driver.
 
-### Coming soon: a userspace program killed from the shell
+### A userspace program killed from the shell
 
-A short clip of a userspace program being started and then killed from the shell
-is planned but not yet captured. It depends on work that does not exist today:
-EL0 userspace and the ELF loader land in later phases, and recording the clip
-needs a display that is unavailable in the current build environment. This note
-is a placeholder; the clip will be added during the final documentation pass once
-those features are in. There is no screenshot here yet, and none has been
-fabricated.
+This works today. The ELF loader and the EL0 boundary it depends on are both
+shipped, and the shell drives them:
+
+- `exec /hello` loads a static ELF64 off the filesystem and runs it at EL0. The
+  embedded `/hello` is also run once on boot, so the serial log shows the loader
+  mapping it, the binary printing `hello, EL0!` through a `write` syscall, and
+  control returning to the kernel.
+- `ps` lists the loaded program in the process registry alongside the kernel
+  threads, with its pid, state, CPU, ticks, and heap bytes.
+- `kill <pid>` reaps a registered process: it sets a flag the syscall handler
+  honors at the program's next `svc` boundary.
+
+All three are proven headlessly by the test suite (`test_elf_load_run`,
+`test_process_kill_reap`, and the EL0 round-trip scenarios), which `make audit`
+gates. What is *not* here is a screenshot or screen recording of the sequence:
+capturing one needs a GPU-backed display, and the build and CI environment is
+headless. The visual capture is a known display-dependent follow-up, to be done
+on a machine with a display. No screenshot or clip has been fabricated to stand
+in for it.
 
 ## Features
 
@@ -87,18 +109,26 @@ fabricated.
 
 ### Core OS Features
 - **Bootstrap**: EL2 to EL1 privilege level transition with stack and BSS setup
+- **Virtual Memory**: MMU enabled from `vmm.c` with an identity map (Normal-WB RAM, Device-nGnRnE MMIO) plus a TTBR1 high-half alias; the kernel runs identity-mapped
 - **Memory Management**: Buddy allocator for physical memory, first-fit heap allocator
-- **Process Management**: Preemptive round-robin scheduler with context switching (100 Hz)
-- **Interrupts**: ARM GICv2 + Generic Timer via FIQ handling
-- **System Calls**: Direct function call interface (exit, write, read, getpid, yield)
+- **Process Management**: Round-robin scheduler with context switching (100 Hz timer); a scheduler-independent process registry backs `ps` and `kill`
+- **Userspace**: EL0/EL1 boundary; a static ELF64 loaded from a file runs at EL0 with per-segment W^X and reaches the kernel only through trapped `svc #0`
+- **SMP**: Secondary cores brought online via PSCI CPU_ON (four cores on the production boot); the scheduler runqueue is spinlock-protected
+- **Interrupts**: ARM GICv2 + Generic Timer; the virtual-timer PPI is delivered as an IRQ and serviced through `handle_irq`
+- **System Calls**: One dispatcher, two paths (direct C call at EL1, `svc #0` trap from EL0): exit, write, read, getpid, yield
+- **Networking**: Minimal in-kernel Ethernet/ARP/IPv4/ICMP stack over a poll-driven virtio-net driver; `ping` gets an ICMP echo reply
+- **Real-time Clock**: PL031 RTC drives the taskbar wall clock and the boot log
+- **Diagnostics**: Symbol-aware backtrace with DWARF `file:line` resolution; crash-log persistence over semihosting
 - **Filesystem**: VFS abstraction layer with ramfs implementation and host persistence
 - **Text Editor**: Vim-like modal editor with insert/normal/ex modes
-- **Interactive Shell**: 24 built-in commands with colorized output
+- **Interactive Shell**: 30 built-in commands with colorized output and history that persists across reboots
 
 ### Device Drivers
 - **VirtIO GPU**: Framebuffer graphics (640x480 @ 32bpp)
 - **VirtIO Input**: Mouse and keyboard support via VirtIO MMIO
+- **VirtIO Net**: Legacy virtio-net (MAC-only negotiation, poll-driven RX/TX) under the in-kernel IP stack
 - **PL011 UART**: Serial console for text mode
+- **PL031 RTC**: Wall-clock time at `0x09010000` for the taskbar clock
 - **ARM Semihosting**: Filesystem persistence to host
 
 ## System Requirements
@@ -156,6 +186,10 @@ make run-virtio      # Alternative GPU driver
 ```bash
 make run             # Text-only shell via UART
 ```
+
+All `run*` targets launch QEMU with `-smp 4` and a virtio-net device
+(`-netdev user,id=net0 -device virtio-net-device,netdev=net0`), so the SMP
+bringup and the `ping 10.0.2.2` path are live out of the box.
 
 ### Debug Mode
 ```bash
@@ -216,13 +250,17 @@ Available in text mode or via the Terminal application:
 | hexdump | Hex dump of file |
 | grep | Search for pattern in file |
 | edit / vi | Vim-like text editor |
-| ps | List processes |
+| ps | List processes (pid, CPU, state, ticks, heap bytes, name) |
+| exec | Load and run a static ELF64 at EL0 |
+| kill | Kill a process by PID |
 | meminfo | Memory statistics |
 | uptime | System uptime |
 | irqinfo | Interrupt statistics |
+| ping | Ping an IPv4 host with ICMP echo (defaults to 10.0.2.2) |
 | history | Command history |
 | time | Time command execution |
 | uname | System information |
+| startx | Start the graphical desktop environment |
 | save | Save filesystem to host |
 | exit | Halt system |
 
@@ -250,7 +288,7 @@ The `edit` and `vi` commands open a vim-like text editor:
 
 ## Testing
 
-`make test` builds the kernel with `TEST=1`, which links a self-contained test runner (`src/kernel/test_runner.c`) as `kernel_main` instead of the normal entry point. The runner brings up memory, the VFS, and the process subsystem, then exercises PMM, heap, VFS, process, shell-parse, symbol-lookup, framebuffer, and security smoke scenarios, 20 in total. The five security scenarios cover the 13.B audit invariants: kcalloc overflow rejection, stack-guard sentinel detection, double-free-after-merge refusal, VFS path-length rejection, and editor growth-overflow refusal. Each scenario logs `PASS: <name>` or `FAIL: <name> (<why>)`. After the suite finishes the runner prints `TEST RESULTS: P PASSED, F FAILED` and exits via semihosting; the `test` target captures stdout to `build/test.log`, parses that line, and exits 0 only when the failure count is zero. Run takes well under a second.
+`make test` builds the kernel with `TEST=1`, which links a self-contained test runner (`src/kernel/test_runner.c`) as `kernel_main` instead of the normal entry point. The runner brings up memory, the VFS, and the process subsystem, then exercises PMM, heap, spinlock, VFS, process, ps-accounting, shell-parse, history-persist, symbol-lookup, framebuffer, the EL0 round trip and privileged-instruction trap, the ELF loader and kill-reap, SMP runqueue-lock and `last_cpu`, the net ARP/ICMP/RX-bounds path, PL031 time formatting, the DWARF `file:line` backtrace, and security smoke scenarios, 39 in total. The five security scenarios cover the 13.B audit invariants: kcalloc overflow rejection, stack-guard sentinel detection, double-free-after-merge refusal, VFS path-length rejection, and editor growth-overflow refusal. Each scenario logs `PASS: <name>` or `FAIL: <name> (<why>)`. After the suite finishes the runner prints `TEST RESULTS: P PASSED, F FAILED` and exits via semihosting; the `test` target captures stdout to `build/test.log`, parses that line, and exits 0 only when the failure count is zero. Run takes well under a second.
 
 `make audit` runs the same suite and additionally asserts that every security scenario reported `PASS`, so a future change that drops one fails the gate. It exits non-zero on any test failure or any missing security scenario.
 
@@ -290,8 +328,12 @@ Filesystem saved successfully!
 0x08000000  GIC Distributor
 0x08010000  GIC CPU Interface
 0x09000000  UART0 (PL011)
-0x0a000000  VirtIO devices (GPU, keyboard, mouse)
+0x09010000  RTC (PL031)
+0x0a000000  VirtIO devices (GPU, net, keyboard, mouse)
 ```
+
+All MMIO above is reached through the identity-mapped Device-nGnRnE block; the
+MMU is on, so these are virtual addresses equal to their physical ones.
 
 ## Project Structure
 
@@ -339,8 +381,11 @@ aeos/
 
 ## Known Limitations
 
-- **Privilege Level**: All code runs at EL1 (no user space)
-- **Virtual Memory**: MMU not configured
+- **Kernel W^X**: The kernel image runs from one coarse RWX 1 GB block; per-segment W^X exists only for loaded EL0 code, not the kernel itself
+- **Userspace concurrency**: One EL0 program runs at a time, synchronously, in a single 2 MB user window. `kill` reaps a registered process at its next syscall, but interactive kill of a running program from a second prompt needs preemptive scheduling
+- **Cross-core scheduling**: Secondary cores come online and park; the round-robin scheduler runs on the primary, so there is no cross-core preemption yet
+- **Networking**: ARP and ICMP echo only, slirp-only, no TCP/UDP/DHCP/DNS and no socket layer
+- **Persistence integrity**: Filesystem and shell-history persistence trust the host through ARM semihosting
 - **Shell Input**: Arrow keys not functional in text mode (escape sequences disabled)
 - **GUI Applications**: Some app functionality is basic/placeholder
 
