@@ -57,6 +57,20 @@ typedef struct process {
     struct process *next;           /* Next process in scheduler queue */
     uint64_t time_slice;            /* Time quantum (for preemptive scheduling) */
     uint64_t total_time;            /* Total CPU time used */
+    uint64_t heap_bytes;            /* Bytes attributable to this PCB: its own
+                                     * struct + its kernel stack + (for a full
+                                     * process) its fd table. NOT a global heap
+                                     * profile: the kernel heap is shared
+                                     * (heap_get_stats is global-only) and kmalloc
+                                     * has no owner argument, so true per-process
+                                     * attribution is out of scope (the full
+                                     * profiler is deferred). A DISPLAY/diagnostic
+                                     * field read by cmd_ps; no invariant depends
+                                     * on it. Set at create in process_create
+                                     * (struct + stack + fd table) and in the
+                                     * registry-only minters user_proc_register /
+                                     * process_register_system (struct only - they
+                                     * allocate no stack and no fd table). */
 
     /* Registry (SCHEDULER-INDEPENDENT). reg_next links the PCB onto a parallel
      * list (registry_head in process.c) used by ps and process_kill; it is
