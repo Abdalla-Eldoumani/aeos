@@ -34,6 +34,8 @@
 #include <aeos/elf.h>
 #include <aeos/spinlock.h>
 #include <aeos/smp.h>
+#include <aeos/net.h>
+#include <aeos/virtio_net.h>
 
 /* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
  * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
@@ -1270,6 +1272,227 @@ static void test_smp_last_cpu(void)
 }
 
 /* ============================================================================
+ * Network scenarios (FEAT-05). Three headless, non-vacuous scenarios:
+ *
+ *   test_net_arp_reply  - the criterion-2 builder unit. PURE: feeds the
+ *     side-effect-free arp_build_reply (08-03) a synthetic inbound ARP request
+ *     for OUR_IP and asserts the exact 42-byte reply, plus asserts it returns
+ *     WITHOUT writing for a wrong-target-IP and a too-short input (so a blind
+ *     builder fails). No device needed.
+ *   test_net_icmp_echo  - the criterion-3 live round trip to the slirp gateway
+ *     10.0.2.2. Drives net_ping (which arp_resolves, sends one echo, and
+ *     bounded-polls for the matching type-0 reply via a got_reply sentinel that
+ *     flips only on a matched id+seq). test_fails on no device / no reply, so a
+ *     silent no-op FAILS. The TEST kernel has no GIC/timer, so the poll path is
+ *     the ONLY path that works - exactly the production code.
+ *   test_net_rx_bounds  - the malformed-frame RED gate for the dominant
+ *     non-negotiable (a malformed RX frame must not fault the WM loop). Feeds
+ *     net_rx_dispatch a battery of out-of-spec frames and asserts each call
+ *     RETURNS (drops) without faulting - reaching test_pass after the whole
+ *     battery is the proof the bounds guards hold (a missing guard faults
+ *     first). Mirrors the Phase 6 oversized-segment regression scenario. No
+ *     device needed (synthetic buffers).
+ *
+ * None is a sec_* scenario; the five sec_* lines stay the audit gate.
+ * ============================================================================ */
+
+static void test_net_arp_reply(void)
+{
+    /* A fixed test identity - the builder is pure, so no device is needed. */
+    const uint8_t our_mac[MAC_ADDR_LEN]  = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };
+    const uint8_t our_ip[IP_ADDR_LEN]    = { OUR_IP_0, OUR_IP_1, OUR_IP_2, OUR_IP_3 };
+    const uint8_t req_mac[MAC_ADDR_LEN]  = { 0x52, 0x54, 0x00, 0x00, 0x00, 0x99 };
+    const uint8_t req_ip[IP_ADDR_LEN]    = { 10, 0, 2, 99 };
+
+    /* Build a synthetic inbound ARP request (opcode 1) FOR our IP: Ethernet
+     * dst = broadcast, src = the fake requester; ARP sender = the fake MAC/IP,
+     * target MAC zero, target IP = OUR_IP. */
+    uint8_t req[ARP_FRAME_LEN];
+    memset(req, 0, sizeof(req));
+    memset(req + ETH_OFF_DST, 0xff, MAC_ADDR_LEN);
+    memcpy(req + ETH_OFF_SRC, req_mac, MAC_ADDR_LEN);
+    req[ETH_OFF_ETHERTYPE]     = (uint8_t)(ETHERTYPE_ARP >> 8);
+    req[ETH_OFF_ETHERTYPE + 1] = (uint8_t)(ETHERTYPE_ARP & 0xff);
+    uint8_t *arp = req + ETH_HDR_LEN;
+    arp[ARP_OFF_HTYPE]     = 0x00; arp[ARP_OFF_HTYPE + 1]  = 0x01;   /* Ethernet */
+    arp[ARP_OFF_PTYPE]     = 0x08; arp[ARP_OFF_PTYPE + 1]  = 0x00;   /* IPv4 */
+    arp[ARP_OFF_HLEN]      = ARP_HLEN_ETHERNET;
+    arp[ARP_OFF_PLEN]      = ARP_PLEN_IPV4;
+    arp[ARP_OFF_OPCODE]    = 0x00; arp[ARP_OFF_OPCODE + 1] = ARP_OP_REQUEST;
+    memcpy(arp + ARP_OFF_SENDER_MAC, req_mac, MAC_ADDR_LEN);
+    memcpy(arp + ARP_OFF_SENDER_IP,  req_ip,  IP_ADDR_LEN);
+    /* target MAC stays zero; target IP = OUR_IP. */
+    memcpy(arp + ARP_OFF_TARGET_IP,  our_ip,  IP_ADDR_LEN);
+
+    /* Pre-fill the output buffer with a sentinel so the return-without-writing
+     * guards below can prove the builder left it UNTOUCHED. */
+    uint8_t out[ARP_FRAME_LEN];
+    memset(out, 0xAA, sizeof(out));
+
+    int n = arp_build_reply(req, sizeof(req), our_mac, our_ip, out);
+    if (n != (int)ARP_FRAME_LEN) {
+        test_fail("net_arp_reply", "valid request did not produce a 42-byte reply");
+        return;
+    }
+
+    /* Assert the exact reply bytes (08-03 contract). Ethernet: dst = the
+     * requester's MAC, src = our MAC, type = ARP. */
+    if (memcmp(out + ETH_OFF_DST, req_mac, MAC_ADDR_LEN) != 0) {
+        test_fail("net_arp_reply", "reply Ethernet dst != requester MAC");
+        return;
+    }
+    if (memcmp(out + ETH_OFF_SRC, our_mac, MAC_ADDR_LEN) != 0) {
+        test_fail("net_arp_reply", "reply Ethernet src != our MAC");
+        return;
+    }
+    if (out[ETH_OFF_ETHERTYPE] != 0x08 || out[ETH_OFF_ETHERTYPE + 1] != 0x06) {
+        test_fail("net_arp_reply", "reply ethertype != 0x0806");
+        return;
+    }
+    /* ARP: opcode 2; sender = us; target = the requester. */
+    const uint8_t *oarp = out + ETH_HDR_LEN;
+    if (oarp[ARP_OFF_OPCODE] != 0x00 || oarp[ARP_OFF_OPCODE + 1] != ARP_OP_REPLY) {
+        test_fail("net_arp_reply", "reply opcode != 2");
+        return;
+    }
+    if (memcmp(oarp + ARP_OFF_SENDER_MAC, our_mac, MAC_ADDR_LEN) != 0 ||
+        memcmp(oarp + ARP_OFF_SENDER_IP,  our_ip,  IP_ADDR_LEN) != 0) {
+        test_fail("net_arp_reply", "reply ARP sender != our MAC/IP");
+        return;
+    }
+    if (memcmp(oarp + ARP_OFF_TARGET_MAC, req_mac, MAC_ADDR_LEN) != 0 ||
+        memcmp(oarp + ARP_OFF_TARGET_IP,  req_ip,  IP_ADDR_LEN) != 0) {
+        test_fail("net_arp_reply", "reply ARP target != requester MAC/IP");
+        return;
+    }
+
+    /* NON-VACUOUS guard 1: a request whose target IP is NOT ours must return 0
+     * and leave out untouched (a blind echoing builder would fail this). */
+    uint8_t wrong[ARP_FRAME_LEN];
+    memcpy(wrong, req, sizeof(wrong));
+    uint8_t not_our_ip[IP_ADDR_LEN] = { 10, 0, 2, 50 };
+    memcpy(wrong + ETH_HDR_LEN + ARP_OFF_TARGET_IP, not_our_ip, IP_ADDR_LEN);
+    uint8_t out2[ARP_FRAME_LEN];
+    memset(out2, 0xAA, sizeof(out2));
+    if (arp_build_reply(wrong, sizeof(wrong), our_mac, our_ip, out2) != 0) {
+        test_fail("net_arp_reply", "wrong-target-IP request was answered");
+        return;
+    }
+    for (uint32_t i = 0; i < sizeof(out2); i++) {
+        if (out2[i] != 0xAA) {
+            test_fail("net_arp_reply", "wrong-target-IP request wrote to out");
+            return;
+        }
+    }
+
+    /* NON-VACUOUS guard 2: a too-short input (41 bytes) must return 0 and leave
+     * out untouched (no read past the short buffer). */
+    uint8_t out3[ARP_FRAME_LEN];
+    memset(out3, 0xAA, sizeof(out3));
+    if (arp_build_reply(req, ARP_FRAME_LEN - 1, our_mac, our_ip, out3) != 0) {
+        test_fail("net_arp_reply", "too-short request was answered");
+        return;
+    }
+    for (uint32_t i = 0; i < sizeof(out3); i++) {
+        if (out3[i] != 0xAA) {
+            test_fail("net_arp_reply", "too-short request wrote to out");
+            return;
+        }
+    }
+
+    test_pass("net_arp_reply");
+}
+
+static void test_net_icmp_echo(void)
+{
+    /* The device must be present - the -netdev flag on the test QEMU line
+     * (08-01) makes this real. A missing device is a REAL failure, not a skip:
+     * a silent skip would make criterion 3 vacuous. virtio_net_init is
+     * idempotent if a prior scenario inited it; init here so the scenario is
+     * self-contained. */
+    if (virtio_net_init() < 0 || !virtio_net_available()) {
+        test_fail("net_icmp_echo", "no net device (the -netdev flag must be on the test line)");
+        return;
+    }
+
+    /* Corroborate criterion 2 with the LIVE resolve (the builder unit is the
+     * primary c2 proof): the gateway ARP must resolve within the bound. */
+    uint8_t gw_ip[IP_ADDR_LEN] = { GW_IP_0, GW_IP_1, GW_IP_2, GW_IP_3 };
+    uint8_t gw_mac[MAC_ADDR_LEN];
+    if (arp_resolve(gw_ip, gw_mac) != 0) {
+        test_fail("net_icmp_echo", "ARP timeout resolving the gateway");
+        return;
+    }
+
+    /* The round trip. net_ping arms a pending-ping (id+seq) under net_lock,
+     * sends one ICMP echo, and bounded-polls for a type-0 reply matching id+seq
+     * via a got_reply sentinel that flips ONLY on the match (08-03). It returns
+     * 0 on the matched reply, -1 on the bounded-wait expiry. A silent no-op
+     * (wrong queue setup, wrong header size, wrong checksum) leaves the sentinel
+     * clear and net_ping returns -1 - so this assert is non-vacuous. */
+    if (net_ping(gw_ip) != 0) {
+        test_fail("net_icmp_echo", "no echo reply from 10.0.2.2 within the bound");
+        return;
+    }
+
+    test_pass("net_icmp_echo");
+}
+
+static void test_net_rx_bounds(void)
+{
+    /* The dominant non-negotiable made a non-vacuous headless RED gate: feed
+     * net_rx_dispatch a battery of malformed inbound frames and assert each call
+     * RETURNS (drops) without faulting. A missing bounds guard would read past
+     * the buffer and fault, so control would never reach the test_pass below -
+     * reaching it after the whole battery IS the proof the guards hold. The drop
+     * signal is exactly "control returns and no reply was sent": all three
+     * frames are dropped before any answer logic (before any net_tx), so no
+     * reply is even attempted. (No device needed - synthetic buffers.) */
+    volatile int returned = 0;
+
+    /* 1. A 13-byte sub-Ethernet frame: shorter than the 14-byte Ethernet
+     * header, so reading the ethertype at offset 12-13 would be out of bounds
+     * without the len >= 14 guard. */
+    uint8_t f1[13];
+    memset(f1, 0x41, sizeof(f1));
+    net_rx_dispatch(f1, sizeof(f1));
+
+    /* 2. A 41-byte sub-ARP frame: ethertype 0x0806 (ARP) but one byte short of
+     * the 42-byte minimum, so the ARP body read would run past len without the
+     * len >= 42 guard. */
+    uint8_t f2[41];
+    memset(f2, 0, sizeof(f2));
+    f2[ETH_OFF_ETHERTYPE]     = (uint8_t)(ETHERTYPE_ARP >> 8);
+    f2[ETH_OFF_ETHERTYPE + 1] = (uint8_t)(ETHERTYPE_ARP & 0xff);
+    net_rx_dispatch(f2, sizeof(f2));
+
+    /* 3. An IPv4 frame (ethertype 0x0800) with ver/IHL = 0x4F (IHL=15 ->
+     * ihl_bytes=60, which exceeds this short frame) AND an oversized
+     * total_length (far larger than the buffer), so the ICMP-payload index
+     * would run past the buffer without the IHL and total_length guards. The
+     * frame is 34 bytes (14 + 20) - just enough to reach the IPv4 header. */
+    uint8_t f3[ETH_HDR_LEN + IP_HDR_MIN_LEN];
+    memset(f3, 0, sizeof(f3));
+    f3[ETH_OFF_ETHERTYPE]     = (uint8_t)(ETHERTYPE_IPV4 >> 8);
+    f3[ETH_OFF_ETHERTYPE + 1] = (uint8_t)(ETHERTYPE_IPV4 & 0xff);
+    uint8_t *ip = f3 + ETH_HDR_LEN;
+    ip[IP_OFF_VER_IHL]       = 0x4F;     /* version 4, IHL 15 -> 60 bytes */
+    ip[IP_OFF_TOTAL_LEN]     = 0xFF;     /* total_length = 0xFFFF, way past len */
+    ip[IP_OFF_TOTAL_LEN + 1] = 0xFF;
+    ip[IP_OFF_PROTO]         = IP_PROTO_ICMP;
+    net_rx_dispatch(f3, sizeof(f3));
+
+    /* Reaching here means all three calls returned with no fault. */
+    returned = 1;
+    if (returned != 1) {
+        test_fail("net_rx_bounds", "net_rx_dispatch did not return from a malformed frame");
+        return;
+    }
+
+    test_pass("net_rx_bounds");
+}
+
+/* ============================================================================
  * Entry point
  *
  * Replaces kernel_main from main.c when TEST=1. Brings up only the subsystems
@@ -1364,6 +1587,16 @@ void kernel_main(void *dtb_addr)
      * register a user process, arm its kill flag by pid, enter EL0, and assert
      * the seam reaped the run at the first svc before getpid dispatched. */
     test_process_kill_reap();
+
+    /* FEAT-05 (the net stack). The arp-reply builder unit and the rx-bounds gate
+     * are PURE/synthetic-buffer scenarios that need nothing beyond the heap +
+     * the stack, so they run here on the primary. The icmp-echo round trip needs
+     * the virtio-net device the -netdev flag on the test QEMU line provides, and
+     * the poll path is the ONLY path that works without a GIC/timer - so it
+     * exercises exactly the production code. None is a sec_* scenario. */
+    test_net_arp_reply();
+    test_net_icmp_echo();
+    test_net_rx_bounds();
 
     /* FEAT-04 criterion 2 (the headline). Brings up REAL secondaries that
      * concurrently hammer the self-locking runqueue mutators + a shared counter,
