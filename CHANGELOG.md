@@ -12,11 +12,20 @@ The Phase 13 milestone added the kernel foundations AEOS previously did without:
 - **FEAT-03 ELF loader + `exec`/`kill`.** `elf_exec_file` parses a static ELF64 off the VFS (`elf_validate`, reject-never-fault), maps each `PT_LOAD` into the 2 MB EL0 window with per-segment W^X (executable read-only at EL0), zero-fills BSS, and runs it at EL0. The loaded program is registered in a scheduler-independent process registry, so `ps` lists it and `kill <pid>` reaps it at its next `svc` boundary. The `exec` and `kill` shell commands are wired. The embedded `/hello` is written to ramfs and run once on boot.
 - **FEAT-04 SMP.** `smp_init` brings up secondary cores 1 through 3 via PSCI CPU_ON with a bounded handshake (a stuck or failed secondary is logged and skipped; the primary always reaches the WM loop). The scheduler runqueue is spinlock-protected, the kprintf crash-dump ring lock discharges the deferred SEC-04 invariant, and `ps` gains a CPU column. Four cores online on the production boot. Cross-core preemptive scheduling is out of scope.
 - **FEAT-05 virtio-net + `ping`.** A legacy virtio-net driver (MAC-only negotiation, poll-driven RX/TX) under a minimal in-kernel Ethernet/ARP/IPv4/ICMP stack answers ARP for its own address and gets an ICMP echo reply. The `ping` command parses a dotted-quad (defaulting to the slirp gateway 10.0.2.2), is bounded so it never hangs the prompt, and the boot path runs a one-shot `ping 10.0.2.2` demo. No TCP/UDP/DHCP/DNS/sockets. The RX parser bounds-checks every attacker-influenced field.
-- **FEAT-06 PL031 clock, DWARF backtrace, persistent history, `ps` accounting.** A PL031 RTC driver reads UTC seconds and drives the taskbar wall clock (replacing the uptime counter) and the boot log. The backtrace resolves `file:line` from a build-time DWARF line table. Shell history persists across reboots through semihosting (`aeos_hist.img`, validated on load). `ps` shows real per-tick `TICKS` and per-PCB `HEAP_B` columns.
+- **FEAT-06 PL031 clock, DWARF backtrace, persistent history, `ps` accounting.** A PL031 RTC driver reads the host wall-clock seconds and drives the taskbar clock (replacing the uptime counter) and the boot log. The backtrace resolves `file:line` from a build-time DWARF line table. Shell history persists across reboots through semihosting (`aeos_hist.img`, validated on load). `ps` shows real per-tick `TICKS` and per-PCB `HEAP_B` columns.
 
 ### Changed
 - `README.md`, `SECURITY.md`, and the `docs/` walkthroughs updated to describe the shipped kernel: the Scope, Known Limitations, Core OS Features, and Shell Commands (now 30) blocks in `README.md`; the threat posture and the invariant sign-off table (extended with the Phase 6-9 invariants) in `SECURITY.md`.
 - `ARCHITECTURE.md` added during the milestone as the one-page boot-order and data-flow model.
+
+### Fixed (post-milestone GUI polish, 2026-05-26)
+- **30 FPS compositor (BUG-20).** `wm_run` now re-renders the desktop on every 33 ms frame tick, not only on input events. Previously content re-rendered only when an event set `needs_redraw`, so between events the loop re-pushed a stale framebuffer: the taskbar clock froze and a freshly opened window stayed on the first frame of its slide-in (a blank rectangle) until a drag. The clock, animations, and live widgets now advance without input.
+- **Absolute pointer.** `run-ramfb` attaches `virtio-tablet-device` instead of the relative `virtio-mouse-device`, so the guest cursor tracks the host pointer and a click lands on the row aimed at (the driver already had the scaled `EV_ABS` path).
+- **Local-time clock.** `run-ramfb` runs QEMU with `-rtc base=localtime`, so the taskbar shows the host's local time (with DST) rather than UTC; the kernel labels read "local". A bare-metal kernel has no IP/GPS geolocation, so the host timezone is the automatic source. `pl031_format_hms` stays timezone-agnostic.
+- **Clock layout.** The taskbar clock moved to `FB_WIDTH - 72` so the 8-character `HH:MM:SS` no longer clips at the right edge.
+
+### Added (tooling)
+- `scripts/screenshot.py`: headless GUI verification via QEMU QMP `screendump` (captures the virtio-gpu scanout under `-display none`) plus `input-send-event` (tablet clicks). This is how the redraw, clock, and click-highlight fixes were verified without a display; documented in `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
