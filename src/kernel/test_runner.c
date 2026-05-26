@@ -559,6 +559,77 @@ static void test_symbol_lookup_below_first(void)
 }
 
 /* ============================================================================
+ * Shell history persistence scenario (FEAT-06 criterion 3)
+ *
+ * Non-vacuous single-boot proof that the history ring survives the semihosting
+ * round trip: seed N known lines, history_save() to aeos_hist.img, CLEAR the
+ * in-memory ring, history_load() it back, and assert BOTH the restored count
+ * AND the exact line bytes match the seed. A no-op save or a load that does not
+ * populate fails the count assertion (a broken load returning before populating
+ * was observed to FAIL it during development). The history buffer is reached
+ * through the TEST_BUILD seam (shell_test_history_*); the TEST QEMU line has
+ * -semihosting-config enable=on so the host file I/O path is live (aeos_fs.img
+ * already round-trips here). NOT a sec_* scenario.
+ *
+ * history_get rel-index ordering: index 0 is the NEWEST entry, so the oldest
+ * seed maps to history_get(count-1) and the newest to history_get(0).
+ * ============================================================================ */
+static void test_history_persist_roundtrip(void)
+{
+    /* The seed order is oldest-first; all four are distinct so history_add does
+     * not drop a consecutive duplicate. */
+    static const char *seed[] = { "ls /", "ps", "meminfo", "history" };
+    const int n = 4;
+    int i;
+
+    if (!semihost_available()) {
+        test_fail("history_persist_roundtrip", "no semihosting");
+        return;
+    }
+
+    shell_test_history_reset();
+    for (i = 0; i < n; i++) {
+        shell_test_history_seed(seed[i]);
+    }
+    if (shell_test_history_count() != n) {
+        test_fail("history_persist_roundtrip", "seed count wrong before save");
+        return;
+    }
+
+    if (history_save() != 0) {
+        test_fail("history_persist_roundtrip", "history_save returned non-zero");
+        return;
+    }
+
+    /* Wipe the in-memory ring so the reload must do the work. */
+    shell_test_history_reset();
+    if (shell_test_history_count() != 0) {
+        test_fail("history_persist_roundtrip", "reset did not clear the ring");
+        return;
+    }
+
+    history_load();
+
+    /* The restored count is the primary non-vacuity guard: a load that returns
+     * before populating leaves this at 0 and FAILS here. */
+    if (shell_test_history_count() != n) {
+        test_fail("history_persist_roundtrip", "restored count != seeded count");
+        return;
+    }
+
+    /* Exact bytes: seed[i] (oldest-first) is at history_get(n-1-i). */
+    for (i = 0; i < n; i++) {
+        const char *got = shell_test_history_get(n - 1 - i);
+        if (got == NULL || strcmp(got, seed[i]) != 0) {
+            test_fail("history_persist_roundtrip", "restored line bytes mismatch");
+            return;
+        }
+    }
+
+    test_pass("history_persist_roundtrip");
+}
+
+/* ============================================================================
  * MMU scenarios — the in-suite proof that the TEST kernel_main enabled the MMU
  * (vmm_init runs before any scenario). test_mmu_enabled is FEAT-01 criterion 1
  * (SCTLR_EL1.M readable and set); test_mmu_ttbr1_alias is criterion 3 (the high-
@@ -1714,6 +1785,12 @@ void kernel_main(void *dtb_addr)
 
     test_symbol_lookup_known();
     test_symbol_lookup_below_first();
+
+    /* FEAT-06 criterion 3 (persistent shell history, headless non-vacuous). Seeds
+     * the ring, saves to aeos_hist.img over semihosting, clears the in-memory
+     * ring, loads it back, and asserts the restored count + exact bytes match.
+     * NOT a sec_* scenario. */
+    test_history_persist_roundtrip();
 
     test_fb_init_and_fill();
 
