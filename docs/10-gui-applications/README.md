@@ -372,7 +372,7 @@ desktop_add_icon("My App", 0xFF00FF00, launch_myapp_icon);
 - No memory keys (M+, MR), no scientific functions
 
 ### System Monitor
-- Heap is the only sampled metric (no CPU%, no per-process info, no userspace yet)
+- Heap is the only sampled metric (no CPU%, no per-process breakdown in the app; the shell's `ps` covers per-process ticks and heap)
 - Sampling is driven from the paint hook, so closing the window stops sampling
 
 ### Notes

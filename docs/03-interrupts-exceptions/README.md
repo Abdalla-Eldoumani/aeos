@@ -44,7 +44,7 @@ So each frame on the panic path now prints `#N 0xADDR name+0xoff (file:line)`, w
 
 ## Stack-Guard Sentinel
 
-The kernel has no MMU yet, so there is no faulting guard page below the boot stack. Instead `boot.asm` stamps a sentinel value, `STACK_GUARD_MAGIC` (0xAE057ACC), at `__stack_limit` (the bottom of the boot stack) before `kernel_main` runs. A stack overflow grows past that address and clobbers the sentinel.
+The MMU maps all of RAM as one identity-mapped block, so there is no unmapped faulting guard page below the boot stack. Instead `boot.asm` stamps a sentinel value, `STACK_GUARD_MAGIC` (0xAE057ACC), at `__stack_limit` (the bottom of the boot stack) before `kernel_main` runs. A stack overflow grows past that address and clobbers the sentinel.
 
 Two paths check it, both in `src/kernel/stack_guard.c`:
 
