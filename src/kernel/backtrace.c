@@ -8,6 +8,7 @@
  * ============================================================================ */
 
 #include <aeos/symbols.h>
+#include <aeos/lines.h>
 #include <aeos/kprintf.h>
 #include <aeos/semihosting.h>
 #include <aeos/string.h>
@@ -51,6 +52,53 @@ void symbol_lookup(uint64_t addr, char *name_buf, uint32_t buf_size)
 }
 
 /**
+ * Resolve `addr` to "<file>:<line>" via the same binary search as
+ * symbol_lookup, but over the addr->file:line table aeos_lines[] keyed on
+ * addr_off = addr - 0x40000000 (the kernel base, linker.ld ORIGIN). Writes an
+ * empty string (not garbage like "(?:?)") when there is no line entry: an
+ * empty table, an address below the text base, or an address below the first
+ * entry. The empty string lets the caller fall back to name+0xoff.
+ */
+void line_lookup(uint64_t addr, char *buf, uint32_t buf_size)
+{
+    if (buf == NULL || buf_size == 0) {
+        return;
+    }
+
+    buf[0] = '\0';
+
+    if (aeos_lines_count == 0 || addr < 0x40000000ULL) {
+        return;
+    }
+
+    uint32_t key = (uint32_t)(addr - 0x40000000ULL);
+    if (key < aeos_lines[0].addr_off) {
+        return;
+    }
+
+    uint32_t lo = 0;
+    uint32_t hi = aeos_lines_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (aeos_lines[mid].addr_off <= key) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    /* lo-1 is the entry with the largest addr_off <= key. */
+    uint32_t idx = lo - 1;
+    uint16_t fo = aeos_lines[idx].file_off;
+    /* file_off is in-range by the generator's construction (gen-lines.py
+     * assigns every file_off as an offset into the NUL-separated pool it
+     * emits), and the pool is NUL-terminated, so &aeos_line_files[fo] is a
+     * valid C string; snprintf's buf_size caps the copy. */
+    snprintf(buf, buf_size, "%s:%u",
+             &aeos_line_files[fo], (uint32_t)aeos_lines[idx].line);
+}
+
+/**
  * Walk the saved-FP chain starting at `fp`. AArch64 stores [prev_fp, lr] at
  * the address pointed to by x29; the previous frame is at a higher address
  * because the stack grows down. Stop when the chain leaves a sane window or
@@ -59,6 +107,7 @@ void symbol_lookup(uint64_t addr, char *name_buf, uint32_t buf_size)
 void backtrace(uint64_t fp)
 {
     char name[96];
+    char loc[64];
     const uint64_t kernel_start = (uint64_t)&_kernel_start;
     const uint64_t stack_top    = (uint64_t)&__stack_top;
 
@@ -86,7 +135,14 @@ void backtrace(uint64_t fp)
         }
 
         symbol_lookup(lr, name, sizeof(name));
-        kprintf("  #%d  0x%x  %s\n", depth, (uint32_t)(lr & 0xFFFFFFFFu), name);
+        line_lookup(lr, loc, sizeof(loc));
+        if (loc[0] != '\0') {
+            kprintf("  #%d  0x%x  %s  (%s)\n", depth,
+                    (uint32_t)(lr & 0xFFFFFFFFu), name, loc);
+        } else {
+            kprintf("  #%d  0x%x  %s\n", depth,
+                    (uint32_t)(lr & 0xFFFFFFFFu), name);
+        }
 
         if (next_fp == 0) {
             return;
