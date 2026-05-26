@@ -419,6 +419,21 @@ void scheduler_get_stats(scheduler_stats_t *stats)
     spin_unlock(&scheduler_lock);
 }
 
+#ifdef TEST_BUILD
+/*
+ * Read-only access to the file-static scheduler.current. test_ps_accounting uses
+ * it to assert tick accrual against the ACTUAL increment target (scheduler_tick
+ * increments scheduler.current->total_time at the top of this file), since no API
+ * makes an arbitrary test PCB scheduler.current. Returns the pointer; does not
+ * mutate scheduler state. Mirrors the editor_test_ and syscall_test_ seams and
+ * compiles out of the production build.
+ */
+process_t *scheduler_test_current(void)
+{
+    return scheduler.current;
+}
+#endif /* TEST_BUILD */
+
 /* ============================================================================
  * End of scheduler.c
  * ============================================================================ */

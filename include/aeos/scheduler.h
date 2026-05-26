@@ -69,4 +69,18 @@ typedef struct {
 
 void scheduler_get_stats(scheduler_stats_t *stats);
 
+#ifdef TEST_BUILD
+/*
+ * Read-only access to the file-static scheduler.current (the actual target that
+ * scheduler_tick increments). test_ps_accounting reads it, ticks N times, and
+ * asserts its total_time advanced by N - the ticks-are-real proof. There is no
+ * way to make an arbitrary test PCB scheduler.current (process_set_current sets
+ * a DIFFERENT variable, schedule() returns idle on an empty ready_head, and
+ * scheduler_start() is noreturn), so the assertion must target scheduler.current
+ * itself. Mirrors the editor_test_ and syscall_test_ TEST seams; compiled out of
+ * production (no prod symbol, no -Werror unused warning).
+ */
+process_t *scheduler_test_current(void);
+#endif /* TEST_BUILD */
+
 #endif /* AEOS_SCHEDULER_H */
