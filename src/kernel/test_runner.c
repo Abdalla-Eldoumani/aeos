@@ -390,6 +390,74 @@ static void test_process_create_remove(void)
 }
 
 /* ============================================================================
+ * ps accounting scenario (criterion 4): the two columns cmd_ps surfaces are
+ * REAL, non-vacuous.
+ *
+ *   (a) TICKS: scheduler_tick increments scheduler.current->total_time
+ *       (scheduler.c). We assert against the ACTUAL increment target read via
+ *       the TEST_BUILD scheduler_test_current() accessor - NOT against an
+ *       arbitrary created PCB, which is never made scheduler.current
+ *       (process_set_current sets a DIFFERENT variable; schedule() returns idle
+ *       on an empty ready_head; scheduler_start() is noreturn). scheduler_init
+ *       ran in this TEST kernel, so scheduler.current is the idle PCB and
+ *       .initialized is true, so scheduler_tick DOES increment. RED gate: comment
+ *       out scheduler.c's total_time++ and this assertion fails (no advance).
+ *   (b) HEAP_B: a process_create'd PCB carries its attributable bytes (its
+ *       struct + stack + fd table), so heap_bytes >= struct + stack.
+ * ============================================================================ */
+
+static void test_ps_accounting(void)
+{
+    /* (a) The ticks are real. scheduler_test_current() returns the file-static
+     * scheduler.current - the idle PCB in this TEST kernel (scheduler_init ran).
+     * It is the SAME pointer scheduler_tick increments. */
+    process_t *cur = scheduler_test_current();
+    if (cur == NULL) {
+        test_fail("ps_accounting", "scheduler.current is NULL (scheduler_init did not run?)");
+        return;
+    }
+
+    const uint64_t N = 5;
+    uint64_t base = cur->total_time;
+    for (uint64_t i = 0; i < N; i++) {
+        scheduler_tick();
+    }
+
+    /* Exactly N, not >= N: a second stray increment would also be a bug. This is
+     * the non-vacuous heart of the scenario - it fails if scheduler_tick stops
+     * incrementing scheduler.current->total_time. */
+    if (cur->total_time != base + N) {
+        test_fail("ps_accounting", "scheduler.current->total_time did not advance by N");
+        return;
+    }
+
+    /* (b) heap_bytes attribution. process_create auto-registers + auto-enqueues;
+     * assert the PCB's attributable bytes include its known struct + stack. */
+    process_t *p = process_create(test_process_dummy_entry, "ps_acct_test");
+    if (p == NULL) {
+        test_fail("ps_accounting", "process_create returned NULL");
+        return;
+    }
+
+    if (p->heap_bytes < sizeof(process_t) + PROCESS_STACK_SIZE) {
+        test_fail("ps_accounting", "heap_bytes below struct + stack attribution");
+        scheduler_remove_process(p);
+        process_unregister(p);
+        kfree(p);
+        return;
+    }
+
+    /* Tear down the created PCB only (the 06-04/06-05 teardown). The test only
+     * READ scheduler.current via the accessor - it ticked the idle PCB's counter
+     * forward by N, which is benign (idle's total_time legitimately advances). */
+    scheduler_remove_process(p);
+    process_unregister(p);
+    kfree(p);
+
+    test_pass("ps_accounting");
+}
+
+/* ============================================================================
  * Shell parser scenarios
  * ============================================================================ */
 
@@ -1603,6 +1671,13 @@ void kernel_main(void *dtb_addr)
     }
 
     test_process_create_remove();
+
+    /* FEAT-06 criterion 4 (headless, non-vacuous). The two ps columns are real:
+     * the ticks half asserts scheduler.current->total_time (via the TEST_BUILD
+     * scheduler_test_current accessor) advances by N per N scheduler_tick calls;
+     * the heap_bytes half asserts a created PCB's attributed bytes. NOT a sec_*
+     * scenario. */
+    test_ps_accounting();
 
     /* FEAT-03 criterion 4 (headless, non-vacuous). Runs after the ELF scenarios:
      * register a user process, arm its kill flag by pid, enter EL0, and assert
