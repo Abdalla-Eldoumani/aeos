@@ -88,6 +88,13 @@ The shell splits a command line on `|` and runs the stages serially. Built-ins a
 - Stores last 32 commands
 - View with `history` command
 - Duplicate commands not stored consecutively
+- Persists across reboots. The `save` command writes the ring to the host file
+  `aeos_hist.img` over semihosting (a magic-versioned blob, oldest-first), right
+  after it saves the filesystem. `shell_init` loads it at boot. The save is a
+  deliberate `save` action only - there is no per-command write, which would
+  pause the kernel on every Enter. A missing, foreign, or malformed image is
+  validated (magic, version, count, line length) and rejected to an empty
+  history, so a bad file never hangs or faults the boot path.
 
 ## Text Editor
 
