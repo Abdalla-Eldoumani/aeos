@@ -262,14 +262,18 @@ static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
         uint8_t *rip = reply + ETH_HDR_LEN;
         memcpy(rip + IP_OFF_SRC, ip + IP_OFF_DST, IP_ADDR_LEN);
         memcpy(rip + IP_OFF_DST, ip + IP_OFF_SRC, IP_ADDR_LEN);
-        /* Type 0, recompute the ICMP checksum over its span. */
+        /* Type 0, recompute the ICMP checksum over its span. inet_csum returns a
+         * host-order value; wbe16 writes it big-endian (network order) - so NO
+         * htons (a second swap would corrupt the on-wire checksum and the peer
+         * would drop the frame). */
         uint8_t *ricmp = rip + ihl_bytes;
         ricmp[ICMP_OFF_TYPE] = ICMP_TYPE_ECHO_REPLY;
         wbe16(ricmp + ICMP_OFF_CHECKSUM, 0);
-        wbe16(ricmp + ICMP_OFF_CHECKSUM, htons(inet_csum(ricmp, icmp_len)));
-        /* Recompute the IPv4 header checksum over its 20+ bytes. */
+        wbe16(ricmp + ICMP_OFF_CHECKSUM, inet_csum(ricmp, icmp_len));
+        /* Recompute the IPv4 header checksum over its 20+ bytes (wbe16 writes it
+         * big-endian; no htons). */
         wbe16(rip + IP_OFF_CHECKSUM, 0);
-        wbe16(rip + IP_OFF_CHECKSUM, htons(inet_csum(rip, ihl_bytes)));
+        wbe16(rip + IP_OFF_CHECKSUM, inet_csum(rip, ihl_bytes));
 
         net_tx(reply, reply_len);
         return;
@@ -410,8 +414,11 @@ int icmp_send_echo(const uint8_t dst_ip[4], const uint8_t dst_mac[6],
     ip[IP_OFF_PROTO] = IP_PROTO_ICMP;
     memcpy(ip + IP_OFF_SRC, our_ip, IP_ADDR_LEN);
     memcpy(ip + IP_OFF_DST, dst_ip, IP_ADDR_LEN);
+    /* inet_csum returns a host-order value; wbe16 writes it big-endian (network
+     * order). NO htons - a second swap corrupts the on-wire checksum and slirp
+     * silently drops the frame (no echo reply). */
     wbe16(ip + IP_OFF_CHECKSUM, 0);
-    wbe16(ip + IP_OFF_CHECKSUM, htons(inet_csum(ip, IP_HDR_MIN_LEN)));
+    wbe16(ip + IP_OFF_CHECKSUM, inet_csum(ip, IP_HDR_MIN_LEN));
 
     /* ICMP echo request: type 8, code 0, id, seq, csum over the 8-byte header. */
     uint8_t *icmp = ip + IP_HDR_MIN_LEN;
@@ -420,7 +427,7 @@ int icmp_send_echo(const uint8_t dst_ip[4], const uint8_t dst_mac[6],
     wbe16(icmp + ICMP_OFF_ID, id);
     wbe16(icmp + ICMP_OFF_SEQ, seq);
     wbe16(icmp + ICMP_OFF_CHECKSUM, 0);
-    wbe16(icmp + ICMP_OFF_CHECKSUM, htons(inet_csum(icmp, ICMP_HDR_LEN)));
+    wbe16(icmp + ICMP_OFF_CHECKSUM, inet_csum(icmp, ICMP_HDR_LEN));
 
     return net_tx(frame, frame_len);
 }
