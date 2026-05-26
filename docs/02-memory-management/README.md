@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements physical memory management for AEOS. It provides a buddy allocator for page-level physical memory allocation and a first-fit allocator for kernel heap management. There is no MMU yet, so all addresses are physical; virtual memory lands in a later phase.
+This section implements memory management for AEOS. It provides a buddy allocator for page-level physical memory allocation, a first-fit allocator for kernel heap management, and the MMU bringup that puts the kernel behind a page table. The MMU is enabled at boot through a single identity map, so kernel addresses are still physical (VA == PA) while translation, caching, and a per-segment-W^X window for loaded EL0 code are all live.
 
 ## Components
 
@@ -27,6 +27,15 @@ This section implements physical memory management for AEOS. It provides a buddy
   - kcalloc rejects an `nmemb * size` multiplication overflow
   - Heap usage statistics
 
+### Virtual Memory (vmm.c)
+- **Location**: `src/mm/vmm.c`
+- **Purpose**: Build the page tables and enable the MMU and caches
+- **Features**:
+  - One L1 identity map: RAM as a Normal write-back block, MMIO as a Device block
+  - A TTBR1 high-half alias of RAM, verified at boot against the identity read
+  - Per-core MMU enable for the SMP secondaries against the same shared tables
+  - A single 2MB EL0 user window with per-segment W^X for loaded code
+
 ## Memory Layout
 
 ```
@@ -40,6 +49,37 @@ Physical Memory (256 MB total, QEMU virt -m 256M)
 The linker (`linker.ld`) lays sections in the order kernel image -> heap -> stack, so the heap and stack addresses shift if the kernel grows. `mm_init` reads `__heap_start` / `__heap_end` symbols and hands the post-stack range to the PMM.
 
 `mm_init` starts the PMM at `__stack_top`, not `heap_end`. The region `[heap_end, __stack_top)` holds the live boot stack and the SEC-01 stack-guard sentinel at `__stack_limit` (which equals `heap_end`). The buddy allocator writes a free-list node at the start of its first managed block, so starting at `heap_end` would clobber the sentinel and the in-use stack on the first allocation. Reserving the stack from the PMM is what "PMM-managed pages (the rest of RAM)" above means.
+
+## Virtual Memory (MMU)
+
+`vmm_init` builds one level-1 page table and enables the MMU and caches from C in `kernel_main`, so every address after boot is translated rather than raw physical. The map is intentionally minimal; the honest posture below states exactly what it does and does not give you.
+
+### The identity map
+
+The L1 table has two live block entries, both 1GB:
+
+- **MMIO** at `0x00000000` is mapped Device-nGnRnE and marked never-execute. This one block covers the GIC, the UART, the virtio transports, and the PL031 RTC. The PL031 driver and the other MMIO drivers read their registers through this block; no driver installs its own mapping.
+- **RAM** at `0x40000000` is mapped Normal write-back, Inner-Shareable. The kernel executes from here, so the execute-never bits stay clear. All 256MB of RAM sits inside this single 1GB block, so the kernel image, heap, framebuffer, stack, and virtqueues are all covered by one entry.
+
+The map is identity: the virtual address equals the physical address. `vmm_init` runs while the program counter is already inside the identity-mapped RAM block, so execution continues across the enable with no relink and no jump.
+
+### The TTBR1 high-half alias
+
+RAM is also mapped at the high-half base `0xFFFFFF8000000000` through TTBR1. `vmm_report` and the `mmu_ttbr1_alias` test read the first word of the kernel image through the alias and confirm it matches the identity read, which proves the high-half mapping is live. The kernel does not yet execute from the high half; the alias is a demonstrated mapping, not the sole map.
+
+### Per-core enable for the SMP secondaries
+
+The tables are built once, by the primary's `vmm_init`. Each secondary core calls `vmm_enable_secondary`, which programs that core's translation registers against the same shared tables and enables the MMU there; it does not rebuild the tables. The register-programming body is a single shared helper, so the load-bearing `TG1` granule field is written from one place and a per-core copy cannot reintroduce a translation fault. The tables are Inner-Shareable, so the page-table walk is coherent across cores.
+
+### The EL0 user window and its 2MB ceiling
+
+`vmm_map_user_page` carves 4KB pages for the EL0 program into one window at `0x80000000` (L1 index 2). Kernel indexes 0 (MMIO) and 1 (RAM) are never touched, so a fault in the user window cannot break the running kernel. The window is backed by a single static L3 table, which is 512 pages, so the mappable region is exactly the 2MB span `[0x80000000, 0x80200000)`, not the 1GB the L1 entry nominally covers. Two virtual addresses in different 2MB bands would collapse onto the same L3 leaf, so callers must reject any address reaching past `0x80200000` before mapping. The ELF loader does this with the `USER_L3_TOP` ceiling: it validates every segment and the EL0 stack against `0x80200000`, the region the mapper can actually honor, before mapping a single page. Lifting the ceiling would mean allocating an additional L3 table per 2MB band, which is deferred.
+
+### MMU posture (do not overstate)
+
+- **One RWX block for the kernel; no kernel-wide W^X.** The kernel's code, rodata, data, heap, and stack share one Normal read-write-execute 1GB block. There is no per-section W^X for the kernel. Fine-grained kernel permissions would need 2MB or 4KB tables and stay out of scope.
+- **Per-segment W^X for loaded EL0 code.** `vmm_map_user_page` supports a `USER_TEXT` class that maps a page EL0 read-and-execute but not EL0-writable. The ELF loader maps executable segments `USER_TEXT`, so a loaded program cannot rewrite its own instructions. This narrows the user window only; the kernel block above is still RWX.
+- **TTBR0 is reserved, not empty.** The per-process user mapping installed for an EL0 program lives in TTBR0, and the running kernel still needs TTBR0 for the identity map, so it is not empty.
 
 ## Buddy Allocator
 
