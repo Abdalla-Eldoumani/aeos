@@ -1346,6 +1346,15 @@ static int cmd_save(int argc, char **argv)
         return -1;
     }
 
+    /* Persist the command history alongside the FS. The FS save already
+     * succeeded, so a history_save failure is logged and ignored here - it must
+     * NOT turn this deliberate `save` into a failure. */
+    if (history_save() == 0) {
+        kprintf("Command history saved.\n");
+    } else {
+        kprintf("Command history not saved (history persistence unavailable).\n");
+    }
+
     kprintf("Filesystem saved successfully!\n");
     kprintf("Changes will persist across reboots (stored on disk.img)\n\n");
 
