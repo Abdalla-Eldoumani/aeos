@@ -15,9 +15,11 @@
  * volatile load - no separate vmm mapping. */
 #define PL031_BASE 0x09010000UL
 
-/* RTC_DR (data register), offset 0x00: the current time as UTC seconds since
- * the Unix epoch. The only register this driver reads; QEMU keeps the RTC
- * running by default so no enable write is needed. */
+/* RTC_DR (data register), offset 0x00: the current time as wall-clock seconds
+ * since the Unix epoch, fed from the QEMU host clock. With -rtc base=localtime
+ * (run-ramfb) that is the host's local time, not UTC. The only register this
+ * driver reads; QEMU keeps the RTC running by default so no enable write is
+ * needed. */
 #define PL031_DR   0x00
 
 /**
@@ -27,15 +29,18 @@
 void pl031_init(void);
 
 /**
- * Read RTC_DR and return the raw UTC seconds-since-epoch.
+ * Read RTC_DR and return the raw wall-clock seconds-since-epoch (host time;
+ * local under run-ramfb's -rtc base=localtime).
  */
 uint32_t pl031_now_seconds(void);
 
 /**
- * Format UTC seconds as a zero-padded "HH:MM:SS" string (no date).
+ * Format epoch seconds as a zero-padded "HH:MM:SS" string (no date).
+ * Timezone-agnostic: it breaks down whatever seconds it is given, so the result
+ * is local time when the RTC base is localtime, UTC when it is utc.
  * Integer-only (safe under -mgeneral-regs-only). Writes at most buf_size bytes
  * including the terminator.
- * @param secs    UTC seconds since epoch
+ * @param secs    wall-clock seconds since epoch
  * @param buf     destination buffer (>= 9 bytes for "HH:MM:SS\0")
  * @param buf_size size of buf
  */
