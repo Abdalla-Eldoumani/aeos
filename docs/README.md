@@ -27,8 +27,8 @@ Interrupt handling and exception management.
 
 - **Location**: `src/interrupts/`
 - **What it does**: Handles exceptions and hardware interrupts using the ARM GICv2 and generic timer
-- **Key concepts**: Exception vectors, GIC configuration, timer interrupts, FIQ handling
-- **Status**: Fully functional with FIQ-based timer interrupts at 100 Hz
+- **Key concepts**: Exception vectors, GIC configuration, timer interrupts, IRQ handling
+- **Status**: Fully functional with IRQ-based timer interrupts at 100 Hz
 
 ### 4. [Process Management](./04-process-management/)
 Process creation and scheduling.
@@ -56,7 +56,7 @@ File system abstraction and ramfs implementation.
 Command-line interface and text editor.
 
 - **Location**: `src/kernel/shell.c`, `src/kernel/editor.c`
-- **What it does**: Provides interactive shell with 24 built-in commands, colorized output, and a vim-like text editor
+- **What it does**: Provides interactive shell with 30 built-in commands, colorized output, and a vim-like text editor
 - **Key concepts**: Command parsing, line editing, file operations, modal text editing
 
 ### 8. [Graphics and GUI](./08-graphics-gui/)
@@ -72,7 +72,7 @@ Graphical desktop environment implementation.
 - **Window Manager** (`wm.c`): Z-ordered window list, focus tracking with Alt+Tab cycle, dragging with edge clamping, open/close animations, focused-window drop shadow, global keyboard shortcuts
 - **Window** (`window.c`): Window creation, decorations, client area management, slide+fade open animation
 - **Notifications** (`notify.c`): Three-slot toast ring with 220 ms slide-in / 4 s visible / 240 ms fade-out
-- **Desktop** (`desktop.c`): Background gradient, icons (7), taskbar, start menu (table-driven)
+- **Desktop** (`desktop.c`): Background gradient, icons (8), taskbar, start menu (table-driven)
 - **GUI Init** (`gui.c`): Coordinates initialization, registers desktop icons, owns the `gui_launch_*` entry points
 
 ### 9. [VirtIO Drivers](./09-virtio-drivers/)
@@ -111,10 +111,10 @@ Each section directory contains:
 ## Design Decisions
 
 1. **Preemptive Scheduling**: Round-robin scheduling with 100 Hz timer tick for time slicing
-2. **FIQ-Based Timer**: Timer interrupts route as FIQ on QEMU virt; handled via direct timer status checking
+2. **IRQ-Based Timer**: The timer PPI is placed in GIC Group 0 and, with `FIQEn = 0`, delivered as an IRQ on QEMU virt; serviced through the normal GIC acknowledge flow (see Section 3)
 3. **Two syscall paths**: EL1 kernel code uses direct function calls; an EL0 payload traps in via `svc` to the same dispatcher (Phase 5)
 4. **Semihosting Persistence**: Filesystem persists to host via ARM semihosting
-5. **EL1 kernel with a tested EL0 boundary**: the kernel runs at EL1; a one-shot in-kernel payload runs at EL0 reachable only via trapped `svc`, with a privileged instruction from EL0 faulting to EL1 (Phase 5). No scheduled-from-file userspace or W^X yet
+5. **EL1 kernel with a tested EL0 boundary**: the kernel runs at EL1; a loaded ELF runs at EL0 with per-segment W^X for its code, reachable only via trapped `svc`, with a privileged instruction from EL0 faulting to EL1 (Phase 5 boundary, Phase 6 loader). It runs synchronously, one at a time, not scheduled across cores
 6. **VirtIO Legacy Mode**: GPU and input use VirtIO MMIO with legacy (v1) protocol
 7. **Event-Driven GUI**: Mouse/keyboard events queued and processed in main loop
 8. **Direct-Compositing Window Manager**: Windows draw straight into the main framebuffer in z-order from `wm_redraw`; no per-window backbuffers
