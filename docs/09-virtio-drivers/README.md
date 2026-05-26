@@ -328,6 +328,22 @@ int icmp_send_echo(const uint8_t dst_ip[4], const uint8_t dst_mac[6],
 int net_ping(const uint8_t dst_ip[4]);
 ```
 
+Checksums go on the wire big-endian: `inet_csum` returns a host-order value and
+the `wbe16` store writes it big-endian, so the store is `wbe16(p, inet_csum(...))`
+with no `htons` (a second swap corrupts the on-wire checksum and the peer drops
+the frame).
+
+The interactive surface is the `ping <ip>` shell command (a dotted-quad parse,
+no DNS; default target the slirp gateway 10.0.2.2), bounded by `net_ping` so it
+never hangs the prompt.
+
+After the probe, `kernel_main` runs a one-shot boot-path `ping 10.0.2.2` demo
+(mirroring the `/hello` EL0 demo's log-and-continue discipline): on a reply it
+logs `ping 10.0.2.2: reply` (the criterion-3 serial proof alongside the MAC),
+and on a timeout or an absent device it warns once and continues - boot always
+reaches the window manager loop. It is gated on the device being present and
+runs exactly once, so a normal boot is not spammy.
+
 ### Framebuffer
 
 ```c
