@@ -145,14 +145,18 @@ This is the single-tick path through the window manager main loop, `wm_run` in
 5. The app updates its own state and calls `window_invalidate`
    (`src/kernel/window.c`), which sets `WINDOW_FLAG_DIRTY` on the window and calls
    `wm_request_redraw`, marking the WM's redraw flag.
-6. Back in the loop, when the redraw flag is set (or on the normal frame cadence),
-   `wm_update_display` repaints through `wm_redraw`. `wm_redraw` runs every
-   visible window's `on_paint`, composites any active toast notifications above
-   the windows, draws the software mouse cursor, and flushes the framebuffer to
-   the GPU.
+6. Back in the loop, the frame tick forces a repaint every ~33 ms (30 FPS):
+   `wm_run` sets the redraw flag on each tick, so `wm_update_display` repaints
+   through `wm_redraw` whether or not an event arrived - this is what keeps the
+   wall clock and the open/close animations advancing without input. An event
+   that set the flag between ticks repaints immediately, so a click is
+   sub-frame responsive. `wm_redraw` runs every visible window's `on_paint`,
+   composites any active toast notifications above the windows, draws the
+   software mouse cursor, and flushes the framebuffer to the GPU.
 
-Live-content apps such as the system monitor graph and the notes caret call
-`wm_request_redraw` each tick so they get a frame even when no input arrived.
+Because the loop repaints every frame, live-content apps such as the system
+monitor graph and the notes caret advance on their own; they may also call
+`wm_request_redraw` directly, which is now redundant but harmless.
 
 ## Data flow two: a shell save to host persistence
 
