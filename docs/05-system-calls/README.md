@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements the system call interface for AEOS. There are two entry paths into one dispatcher. Kernel code at EL1 makes a syscall as a direct C call (no privilege boundary to cross). An EL0 payload makes a syscall the architected way, with an `svc` trap into the EL1 vector table; that path was added in Phase 5 (FEAT-02) and is exercised and tested, though by a one-shot in-kernel payload rather than a scheduled process.
+This section implements the system call interface for AEOS. There are two entry paths into one dispatcher. Kernel code at EL1 makes a syscall as a direct C call (no privilege boundary to cross). An EL0 program makes a syscall the architected way, with an `svc` trap into the EL1 vector table; that path was added in Phase 5 (FEAT-02) and is exercised by both a one-shot in-kernel payload and, since Phase 6, a static ELF loaded from a file and run at EL0 (see Section 04).
 
 ## Implementation Approach
 
@@ -22,9 +22,9 @@ svc #0
 ```
 The instruction traps to `el0_aarch64_sync` (`src/interrupts/vectors.asm`, VBAR+0x400), which decodes ESR_EL1 EC=0x15, pulls x8/x0-x5 out of the saved register frame, and calls the SAME `syscall_handler`. The return value is written back into the frame's x0 slot and the handler `eret`s to EL0. The dispatcher is shared: the EL0 svc path was added alongside the direct-call path, not as a replacement.
 
-The privilege boundary is real. The EL0 code page is mapped EL0-accessible (AP=01) while kernel pages stay AP=00 (EL0 no-access), so EL0 faults on any kernel address; a privileged instruction from EL0 (`msr daifset`) traps to EL1 with ESR EC=0x18 rather than executing. `make test` proves both directions: `test_el0_roundtrip` (the getpid+exit round trip returns control to the kernel and the getpid svc is observed) and `test_el0_priv_trap` (the privileged-instruction trap is EC=0x18).
+The privilege boundary is real. The EL0 code page is mapped EL0-accessible while kernel pages stay EL0-no-access, so EL0 faults on any kernel address; a privileged instruction from EL0 (`msr daifset`) traps to EL1 with ESR EC=0x18 rather than executing. `make test` proves both directions: `test_el0_roundtrip` (the getpid+exit round trip returns control to the kernel and the getpid svc is observed) and `test_el0_priv_trap` (the privileged-instruction trap is EC=0x18).
 
-What is NOT done yet: a scheduled EL0 process loaded from a file, per-section W^X, and user-pointer validation in syscalls (the one-shot payload passes no user pointers). Those are Phase 6.
+Phase 6 carried this from a one-shot payload to a loaded program: a static ELF loaded from a file and run at EL0, with per-segment W^X for the loaded code (executable segments are mapped read-only at EL0, see Section 02) and a user-pointer bound check in `sys_write`. The remaining gap is that a loaded program runs synchronously, one at a time, not as a process the scheduler time-shares.
 
 ## Components
 
@@ -132,6 +132,16 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2, ...)
         return (uint64_t)-1;
     }
 
+    /* EL0-origin write: the user buffer is attacker-controlled, so reject any
+     * [buf, buf+count) not wholly inside the mapped user window before the
+     * kernel dereferences a byte. Gated on the one-shot flag so the EL1
+     * direct-call path keeps passing trusted kernel pointers unchecked. */
+    if (el0_oneshot_active()) {
+        if (!is_user_range((uint64_t)buf, (uint64_t)count)) {
+            return (uint64_t)-1;
+        }
+    }
+
     /* Write to UART */
     for (size_t i = 0; i < count; i++) {
         uart_putc(((const char *)buf)[i]);
@@ -141,7 +151,7 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2, ...)
 }
 ```
 
-Currently writes to UART regardless of file descriptor (no VFS integration yet).
+Writes to UART regardless of file descriptor (no VFS integration yet). When the write originates at EL0, `is_user_range(buf, count)` first checks that the buffer lies wholly inside the mapped EL0 window `[usermode_map_base(), usermode_map_end())` (the extent the ELF loader publishes), checking the whole range and the `ptr + len` overflow, not just the start. An out-of-window or overflowing EL0 buffer is rejected with -1 and no dereference. The check is gated on `el0_oneshot_active()`, so the EL1 direct-call path (the GUI, the shell, the test runner) keeps passing trusted kernel pointers unchecked; `count == 0` is allowed.
 
 ### sys_getpid
 ```c
@@ -222,11 +232,11 @@ Tracks:
 
 ## Known Issues
 
-### No user-pointer validation
-Syscalls do not range-check user-supplied pointers before dereferencing them at EL1. The EL0 one-shot payload passes no pointers (getpid, exit, daifset take none), so this is not exercised yet, but any future syscall that takes a user buffer must validate it with `IS_USER_ADDR` first. Phase 6.
+### User-pointer validation covers only sys_write
+`sys_write` range-checks its EL0 buffer with `is_user_range` before dereferencing it (gated on `el0_oneshot_active()`, so the EL1 direct-call path is unaffected). It is the only syscall that takes a user buffer today. Any future syscall that takes one (a real `sys_read` into a user buffer, for example) must apply the same gated range check before dereferencing at EL1; only `sys_write` is covered.
 
-### No scheduled EL0 process
-EL0 execution today is a one-shot in-kernel payload entered from `kernel_main`, not a process loaded from a file and scheduled. The mechanism (entry trampoline, svc dispatch, user-page mapping) is in place; loading an ELF and running it under the scheduler is Phase 6.
+### No scheduler-managed EL0 process
+A loaded ELF runs at EL0 synchronously, one at a time, on the current EL1 stack; it is not enqueued in the scheduler and the scheduler does not time-share EL0 programs. The mechanism (entry trampoline, svc dispatch, user-page mapping, ELF loader) is in place and the program is registered so `ps` and `kill` see it; preemptive cross-core scheduling of EL0 programs stays out of scope (see Section 04).
 
 ### Limited Error Codes
 System calls return -1 or 0 for errors, not errno codes. No global errno variable.
@@ -269,8 +279,8 @@ assert(pid1 != pid2);
 
 ## Future Enhancements
 
-- A scheduled EL0 process loaded from a file (the svc dispatch and entry path already exist; the ELF loader and per-process scheduling are next)
-- User-pointer validation and per-section W^X for the EL0 path
+- Scheduler-managed EL0 programs (the svc dispatch, entry path, ELF loader, per-segment W^X, and the `sys_write` range check already exist; a loaded program runs synchronously today, so preemptive per-process scheduling of EL0 programs is next)
+- User-pointer validation beyond `sys_write` (every future syscall taking a user buffer needs the same gated range check)
 - More syscalls: open, close, read, fork, exec, wait
 - errno-style error reporting
 - Syscall tracing and auditing
