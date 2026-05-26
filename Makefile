@@ -310,11 +310,11 @@ run-nopersist: all
 run-ramfb: all
 	@echo "Starting QEMU with graphics window..."
 	@echo "Graphics will appear in a separate window"
-	@echo "Click in window to grab mouse, Ctrl+Alt+G to release"
+	@echo "The tablet is absolute, so the guest cursor tracks the host pointer directly"
 	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 256M -smp 4 \
 		-device virtio-gpu-device \
 		-device virtio-keyboard-device \
-		-device virtio-mouse-device \
+		-device virtio-tablet-device \
 		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-serial stdio \
 		-semihosting-config enable=on,target=native \
