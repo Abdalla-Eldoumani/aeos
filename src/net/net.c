@@ -248,6 +248,13 @@ static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
     uint8_t type = icmp[ICMP_OFF_TYPE];
 
     if (type == ICMP_TYPE_ECHO_REQUEST) {
+        /* Answer only an echo request addressed to us. The contract (net.h) is
+         * "answer an ICMP echo request to our IP", so drop a request for any
+         * other destination rather than acting as an echo responder for every
+         * address. our_ip is in wire order, so this is a direct byte compare. */
+        if (memcmp(ip + IP_OFF_DST, our_ip, IP_ADDR_LEN) != 0) {
+            return;
+        }
         /* Echo this back as a type-0 reply: swap the Ethernet src/dst MAC and
          * the IPv4 src/dst IP, set type 0, recompute the ICMP checksum (over
          * the ICMP span we received, bounded by total_length) then the IPv4
