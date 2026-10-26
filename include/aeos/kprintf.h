@@ -72,7 +72,7 @@ void kprintf_ring_walk(kprintf_ring_sink_fn sink);
 
 #ifdef TEST_BUILD
 /**
- * TEST_BUILD-only panic-path bypass gate (Phase 7). Takes the file-static ring
+ * TEST_BUILD-only panic-path bypass gate (SMP ring lock). Takes the file-static ring
  * lock and then drives kprintf_ring_walk on this same core. Returns 1 if
  * control reaches the end - which it can only do if kprintf_ring_walk's
  * trylock-or-bypass returned despite the held lock. A regression to a blocking
