@@ -107,7 +107,7 @@ uint64_t syscall_handler(uint64_t syscall_num,
                (uint32_t)syscall_num,
                (uint32_t)process_current()->pid);
 
-    /* The middle round-trip marker (criterion 4). Fires only for the EL0
+    /* The middle round-trip marker. Fires only for the EL0
      * one-shot - never on the GUI/shell direct-call path, which is not one-shot
      * - so the production serial shows enter-EL0 / svc-from-EL0 / return without
      * spamming every kernel-thread syscall. klog_debug above is off by default. */
@@ -122,7 +122,7 @@ uint64_t syscall_handler(uint64_t syscall_num,
 /**
  * True iff [ptr, ptr+len) lies wholly inside the currently-mapped EL0 window
  * [usermode_map_base(), usermode_map_end()). Checks the whole range, not just
- * the start (RESEARCH Pitfall 4), and rejects the ptr+len unsigned overflow.
+ * the start, and rejects the ptr+len unsigned overflow.
  * len==0 is allowed (no dereference). Callers gate this on el0_oneshot_active()
  * so the EL1 direct-call path (kernel pointers) is never range-checked.
  */
@@ -254,7 +254,7 @@ static uint64_t sys_write_impl(uint64_t arg0, uint64_t arg1, uint64_t arg2,
 
     /* EL0-origin write: the user buffer is attacker-controlled, so reject any
      * [buf, buf+count) that is not wholly inside the mapped user window before
-     * the kernel dereferences a byte (T-06-07). Gated STRICTLY on the one-shot
+     * the kernel dereferences a byte. Gated STRICTLY on the one-shot
      * flag so the EL1 direct-call path (GUI/shell/test_runner) keeps passing
      * trusted kernel pointers unchecked. */
     if (el0_oneshot_active()) {
