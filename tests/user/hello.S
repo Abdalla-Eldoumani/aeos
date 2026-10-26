@@ -3,11 +3,11 @@
  * File: tests/user/hello.S
  * Description: Minimal static AArch64 EL0 test payload for the ELF loader.
  *
- * Built and embedded by the Makefile, parsed and run by the Phase 6 loader.
+ * Built and embedded by the Makefile, parsed and run by the ELF loader.
  * Uses the AEOS EL0 syscall ABI: x8 = syscall number, x0-x5 = args, svc #0
  * traps into el0_aarch64_sync -> syscall_handler. SYS_WRITE=1 writes fd 1
  * (STDOUT) to the UART, so write(1, msg, len) puts msg on serial - the
- * criterion-3 observable. SYS_EXIT=0 ends the one-shot.
+ * loader's observable. SYS_EXIT=0 ends the one-shot.
  *
  * Position-independent within its single PT_LOAD segment (adr is PC-relative);
  * linked at VA 0x80000000 by user.ld with exactly one in-window LOAD.
