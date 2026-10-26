@@ -26,7 +26,7 @@ kprintf_hook_fn kprintf_output_hook = NULL;
  * mortems include the boot log, the EXCEPTION block, and the backtrace
  * even when the framebuffer is gone.
  *
- * Cross-core interleave invariant (SEC-04, discharged in Phase 7).
+ * Cross-core interleave invariant (SEC-04, discharged by the SMP ring lock).
  *
  * The ring is written from exactly one place, putchar, and read from exactly
  * one place, the panic path, which reaches kprintf_ring_walk from
@@ -44,7 +44,7 @@ kprintf_hook_fn kprintf_output_hook = NULL;
  *   2. kprintf_ring_lock (added here). putchar takes it across the ring store +
  *      pos/wrap update so two cores cannot splice a torn (pos, wrapped) pair.
  *      This is the cross-core exclusion the single-CPU DAIF-mask invariant could
- *      not provide - the lock SEC-04 deferred to the SMP phase. It is ADDITIVE:
+ *      not provide - the lock SEC-04 deferred to SMP bringup. It is ADDITIVE:
  *      it does not replace the DAIF mask, it adds the cross-core ordering on top.
  *
  * The panic reader (kprintf_ring_walk) does NOT block on the lock. It uses
