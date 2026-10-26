@@ -316,7 +316,7 @@ static void vfs_inode_unref(vfs_inode_t *inode)
 
 **Lifecycle**: the directory entry holds the first reference; each open adds one. `unlink` on an open inode removes the directory entry right away, but `vfs_inode_unref` only destroys the inode when the count reaches zero, which happens at the last close. This closes the unlink-while-open use-after-free.
 
-**Barrier (SEC-05)**: the `dmb ish` orders the `refcount++` store ahead of the inode becoming reachable through the fd table. It covers `-O2` reordering on the single CPU today; a full atomic refcount is deferred to the SMP phase and is not present yet.
+**Barrier (SEC-05)**: the `dmb ish` orders the `refcount++` store ahead of the inode becoming reachable through the fd table. It covers `-O2` reordering on the single CPU today; a full atomic refcount is deferred to later SMP work and is not present yet.
 
 **Table teardown**: `vfs_fd_table_destroy` walks `table->fds` directly instead of calling `vfs_close`, so it works for any process's table, not only `process_current()`'s.
 
