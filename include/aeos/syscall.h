@@ -56,7 +56,8 @@ uint64_t syscall_test_last_getpid(void);
  * Pre-set the getpid observable to a sentinel. test_process_kill_reap writes a
  * value getpid never returns, runs a getpid-first payload with the kill flag
  * armed, and asserts the observable is STILL the sentinel - proving the seam
- * reaped the run before sys_getpid_impl dispatched (the 06-04 ordering). Without
+ * reaped the run before sys_getpid_impl dispatched (kill is checked before
+ * dispatch). Without
  * this setter the assertion would be vacuous: process_current() is idle on both
  * the kill-armed and the no-flag run, so "last_getpid unchanged" would hold even
  * if getpid had dispatched. Compiled only under TEST_BUILD.
