@@ -10,8 +10,8 @@
 
 #include <aeos/types.h>
 
-/* Leaf-inline exception to include/CLAUDE.md's "no function bodies in headers"
- * rule: this header has no matching .c. It is a primitive used inline across
+/* Leaf-inline exception to the include/ convention of "no function bodies in
+ * headers": this header has no matching .c. It is a primitive used inline across
  * translation units (kprintf.c's ring lock, scheduler.c's runqueue lock,
  * test_runner.c's RED gate), so the static inline bodies must live here - a
  * single shared .c would force a call and defeat the point of a leaf lock.
