@@ -57,7 +57,7 @@ off the queue on its own loop.
   - Two virtqueues: RX = queue 0 (write-only ~2KB buffers, posted before the device is notified), TX = queue 1 (device reads, posted on demand)
   - Reads the 6-byte MAC from device config offset 0x100 and prints it at probe: `virtio-net: MAC 52:54:00:12:34:56`
   - Poll-driven `net_tx` / `net_rx_poll` - there is no interrupt path. The `TEST=1` kernel has no GIC or timer, so an IRQ-driven driver could not work in the test build; the poll path runs identically in both builds
-  - A file-static spinlock guards the RX/TX queue indices (the shared state), reusing the Phase 7 `spinlock.h` primitive
+  - A file-static spinlock guards the RX/TX queue indices (the shared state), reusing the SMP `spinlock.h` primitive
   - No-op when absent: if no net device is found the probe returns -1 and the kernel boots on (logs `virtio-net not found`)
 
 The Ethernet/ARP/IPv4/ICMP stack that sits on top of `net_tx`/`net_rx_poll` lives
@@ -91,13 +91,12 @@ pending-ping state under the SAME lock the queue cursors use.
   deadline in production, a spin-count under `TEST_BUILD` (no timer there). They
   return -1 on the bounded-wait expiry, never an infinite loop.
 - **Lock discipline**: the pending-ping state is guarded by the driver's
-  `net_lock` (criterion 4), not a second lock. `net_lock` is non-recursive, so
+  `net_lock`, not a second lock. `net_lock` is non-recursive, so
   no flow holds it across a `net_tx`/`net_rx_poll` call (those re-take it and
   would self-deadlock). `net_rx_dispatch` locks only the brief reply-match; the
   ARP/echo sends and the ping poll loop run with the lock released.
 
-Not yet wired into the boot path or the shell (that is a later plan); the code
-links into both kernels but is not called on boot.
+Wired into the boot path (a one-shot `ping 10.0.2.2`) and the shell (`ping`).
 
 ### virtio_net_hdr
 
@@ -328,7 +327,7 @@ bool virtio_net_available(void);
 void virtio_net_get_mac(uint8_t out_mac[6]);
 
 /* Acquire/release the driver's net_lock - the SAME lock net_tx/net_rx_poll use.
- * The src/net/ stack guards its pending-ping state through this (criterion 4).
+ * The src/net/ stack guards its pending-ping state through this.
  * Non-recursive: do not call net_tx/net_rx_poll while holding it. */
 void net_lock_acquire(void);
 void net_lock_release(void);
@@ -373,7 +372,7 @@ never hangs the prompt.
 
 After the probe, `kernel_main` runs a one-shot boot-path `ping 10.0.2.2` demo
 (mirroring the `/hello` EL0 demo's log-and-continue discipline): on a reply it
-logs `ping 10.0.2.2: reply` (the criterion-3 serial proof alongside the MAC),
+logs `ping 10.0.2.2: reply` (the serial proof alongside the MAC),
 and on a timeout or an absent device it warns once and continues - boot always
 reaches the window manager loop. It is gated on the device being present and
 runs exactly once, so a normal boot is not spammy.
