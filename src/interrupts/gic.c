@@ -138,7 +138,7 @@ void gic_init(void)
  * and the distributor enable - is GLOBAL and configured exactly once by the
  * primary's gic_init. A secondary re-running any distributor write would
  * re-disable/reconfigure it mid-flight and break the primary's timer and device
- * IRQs (RESEARCH Pitfall 5). Call from secondary_main on each secondary.
+ * IRQs. Call from secondary_main on each secondary.
  */
 void gic_init_secondary(void)
 {
