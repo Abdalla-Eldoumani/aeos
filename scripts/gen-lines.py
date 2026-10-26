@@ -25,7 +25,7 @@ import sys
 import os
 
 # The kernel base (linker.ld ORIGIN). addr_off is the PC minus this so it fits
-# a uint32_t in the packed entry; 09-05's lookup keys on lr - TEXT_BASE.
+# a uint32_t in the packed entry; line_lookup keys on lr - TEXT_BASE.
 TEXT_BASE = 0x40000000
 
 # The packed-entry field widths cap the table. A future kernel that exceeds any
