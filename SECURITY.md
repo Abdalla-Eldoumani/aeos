@@ -26,7 +26,7 @@ These are the invariants that, if broken, count as bugs worth reporting:
 - **Frame-pointer-walking backtrace** does not dereference out-of-range addresses. It bounds-checks every saved FP against `[_kernel_start, __stack_top)` before reading.
 - **Persistence formats reject corrupted files.** Tetris's `/tetris_high.bin` and the ramfs save format both refuse to load on bad magic, version mismatch, or checksum failure, and fall back to defaults.
 
-The 13.B security audit added three more defended invariants:
+The security hardening pass added three more defended invariants:
 
 - **Kernel stack overflow is detected.** A magic sentinel at the bottom of the boot stack is checked on every exception entry and timer tick; a clobbered sentinel triggers a deterministic `klog_fatal` naming the offending PC instead of silently corrupting BSS.
 - **Allocation paths reject pathologically large inputs.** The editor refuses a line-array growth whose byte size would overflow, and the VFS rejects a path over `VFS_PATH_MAX` or a component over `MAX_FILENAME_LEN - 1` before allocating, so attacker-influenced shell input cannot drive an undersized buffer or an unbounded `kmalloc`.
@@ -34,25 +34,25 @@ The 13.B security audit added three more defended invariants:
 
 ### Invariant sign-off
 
-Each invariant below is proven by an automated scenario in the in-kernel test runner (`src/kernel/test_runner.c`) and gated by `make audit`, or by a named code review. SEC-01 through SEC-07 are the invariants the 13.B hardening pass closed; the rows below SEC-07 are the security-relevant invariants the Phase 6-9 feature work (the ELF loader, SMP, the net stack, and the Phase 9 polish) added. The verification column names the scenario or the review check. The current suite is 39 scenarios, `39 PASSED, 0 FAILED` under `-smp 4` with the net device.
+Each invariant below is proven by an automated scenario in the in-kernel test runner (`src/kernel/test_runner.c`) and gated by `make audit`, or by a named code review. SEC-01 through SEC-07 are the invariants the hardening pass closed; the rows below SEC-07 are the security-relevant invariants the feature work (the ELF loader, SMP, the net stack, and the clock, backtrace, and history work) added. The verification column names the scenario or the review check. The current suite is 39 scenarios, `39 PASSED, 0 FAILED` under `-smp 4` with the net device.
 
 | ID | Invariant | Verification | Closed |
 |----|-----------|--------------|--------|
-| SEC-01 | Kernel stack overflow is detected and panics naming the PC | `make audit` / `test_sec_stack_guard` | 13.B |
-| SEC-02 | Editor line-array growth overflow is refused, buffer intact | `make audit` / `test_sec_editor_growth_overflow` | 13.B |
-| SEC-03 | VFS path over the length bound or with an over-long component is rejected before allocation | `make audit` / `test_sec_vfs_path_too_long` | 13.B |
-| SEC-04 | kprintf crash-dump ring interleave invariant documented, write barrier in place | code review of `kprintf.c` (`dmb ish` after the ring store, DAIF-mask invariant documented) | 13.B |
-| SEC-05 | inode refcount increment is ordered before the inode is handed out | code review of `vfs.c` (`dmb ish` between `refcount++` and `vfs_fd_alloc`); existing VFS open scenarios | 13.B |
-| SEC-06 | Heap magic re-stamped on split/merge/shrink; `kfree` refuses a wrong-magic pointer | `make audit` / `test_sec_double_free_after_merge`, `test_sec_kcalloc_overflow` | 13.B |
-| SEC-07 | `process_create` copies the name into a fixed PCB buffer, not the caller pointer | `make audit` / `test_process_create_remove` (mutate-after-create) | 13.B |
-| SEC-09 | The ELF loader rejects a malformed or non-ELF file rather than faulting (`elf_validate` reads every field behind the size gate; the phdr-table extent is computed overflow-safe in `uint64_t`) | `make audit` / `test_elf_reject_malformed` | Phase 6 (FEAT-03) |
-| SEC-10 | Loaded segments and the EL0 stack are bounds-checked against `USER_L3_TOP` (the real 2 MB mapping ceiling), required strictly ascending and non-overlapping; a segment past the window is rejected before any page is mapped | `make audit` / `test_elf_reject_oversized_segment` (a 3 MB-spanning PT_LOAD is refused with no leaked pmm pages) | Phase 6 (FEAT-03, review CR-01/CR-03) |
-| SEC-11 | The loader's page tracker fails closed: reaching the page-count ceiling rejects the run and frees every mapped page rather than leaking past the cap | code review of `exec.c` (`free_mapped_pages` on every error path; `mapped_pas[]` sized to the real ceiling) | Phase 6 (FEAT-03, review CR-02) |
-| SEC-12 | `sys_write` from EL0 bound-checks the user buffer against the mapped window (range plus `ptr+len` overflow) before any dereference; the check is gated on `el0_oneshot_active()` so the EL1 direct-call path is unaffected | code review of `syscall.c` (`is_user_range` gate); the EL0 round-trip scenarios | Phase 6 (FEAT-03) |
-| SEC-13 | The scheduler runqueue, the kprintf crash-dump ring, and the net RX/TX queues are spinlock-protected for cross-core safety (SEC-04's deferred "real lock on the ring" is now discharged under SMP) | `make audit` / `test_spinlock_uncontended`, `test_smp_runqueue_lock`, `test_kprintf_ring_panic_bypass` (the panic-path trylock-or-bypass does not deadlock) | Phase 7 (FEAT-04) |
-| SEC-14 | `net_rx_dispatch` bounds-checks every attacker-influenced field before indexing and drops on any inconsistency, including the lower bound on `total_length` that prevents the `icmp_len` unsigned underflow | `make audit` / `test_net_rx_bounds` (sub-Ethernet, sub-ARP, oversized-IHL, and underflow frames all return without faulting) | Phase 8 (FEAT-05, review CR-01) |
-| SEC-15 | `history_load` validates magic, version, count, and record length before indexing any record, falling back to an empty ring on a missing, foreign, or malformed image so the boot path never hangs or faults | `make audit` / `test_history_persist_roundtrip` | Phase 9 (FEAT-06) |
-| SEC-16 | `line_lookup` writes an empty string on an empty table, a below-base address, a below-first key, or a miss; `snprintf`'s buffer size caps the file:line copy, so the panic-path backtrace never reads out of range | `make audit` / `test_backtrace_fileline`; code review of `backtrace.c` | Phase 9 (FEAT-06) |
+| SEC-01 | Kernel stack overflow is detected and panics naming the PC | `make audit` / `test_sec_stack_guard` | Hardening pass |
+| SEC-02 | Editor line-array growth overflow is refused, buffer intact | `make audit` / `test_sec_editor_growth_overflow` | Hardening pass |
+| SEC-03 | VFS path over the length bound or with an over-long component is rejected before allocation | `make audit` / `test_sec_vfs_path_too_long` | Hardening pass |
+| SEC-04 | kprintf crash-dump ring interleave invariant documented, write barrier in place | code review of `kprintf.c` (`dmb ish` after the ring store, DAIF-mask invariant documented) | Hardening pass |
+| SEC-05 | inode refcount increment is ordered before the inode is handed out | code review of `vfs.c` (`dmb ish` between `refcount++` and `vfs_fd_alloc`); existing VFS open scenarios | Hardening pass |
+| SEC-06 | Heap magic re-stamped on split/merge/shrink; `kfree` refuses a wrong-magic pointer | `make audit` / `test_sec_double_free_after_merge`, `test_sec_kcalloc_overflow` | Hardening pass |
+| SEC-07 | `process_create` copies the name into a fixed PCB buffer, not the caller pointer | `make audit` / `test_process_create_remove` (mutate-after-create) | Hardening pass |
+| SEC-09 | The ELF loader rejects a malformed or non-ELF file rather than faulting (`elf_validate` reads every field behind the size gate; the phdr-table extent is computed overflow-safe in `uint64_t`) | `make audit` / `test_elf_reject_malformed` | FEAT-03 |
+| SEC-10 | Loaded segments and the EL0 stack are bounds-checked against `USER_L3_TOP` (the real 2 MB mapping ceiling), required strictly ascending and non-overlapping; a segment past the window is rejected before any page is mapped | `make audit` / `test_elf_reject_oversized_segment` (a 3 MB-spanning PT_LOAD is refused with no leaked pmm pages) | FEAT-03 (with review fixes) |
+| SEC-11 | The loader's page tracker fails closed: reaching the page-count ceiling rejects the run and frees every mapped page rather than leaking past the cap | code review of `exec.c` (`free_mapped_pages` on every error path; `mapped_pas[]` sized to the real ceiling) | FEAT-03 (with review fixes) |
+| SEC-12 | `sys_write` from EL0 bound-checks the user buffer against the mapped window (range plus `ptr+len` overflow) before any dereference; the check is gated on `el0_oneshot_active()` so the EL1 direct-call path is unaffected | code review of `syscall.c` (`is_user_range` gate); the EL0 round-trip scenarios | FEAT-03 |
+| SEC-13 | The scheduler runqueue, the kprintf crash-dump ring, and the net RX/TX queues are spinlock-protected for cross-core safety (SEC-04's deferred "real lock on the ring" is now discharged under SMP) | `make audit` / `test_spinlock_uncontended`, `test_smp_runqueue_lock`, `test_kprintf_ring_panic_bypass` (the panic-path trylock-or-bypass does not deadlock) | FEAT-04 |
+| SEC-14 | `net_rx_dispatch` bounds-checks every attacker-influenced field before indexing and drops on any inconsistency, including the lower bound on `total_length` that prevents the `icmp_len` unsigned underflow | `make audit` / `test_net_rx_bounds` (sub-Ethernet, sub-ARP, oversized-IHL, and underflow frames all return without faulting) | FEAT-05 (with review fixes) |
+| SEC-15 | `history_load` validates magic, version, count, and record length before indexing any record, falling back to an empty ring on a missing, foreign, or malformed image so the boot path never hangs or faults | `make audit` / `test_history_persist_roundtrip` | FEAT-06 |
+| SEC-16 | `line_lookup` writes an empty string on an empty table, a below-base address, a below-first key, or a miss; `snprintf`'s buffer size caps the file:line copy, so the panic-path backtrace never reads out of range | `make audit` / `test_backtrace_fileline`; code review of `backtrace.c` | FEAT-06 |
 
 ## Reporting an issue
 
