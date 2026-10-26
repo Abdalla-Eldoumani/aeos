@@ -42,7 +42,7 @@ This section implements preemptive multitasking for AEOS with a round-robin sche
 ### Loaded EL0 Programs
 A loaded ELF runs at EL0, synchronously, one at a time. `elf_exec_file` reads a static ELF off the VFS, maps its segments into the EL0 user window (executable segments read-only for per-segment W^X, see Section 02), maps an EL0 stack, and enters the program at EL0. The program reaches the kernel only through a trapped `svc`, and a privileged instruction from EL0 faults to EL1.
 
-While it runs, the program holds a registry PCB: it shows up in `ps`, and `kill <pid>` arms a flag that the next `svc` honors, reaping the run. The first EL0 path was the Phase 5 one-shot in-kernel payload that proved the privilege boundary; the loaded-from-a-file program is the Phase 6 ELF loader built on the same `usermode_enter` mechanism.
+While it runs, the program holds a registry PCB: it shows up in `ps`, and `kill <pid>` arms a flag that the next `svc` honors, reaping the run. The first EL0 path was the one-shot in-kernel payload that proved the privilege boundary; the loaded-from-a-file program is the ELF loader built on the same `usermode_enter` mechanism.
 
 The honest scope: the loaded program runs on the current EL1 stack and is never enqueued in the scheduler, so the dormant scheduler stays asleep. `kill` reaps a registered process at its next `svc`, which the headless test suite proves; interactive "kill from a second prompt while the program runs mid-flight" is not delivered, because the program runs to completion before the prompt returns. Cross-core scheduling stays out of scope (see the SMP section).
 
@@ -280,7 +280,7 @@ The current implementation assumes single-threaded execution during initializati
 
 The kill flag is honored at the EL0 syscall boundary, against the loaded program's PCB rather than `process_current()` (which is idle throughout the synchronous one-shot). A kill-armed run is reaped at its next `svc`, before that syscall dispatches.
 
-## SMP bringup (Phase 7)
+## SMP bringup
 
 The QEMU virt board boots with four cortex-a57 cores. The primary core (0) runs `kernel_main`; the other three start powered off. `smp_init` brings them online:
 
