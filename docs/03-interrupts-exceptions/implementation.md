@@ -100,7 +100,7 @@ el1_spx_sync:
 
 ### SVC from EL0
 
-`el0_aarch64_sync` (VBAR+0x400, lower-EL AArch64 synchronous) carries the svc-decode block, a verbatim copy of the proven `el1_spx_sync` decode: check ESR_EL1 EC=0x15, pull the syscall number (x8) and arguments (x0-x5) from the saved register frame, `bl syscall_handler`, store the return value back into the frame's x0 slot, then `RESTORE_CONTEXT; eret`. The `eret` returns to EL0 because the saved SPSR is EL0t, not because of anything in the handler. The non-SVC branch routes through `handle_el0_sync` (in `src/proc/usermode.c`): a trapped privileged instruction from EL0 (such as `msr daifset`, EC=0x18) is recorded for the test seam when armed, and otherwise reported through the halting `handle_exception`. This is the Phase 5 EL0/EL1 boundary; see Section 05.
+`el0_aarch64_sync` (VBAR+0x400, lower-EL AArch64 synchronous) carries the svc-decode block, a verbatim copy of the proven `el1_spx_sync` decode: check ESR_EL1 EC=0x15, pull the syscall number (x8) and arguments (x0-x5) from the saved register frame, `bl syscall_handler`, store the return value back into the frame's x0 slot, then `RESTORE_CONTEXT; eret`. The `eret` returns to EL0 because the saved SPSR is EL0t, not because of anything in the handler. The non-SVC branch routes through `handle_el0_sync` (in `src/proc/usermode.c`): a trapped privileged instruction from EL0 (such as `msr daifset`, EC=0x18) is recorded for the test seam when armed, and otherwise reported through the halting `handle_exception`. This is the EL0/EL1 boundary; see Section 05.
 
 ### Exception Counters
 
