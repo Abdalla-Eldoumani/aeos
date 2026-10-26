@@ -1863,7 +1863,7 @@ static int cmd_run_elf(int argc, char **argv)
  *
  * Parses a decimal PID (no libc strtoull; rejects non-digit input) and calls
  * process_kill, which sets kill_requested on the matching registry PCB. The flag
- * is honored at the target's next EL0 syscall boundary (Scope B: a registered
+ * is honored at the target's next EL0 syscall boundary (a registered
  * process is reaped at its next svc, not preemptively from a second prompt).
  */
 static int cmd_kill(int argc, char **argv)
@@ -1881,7 +1881,7 @@ static int cmd_kill(int argc, char **argv)
         }
         /* Reject before the accumulate would wrap uint64_t (no UINT64_MAX in
          * this tree, so the ((uint64_t)-1) idiom the editor guards use). A
-         * wrapped pid could collide with a real registered pid (WR-04). */
+         * wrapped pid could collide with a real registered pid. */
         if (pid > (((uint64_t)-1) - 9) / 10) {
             kprintf("kill: pid '%s' out of range\n", argv[1]);
             return -1;
@@ -1912,7 +1912,7 @@ static int cmd_kill(int argc, char **argv)
  * The bound lives entirely inside net_ping (a uptime-ms deadline in production,
  * a spin-count under TEST_BUILD), so this command does NO waiting itself: it
  * calls net_ping once and prints reply/timeout/no-device. It NEVER loops or
- * hangs the prompt (T-08-11).
+ * hangs the prompt.
  */
 static int cmd_ping(int argc, char **argv)
 {
@@ -1922,7 +1922,7 @@ static int cmd_ping(int argc, char **argv)
         /* Parse exactly four octets split on '.', each digit-only and 0-255.
          * Reject non-digits, an octet > 255, and a wrong dot count (missing or
          * extra) - the cmd_kill range-guard idiom adapted to four fields, so a
-         * malformed arg can never produce a wrong address or overflow (T-08-14). */
+         * malformed arg can never produce a wrong address or overflow. */
         const char *c = argv[1];
         int octet_idx = 0;
         for (;;) {
