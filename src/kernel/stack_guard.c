@@ -8,7 +8,7 @@
 #include <aeos/kprintf.h>
 #include <aeos/symbols.h>
 
-/* No MMU until Phase 4, so a faulting guard page is unavailable. The boot stack
+/* The boot stack predates the MMU, so a faulting guard page is unavailable. The boot stack
  * instead carries a magic word at its bottom (__stack_limit, stamped by
  * boot.asm). Overflow grows the stack pointer down past the bottom and
  * overwrites the word. The check is split so a non-destructive test can read
