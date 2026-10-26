@@ -39,8 +39,8 @@ static inline uint16_t rbe16(const uint8_t *p)
 }
 
 /* 16-bit one's-complement Internet checksum. Probe-validated for BOTH the
- * 20-byte IPv4 header and the 8-byte ICMP message (08-RESEARCH Q3). Pure: no
- * I/O, no statics - so 08-04's RED gate can assert a known frame's checksum
+ * 20-byte IPv4 header and the 8-byte ICMP message. Pure: no I/O, no statics -
+ * so a unit test can assert a known frame's checksum
  * directly. Zero the checksum field before calling, then store the result
  * big-endian into it. */
 uint16_t inet_csum(const uint8_t *data, uint32_t len)
@@ -61,8 +61,8 @@ uint16_t inet_csum(const uint8_t *data, uint32_t len)
 }
 
 /* Build an opcode-2 ARP reply for a valid inbound request. PURE - no net_tx,
- * no logging - so 08-04's test_net_arp_reply can feed a synthetic request and
- * assert the exact reply bytes (the non-vacuous criterion-2 proof; slirp never
+ * no logging - so test_net_arp_reply can feed a synthetic request and
+ * assert the exact reply bytes (the non-vacuous ARP proof; slirp never
  * ARPs the guest, so the builder unit is the direct proof).
  *
  * Returns WITHOUT writing (0) unless the input is a well-formed ARP request for
@@ -121,7 +121,7 @@ static const uint8_t our_ip[IP_ADDR_LEN] = { OUR_IP_0, OUR_IP_1, OUR_IP_2, OUR_I
 
 /* Shared net-path state, ALWAYS read/written under the driver's net_lock (the
  * SAME lock net_tx/net_rx_poll use over the queue cursors - reached through
- * net_lock_acquire/release; criterion 4). This is NOT a second lock. The RX
+ * net_lock_acquire/release). This is NOT a second lock. The RX
  * dispatch updates these on a matching reply; arp_resolve/net_ping read them. */
 static volatile bool    arp_pending  = false;       /* a resolve is waiting */
 static uint8_t          arp_want_ip[IP_ADDR_LEN];    /* the IP it awaits */
@@ -137,7 +137,7 @@ static volatile bool    ping_got     = false;       /* set on a matched reply */
  * (CNTVCT-backed; advances even when ticks are starved). The TEST kernel has no
  * timer, so it uses a spin-count bound (the probe used ~50M spins, well under
  * the 30s make-test timeout). Either way the wait is FINITE - on expiry the
- * caller returns -1, never an infinite loop (T-08-08). */
+ * caller returns -1, never an infinite loop. */
 #define NET_WAIT_MS     2000u            /* production deadline */
 #define NET_WAIT_SPINS  50000000u        /* TEST_BUILD spin bound */
 
@@ -179,7 +179,7 @@ static void net_handle_arp(const uint8_t *frame, uint32_t len)
 
     if (op == ARP_OP_REPLY) {
         /* Cache the sender MAC only if a resolve is awaiting this sender IP
-         * (anti-spoof, T-08-09). The compare + set is under net_lock so it is
+         * (anti-spoof). The compare + set is under net_lock so it is
          * consistent with the queue cursors; no net_tx is called here, so the
          * lock is never held across a primitive. */
         const uint8_t *sender_ip  = arp + ARP_OFF_SENDER_IP;
@@ -200,7 +200,7 @@ static void net_handle_arp(const uint8_t *frame, uint32_t len)
  * PRECEDES it: 14+20 for the IPv4 header, IHL*4 >= 20 and 14+ihl_bytes <= len
  * and 14+total_length <= len before the ICMP payload, and 14+ihl_bytes+8 <= len
  * before the ICMP fields. Any inconsistency DROPS (returns) - never indexes
- * past len (T-08-07). */
+ * past len. */
 static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
 {
     /* Need the fixed 20-byte IPv4 header before reading ver/IHL, proto, etc. */
@@ -294,7 +294,7 @@ static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
     }
 
     if (type == ICMP_TYPE_ECHO_REPLY) {
-        /* Match against the pending ping (id AND seq, T-08-09) under net_lock -
+        /* Match against the pending ping (id AND seq) under net_lock -
          * the brief read/compare/set, consistent with the queue cursors. No
          * net_tx here, so the lock is never held across a primitive. */
         uint16_t id  = rbe16(icmp + ICMP_OFF_ID);
@@ -310,7 +310,7 @@ static void net_handle_ipv4(const uint8_t *frame, uint32_t len)
 
 /* Parse one inbound Ethernet frame. The FIRST guard (len >= 14) precedes the
  * ethertype read; the per-protocol handlers guard their own fields. A malformed
- * or short frame is DROPPED here, never indexed past (T-08-07). */
+ * or short frame is DROPPED here, never indexed past. */
 void net_rx_dispatch(const uint8_t *frame, uint32_t len)
 {
     if (len < ETH_HDR_LEN) {
