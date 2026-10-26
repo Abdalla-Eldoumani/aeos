@@ -2,7 +2,7 @@
  * AEOS - Abdalla's Educational Operating System
  * File: include/aeos/smp.h
  * Description: SMP bringup contract - PSCI CPU_ON constants, smp_init, and the
- *              secondary-core entry / online-flag seam (PSCI multi-core, Phase 7)
+ *              secondary-core entry / online-flag seam (PSCI multi-core)
  * ============================================================================ */
 
 #ifndef AEOS_SMP_H
@@ -32,12 +32,12 @@
 /* Bring up secondaries 1..SMP_MAX_CPUS-1 via PSCI CPU_ON with a BOUNDED
  * handshake. A CPU_ON that returns nonzero, or a secondary that never sets its
  * online flag within SMP_BRINGUP_TIMEOUT spins, is logged and SKIPPED - never
- * fatal. The primary always returns. Intended to be called from kernel_main
- * AFTER gic_init/timer_init (wired in a later plan); nothing calls it yet. */
+ * fatal. The primary always returns. Called from kernel_main AFTER
+ * gic_init/timer_init. */
 void smp_init(void);
 
 /* The per-core entry point a secondary lands at when PSCI CPU_ON powers it on.
- * DEFINED in src/boot/secondary.asm (a later plan): it drops EL2->EL1, sets the
+ * DEFINED in src/boot/secondary.asm: it drops EL2->EL1, sets the
  * per-core SP from the context_id PSCI passes in x0, and calls secondary_main.
  * smp_init only takes its address as the CPU_ON entry argument. The secondary
  * starts with the MMU OFF, so that address must be a PHYSICAL address - it is,
@@ -48,7 +48,7 @@ extern void secondary_entry(void);
  * the per-core SP set. In production it enables the per-core MMU against the
  * primary's shared tables, programs the per-core GIC CPU interface, sets
  * VBAR_EL1, then signals online (smp_mark_online) and parks in wfe - the
- * bounded-scope idle/report loop. The full MMU/GIC body lands in a later plan. */
+ * bounded-scope idle/report loop. */
 void secondary_main(void);
 
 /* The online-flag seam. A secondary calls smp_mark_online(smp_cpu_id()) AFTER
@@ -61,7 +61,7 @@ uint32_t smp_is_online(uint32_t cpu);
 
 /* Register a per-core idle marker ("idle/cpuN", a registry-only killable=false
  * PCB) on the enumeration registry so ps lists a process for each online core
- * (criterion-3 visibility; the CPU column is a later plan). CALLED FROM THE
+ * (per-core visibility; ps also shows a CPU column). CALLED FROM THE
  * PRIMARY ONLY - it kmallocs, and the heap is not thread-safe, so secondaries
  * (which only park in wfe) never call it. Registry-only: NOT enqueued, so
  * ready_head stays NULL and the dormant scheduler is not woken. A kmalloc
@@ -69,7 +69,7 @@ uint32_t smp_is_online(uint32_t cpu);
 void smp_register_core_idle(uint32_t cpu);
 
 #ifdef TEST_BUILD
-/* TEST_BUILD cross-core runqueue stress seam (criterion 2 proof). Brings up the
+/* TEST_BUILD cross-core runqueue stress seam (the runqueue-lock proof). Brings up the
  * secondaries in stress mode - each does the EL2->EL1 drop + vmm_enable_secondary
  * (MMU on, REQUIRED for the cross-core exclusive monitor) + a per-core stack, but
  * SKIPS gic_init_secondary (the TEST GICD is unconfigured; a memory stress needs
