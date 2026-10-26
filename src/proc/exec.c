@@ -6,7 +6,7 @@
  *              each PT_LOAD into the single EL0 window (USER_TEXT for PF_X code,
  *              USER_DATA otherwise) with BSS zero-fill, maps a fresh EL0 stack
  *              above the highest segment, and enters EL0 at e_entry by reusing
- *              the proven Phase 5 usermode_enter one-shot (NOT
+ *              the proven usermode_enter one-shot (NOT
  *              usermode_run_payload, which hardcodes the compile-time payload
  *              VAs). The reject-never-fault discipline of elf_validate is
  *              continued by per-segment bounds checks before any page is mapped.
@@ -36,8 +36,8 @@
 
 /* The single 2MB region the loader can actually map. vmm_map_user_page backs the
  * window with ONE static user_l3[512] = 512 pages = 2MB at [0x80000000,
- * 0x80200000). Two VAs in different 2MB regions collapse onto the same L3 leaf
- * (CR-01/CR-03), so the loader rejects any segment or stack page reaching past
+ * 0x80200000). Two VAs in different 2MB regions collapse onto the same L3
+ * leaf, so the loader rejects any segment or stack page reaching past
  * this ceiling. The 1GB L1 window is NOT the mappable extent - only this 2MB L3
  * is. The advertised USER_WINDOW_TOP (0xC0000000) was a correctness trap: it let
  * the validator accept p_memsz the mapper could not honor. It is retired; all
@@ -63,7 +63,7 @@ static process_t *current_user_proc;
  * most 512 segment pages + 1 stack page, so the array is sized to the real
  * capacity and the tracker FAILS CLOSED (rejects the run) if it would ever
  * overflow, rather than silently dropping a page off the free list (the old
- * cap-and-drop leaked every page past the cap, CR-02). */
+ * cap-and-drop leaked every page past the cap). */
 #define EXEC_MAX_USER_PAGES 512
 static uint64_t mapped_pas[EXEC_MAX_USER_PAGES + 1];   /* +1 for the stack page */
 static unsigned mapped_count;
@@ -97,7 +97,7 @@ uint64_t usermode_map_end(void)
 
 /* Return every tracked page to the pmm and reset the count. Called on every
  * error path after the first page is mapped, and after a completed run, so a
- * reject never leaks the segment/stack pages it already allocated (CR-02). */
+ * reject never leaks the segment/stack pages it already allocated. */
 static void free_mapped_pages(void)
 {
     for (unsigned k = 0; k < mapped_count; k++) {
@@ -112,11 +112,11 @@ static inline uint64_t round_up_page(uint64_t va)
     return (va + 0xFFFULL) & ~0xFFFULL;
 }
 
-/* One-at-a-time guard (WR-02). The loader's window/page state (user_map_base/
+/* One-at-a-time guard. The loader's window/page state (user_map_base/
  * end, mapped_pas[], mapped_count, current_user_proc) is file-static and not
  * re-entrancy safe: a nested elf_exec_file would reset mapped_count and the
  * outer cleanup would then free the inner run's pages and leak its own. The
- * Scope B model is documented one-at-a-time; this flag fails closed on re-entry
+ * synchronous-run model is documented one-at-a-time; this flag fails closed on re-entry
  * instead of silently corrupting that state. Set/cleared at a SINGLE point by
  * the elf_exec_file wrapper around elf_exec_file_inner so every inner return
  * path clears it. */
@@ -186,7 +186,7 @@ static int elf_exec_file_inner(const char *path)
         return -4;
     }
 
-    /* 4. Header gate (criterion 1 via the real loader). elf_validate already
+    /* 4. Header gate (the reject path via the real loader). elf_validate already
      * logged the specific reason; never maps anything on failure. */
     if (elf_validate(buf, size) != 0) {
         klog_error("exec: %s is not a loadable static AArch64 ELF64", path);
@@ -229,7 +229,7 @@ static int elf_exec_file_inner(const char *path)
         /* Window bounds (overflow-safe). The mappable region is the single 2MB
          * L3 [USER_WINDOW_BASE, USER_L3_TOP), NOT the 1GB L1 window: a segment
          * crossing USER_L3_TOP would alias an earlier 2MB band's L3 leaf and run
-         * a corrupt mapping at EL0 (CR-01). Reject below the base or past the
+         * a corrupt mapping at EL0. Reject below the base or past the
          * real ceiling, and reject the vaddr+memsz unsigned overflow. */
         if (vaddr < USER_WINDOW_BASE || vaddr + memsz < vaddr ||
             vaddr + memsz > USER_L3_TOP) {
@@ -238,7 +238,7 @@ static int elf_exec_file_inner(const char *path)
             kfree(buf);
             return -13;
         }
-        /* Segments must be strictly ascending and non-overlapping (WR-01).
+        /* Segments must be strictly ascending and non-overlapping.
          * top_seg_end is the rounded-up end of the previous mapped segment
          * (starts at USER_WINDOW_BASE). Rejecting vaddr < top_seg_end stops two
          * PT_LOADs from double-mapping a page (the second leaf would clobber the
@@ -250,8 +250,8 @@ static int elf_exec_file_inner(const char *path)
             kfree(buf);
             return -14;
         }
-        /* Page-aligned p_vaddr only this phase (the in-scope binary is aligned;
-         * the unaligned general case is deferred per RESEARCH). */
+        /* Page-aligned p_vaddr only for now (the in-scope binary is aligned;
+         * the unaligned general case is deferred). */
         if ((vaddr & 0xFFFULL) != 0) {
             klog_error("exec: %s segment %u unaligned vaddr unsupported this phase", path, i);
             free_mapped_pages();
@@ -275,7 +275,7 @@ static int elf_exec_file_inner(const char *path)
          * write into the wrong physical page. */
         uint64_t copied = 0;
         for (uint64_t p = 0; p < pages; p++) {
-            /* Fail closed if tracking would overflow (CR-02): the 2MB ceiling
+            /* Fail closed if tracking would overflow: the 2MB ceiling
              * caps a valid run at 512 segment pages + 1 stack page, so reaching
              * the array bound means a check above was bypassed. Reject and free
              * rather than allocate a page we could not record and would leak. */
@@ -317,7 +317,7 @@ static int elf_exec_file_inner(const char *path)
 
     /* 6. EL0 stack one page ABOVE the highest segment (computed, never the
      * hardcoded 0x80001000 which would collide with a data segment). The stack
-     * page must also fit inside the single 2MB L3 (CR-03): if the top segment
+     * page must also fit inside the single 2MB L3: if the top segment
      * reached USER_L3_TOP the stack would land in a different 2MB band and alias
      * a segment's L3 leaf, so SP_EL0's first push would clobber code/data or
      * fault. Reject before mapping it. */
