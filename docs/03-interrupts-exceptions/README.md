@@ -63,7 +63,7 @@ On a clobbered sentinel `stack_guard_check` reports a `klog_fatal` naming the PC
   - IRQ/FIQ routing
   - Exception counters for debugging
 
-The kernel's own syscalls do not trap through the synchronous vector - they are direct C function-call table lookups (see Section 05). But the EL0 synchronous vector entry (`el0_aarch64_sync`, VBAR+0x400) DOES decode `svc` from EL0 and route it through the same dispatcher: this is the Phase 5 privilege boundary. Its non-SVC branch handles trapped privileged instructions from EL0 (for example `msr daifset`, which faults with EC=0x18) via a seam that records the fault for tests and otherwise reports it through the normal halting path.
+The kernel's own syscalls do not trap through the synchronous vector - they are direct C function-call table lookups (see Section 05). But the EL0 synchronous vector entry (`el0_aarch64_sync`, VBAR+0x400) DOES decode `svc` from EL0 and route it through the same dispatcher: this is the EL0 privilege boundary. Its non-SVC branch handles trapped privileged instructions from EL0 (for example `msr daifset`, which faults with EC=0x18) via a seam that records the fault for tests and otherwise reports it through the normal halting path.
 
 ### Exception Handlers (exceptions.c)
 - **Location**: `src/interrupts/exceptions.c`
@@ -181,11 +181,11 @@ void gic_set_priority(uint32_t irq, uint8_t priority);
 uint32_t gic_acknowledge_irq(void);
 void gic_end_of_irq(uint32_t irq);
 
-/* Per-core CPU interface init for an SMP secondary (Phase 7) */
+/* Per-core CPU interface init for an SMP secondary */
 void gic_init_secondary(void);
 ```
 
-`gic_init` owns the global distributor and is run once by the primary. `gic_init_secondary` (Phase 7) is the per-core half: each secondary core enables its own banked GICC (priority mask, binary point, CPU-interface enable) and touches no distributor register, so it cannot reconfigure the primary's group assignments or IRQ targeting mid-flight. It is called from `secondary_main` during SMP bringup.
+`gic_init` owns the global distributor and is run once by the primary. `gic_init_secondary` is the per-core half: each secondary core enables its own banked GICC (priority mask, binary point, CPU-interface enable) and touches no distributor register, so it cannot reconfigure the primary's group assignments or IRQ targeting mid-flight. It is called from `secondary_main` during SMP bringup.
 
 ### Timer Functions
 
