@@ -16,7 +16,7 @@ Bullet list of the meaningful changes. Group by file or by subsystem, not by com
 - [ ] `make test` reports `N PASSED, 0 FAILED` (paste the actual line).
 - [ ] No new `TODO`/`FIXME`/`XXX`/`HACK` markers — `grep -rn 'TODO\|FIXME\|XXX\|HACK' --include='*.c' --include='*.h' --include='*.asm' src/ include/` returns nothing.
 - [ ] If this touches a UI path, manually exercised in `make run-ramfb` and a screenshot is attached.
-- [ ] Subsystem `CLAUDE.md` and matching `docs/` section reflect the change.
+- [ ] The matching `docs/` section (and `ARCHITECTURE.md`, if boot order or data flow changed) reflects the change.
 - [ ] Commit history is one-file-per-commit, lowercase imperative messages.
 
 ### Screenshot
