@@ -23,7 +23,7 @@
 void vmm_init(void);
 
 /**
- * Enable the MMU + caches on a SECONDARY core against the SHARED Phase-4 tables.
+ * Enable the MMU + caches on a SECONDARY core against the SHARED boot-time tables.
  * Factored from vmm_enable: it programs only the per-core enabling registers
  * (MAIR/TCR/TTBR0/TTBR1/SCTLR) and reuses the global L1 tables the primary built
  * in vmm_init - it does NOT rebuild them. The TCR (including the load-bearing
@@ -54,7 +54,7 @@ uint32_t vmm_ttbr1_alias_read(uint64_t pa);
  * Protection class for an EL0 user page. All classes set PXN=1 (EL1 must never
  * execute user memory). They differ in AP[2:1] and UXN:
  *   USER_EXEC - AP=01 (EL0 RW), UXN=0: EL0 may fetch-and-execute AND write the
- *               page. Kept for the Phase 5 one-shot payloads, which map a
+ *               page. Kept for the one-shot EL0 payloads, which map a
  *               compile-time code page in place and need it EL0-writable; NOT
  *               W^X.
  *   USER_DATA - AP=01 (EL0 RW), UXN=1: the page is never executed at any EL
@@ -71,8 +71,8 @@ typedef enum { USER_EXEC, USER_DATA, USER_TEXT } user_prot_t;
 /**
  * Map a single 4KB EL0-accessible page at user VA uva to physical page pa with
  * the given protection. Builds an L1->L2->L3 walk chain at the FREE L1 index for
- * uva (only the single VA 0x80000000 1GB window is supported this phase: index 2,
- * which the Phase 4 identity map leaves invalid). The kernel RAM block (L1 index
+ * uva (only the single VA 0x80000000 1GB window is supported: index 2,
+ * which the identity map leaves invalid). The kernel RAM block (L1 index
  * 1) and MMIO block (index 0) are NOT touched, so EL0 still faults on every kernel
  * VA via their AP=00. Ends with dsb ish; tlbi vmalle1; dsb ish; isb so the live
  * table walk sees the new entries and the I-side is coherent for a code page.
