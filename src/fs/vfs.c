@@ -492,7 +492,7 @@ int vfs_open(const char *path, uint32_t flags, uint32_t mode)
      * the fd table. This release barrier orders the increment ahead of the
      * handoff so no consumer can observe the handle with a stale count. It
      * matters under -O2 reordering today and on SMP later; a full atomic
-     * refcount is deferred to the SMP phase. */
+     * refcount is deferred to later SMP work. */
     __asm__ volatile("dmb ish" ::: "memory");
 
     /* Allocate file descriptor */
