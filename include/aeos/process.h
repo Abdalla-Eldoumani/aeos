@@ -82,7 +82,7 @@ typedef struct process {
     bool killable;                  /* Only a user_proc_register'd EL0 run is
                                      * killable. process_create leaves this false
                                      * so process_kill refuses idle (PID 1) and
-                                     * kernel threads (WR-03). */
+                                     * kernel threads. */
     uint32_t last_cpu;              /* The cpu id this process last ran on / was
                                      * last touched on, set from smp_cpu_id()
                                      * (0 = the primary). Initialized in
@@ -161,7 +161,7 @@ process_t *process_registry_head(void);
  * name, state=PROCESS_RUNNING, kill_requested=false, prepended on the registry.
  * It is NEVER enqueued in the scheduler (no scheduler_add_process, no kernel
  * stack), so ready_head stays NULL and the dormant scheduler is not woken - the
- * Scope B boot-stability invariant. The caller frees it (process_unregister +
+ * synchronous-run boot-stability invariant. The caller frees it (process_unregister +
  * kfree) after the run. Returns the PCB, or NULL on allocation failure.
  */
 process_t *user_proc_register(const char *name);
@@ -170,7 +170,7 @@ process_t *user_proc_register(const char *name);
  * Mint a REGISTRY-ONLY system marker PCB (heap PCB, fresh pid, name,
  * state=PROCESS_RUNNING, prepended on the registry, NOT enqueued so ready_head
  * stays NULL). Like user_proc_register but killable=false, so process_kill
- * refuses it - the same as idle (PID 1) and kernel threads (WR-03). Used by the
+ * refuses it - the same as idle (PID 1) and kernel threads. Used by the
  * SMP per-core idle markers ("idle/cpuN") so they appear in ps without being
  * arm-able by `kill`. Returns the PCB, or NULL on allocation failure.
  */
@@ -182,9 +182,9 @@ process_t *process_register_system(const char *name);
  * Returns 0 if a KILLABLE process with that pid is registered, negative
  * otherwise. A PCB is killable only if user_proc_register minted it (an EL0
  * run); idle (PID 1) and kernel threads are not killable, so `kill 1` is refused
- * rather than reported as a misleading success (WR-03). Scope B: this reaps a
+ * rather than reported as a misleading success. This reaps a
  * synchronously-running EL0 program at its next svc, NOT a concurrently-running
- * one (no preemption until Phase 7).
+ * one (there is no cross-core preemption).
  */
 int process_kill(uint64_t pid);
 
