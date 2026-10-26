@@ -5,7 +5,7 @@
  *              the VFS into a size-bounded kmalloc buffer, validates it, maps
  *              each PT_LOAD into the single EL0 window (USER_TEXT for PF_X,
  *              USER_DATA otherwise) with BSS zero-fill and a computed EL0 stack,
- *              and enters EL0 at e_entry by reusing the Phase 5 usermode_enter
+ *              and enters EL0 at e_entry by reusing the usermode_enter
  *              one-shot. The two accessors expose the mapped-window extent for
  *              the syscall user-pointer bound check.
  * ============================================================================ */
