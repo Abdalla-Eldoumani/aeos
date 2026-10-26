@@ -6,9 +6,8 @@
  *              PT_LOAD/PF_* constants, and the elf_validate header gate. No libc
  *              types: the integer widths come from <aeos/types.h>. Layouts were
  *              verified byte-for-byte against a real aarch64-linux-gnu-gcc
- *              -nostdlib -static build (06-RESEARCH.md Q2). Static ELF64 only -
- *              dynamic linking / relocations are out of scope (locked PROJECT
- *              decision), which is why elf_validate rejects ET_DYN/PIE.
+ *              -nostdlib -static build. Static ELF64 only - dynamic linking /
+ *              relocations are out of scope by design, which is why elf_validate rejects ET_DYN/PIE.
  * ============================================================================ */
 
 #ifndef AEOS_ELF_H
@@ -96,12 +95,12 @@ _Static_assert(sizeof(Elf64_Phdr) == 56, "Elf64_Phdr must be 56 bytes");
  * Validate the ELF64 header in [buf, buf+size) as a loadable static AArch64
  * executable. Returns 0 iff buf is a little-endian AArch64 ET_EXEC ELF64 whose
  * program-header table lies wholly inside [buf, buf+size); returns a negative
- * error code (and logs the reason) otherwise. This is the criterion-1 gate:
+ * error code (and logs the reason) otherwise. This is the reject gate:
  * a malformed or non-ELF file produces a clean error, never a fault - the
  * function never dereferences any address outside [buf, buf+size).
  *
  * ET_DYN/PIE is rejected at the e_type check: this kernel applies no
- * relocations (locked PROJECT decision), so only an absolute-addressed ET_EXEC
+ * relocations (a deliberate scope limit), so only an absolute-addressed ET_EXEC
  * is loadable. Per-segment bounds (p_offset/p_filesz/p_vaddr) are the loader's
  * job, not this header gate.
  */
