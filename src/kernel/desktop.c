@@ -15,7 +15,7 @@
 #include <aeos/theme.h>
 
 /* Color scheme. Hover and selected variants reuse the same theme token until
- * Phase 3 redoes decorations. ICON_SELECTED_BG and ICON_LABEL_BG are alpha
+ * decorations are redone. ICON_SELECTED_BG and ICON_LABEL_BG are alpha
  * overlays that the framebuffer draws as opaque today; keep them as one-offs. */
 #define DESKTOP_BG_TOP      THEME_BG_GRADIENT_TOP
 #define DESKTOP_BG_BOTTOM   THEME_BG_GRADIENT_BOT
