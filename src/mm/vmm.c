@@ -183,7 +183,7 @@ void vmm_init(void)
 }
 
 /**
- * Enable the MMU + caches on a SECONDARY core against the SHARED Phase-4 tables.
+ * Enable the MMU + caches on a SECONDARY core against the SHARED boot-time tables.
  * The L1 tables were built once by the primary's vmm_init (vmm_build_tables);
  * this does NOT rebuild them - it only programs this core's MAIR/TCR/TTBR0/TTBR1
  * and sets SCTLR.M|C|I, reusing the global ttbr0_l1/ttbr1_l1 statics. The shared
@@ -235,7 +235,7 @@ void vmm_map_user_page(uint64_t uva, uint64_t pa, user_prot_t prot)
     user_l3[l3i] = leaf;
 
     /* Publish the new entries to the live table walk and make the I-side
-     * coherent for a compile-time code page (RESEARCH Pitfalls 5 and 6). */
+     * coherent for a compile-time code page. */
     __asm__ volatile("dsb ish" ::: "memory");
     __asm__ volatile("tlbi vmalle1");
     __asm__ volatile("dsb ish" ::: "memory");
