@@ -23,7 +23,7 @@
 /* --------------------------------------------------------------------------
  * Byte-swap helpers (integer-only; safe under -mgeneral-regs-only).
  * Network order is big-endian. On this little-endian kernel htons==ntohs and
- * htonl==ntohl (the swap is its own inverse). Probe-validated (08-RESEARCH Q3).
+ * htonl==ntohl (the swap is its own inverse). Validated against a live probe.
  * -------------------------------------------------------------------------- */
 static inline uint16_t htons(uint16_t v) { return (uint16_t)((v << 8) | (v >> 8)); }
 static inline uint16_t ntohs(uint16_t v) { return htons(v); }
@@ -35,7 +35,7 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 
 /* --------------------------------------------------------------------------
  * Ethernet header (14 bytes). off 0 dst MAC[6], off 6 src MAC[6],
- * off 12 ethertype[2 BE]. (08-RESEARCH Q3, lines 271-277.)
+ * off 12 ethertype[2 BE].
  * -------------------------------------------------------------------------- */
 #define ETH_HDR_LEN        14
 #define ETH_OFF_DST        0
@@ -47,7 +47,6 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 /* --------------------------------------------------------------------------
  * ARP packet (28 bytes, after the 14-byte Ethernet header). Offsets are
  * relative to the start of the ARP packet (i.e. ETH_HDR_LEN + ARP_OFF_*).
- * (08-RESEARCH Q3, lines 279-292.)
  * -------------------------------------------------------------------------- */
 #define ARP_LEN            28
 #define ARP_OFF_HTYPE      0   /* [2 BE] = 1 (Ethernet) */
@@ -70,7 +69,7 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 
 /* --------------------------------------------------------------------------
  * IPv4 header (20 bytes). Offsets relative to the IPv4 header start
- * (ETH_HDR_LEN + IP_OFF_*). (08-RESEARCH Q3, lines 298-311.)
+ * (ETH_HDR_LEN + IP_OFF_*).
  * -------------------------------------------------------------------------- */
 #define IP_HDR_MIN_LEN     20
 #define IP_OFF_VER_IHL     0   /* [1] = 0x45 (v4, IHL 5 = 20 bytes) */
@@ -89,7 +88,7 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 
 /* --------------------------------------------------------------------------
  * ICMP echo (8-byte header + optional payload). Offsets relative to the ICMP
- * message start. (08-RESEARCH Q3, lines 314-323.)
+ * message start.
  * -------------------------------------------------------------------------- */
 #define ICMP_HDR_LEN       8
 #define ICMP_OFF_TYPE      0   /* [1] 8=echo request, 0=echo reply */
@@ -101,7 +100,7 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
 #define ICMP_TYPE_ECHO_REPLY   0
 
 /* --------------------------------------------------------------------------
- * Static config (slirp defaults, VERIFIED 08-RESEARCH). 4-byte arrays in wire
+ * Static config (slirp defaults, verified against QEMU). 4-byte arrays in wire
  * (network) byte order so they drop straight into the packet via memcpy - no
  * htonl needed at the call site. Our IP 10.0.2.15, gateway 10.0.2.2.
  * -------------------------------------------------------------------------- */
@@ -120,7 +119,7 @@ static inline uint32_t ntohl(uint32_t v) { return htonl(v); }
  * 16-bit one's-complement Internet checksum over data[0..len). Pure (no I/O).
  * Used for BOTH the 20-byte IPv4 header and the ICMP message. Zero the
  * checksum field first, compute over the span, store the result big-endian.
- * Probe-validated (08-RESEARCH Q3, lines 328-338).
+ * Validated against a live probe.
  * @return the folded one's-complement of the 16-bit big-endian sum.
  */
 uint16_t inet_csum(const uint8_t *data, uint32_t len);
@@ -128,7 +127,7 @@ uint16_t inet_csum(const uint8_t *data, uint32_t len);
 /**
  * Build an ARP reply (opcode 2) for a valid inbound ARP request. PURE: no
  * net_tx, no logging - so a headless unit test can feed a synthetic request
- * and assert the exact reply bytes (the non-vacuous criterion-2 proof, since
+ * and assert the exact reply bytes (the non-vacuous ARP proof, since
  * slirp never ARPs the guest).
  *
  * Writes a 42-byte reply into out only when the request is well-formed AND its
@@ -154,7 +153,7 @@ int arp_build_reply(const uint8_t *req, uint32_t req_len,
  * (len >= 14 before the ethertype; ARP len >= 42; IPv4 IHL and total-length
  * validated against len before indexing the ICMP payload) and DROPS any
  * malformed/short/inconsistent frame - it never reads past len or faults
- * (reaching the WM loop dominates; T-08-07). Answers an ARP request for our IP,
+ * (reaching the WM loop dominates). Answers an ARP request for our IP,
  * answers an ICMP echo request to our IP, and matches an ICMP echo reply
  * against the pending ping (under net_lock).
  * @param frame the received Ethernet frame (no virtio_net_hdr).
@@ -187,7 +186,7 @@ int icmp_send_echo(const uint8_t dst_ip[4], const uint8_t dst_mac[6],
 /**
  * The bounded ping driver. Resolves the next hop, sends one ICMP echo with a
  * fresh id+seq (set under net_lock), and bounded-polls for the matching reply.
- * Never infinite. The shell command / boot demo / tests (08-04) call this.
+ * Never infinite. The shell command / boot demo / tests call this.
  * @param dst_ip the 4-byte destination IP (wire order).
  * @return 0 on a matched echo reply; -1 on timeout, ARP failure, or no device.
  */
