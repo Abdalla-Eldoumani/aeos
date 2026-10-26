@@ -6,7 +6,6 @@ AEOS is an educational kernel. Patches that improve clarity, correctness, or cov
 
 - Read `README.md` for what AEOS is and the bounded form each subsystem takes (MMU on, an EL0/EL1 boundary running a loaded ELF, SMP cores online, a minimal ARP/ICMP net stack, a PL031 wall clock) plus the honest remaining gaps (no kernel W^X, no cross-core preemptive scheduling, no TCP/UDP/DHCP/DNS).
 - Read `ARCHITECTURE.md` for boot order, subsystem dependencies, and the runtime data flows, then the matching section under `docs/` for a code walkthrough of the area you plan to touch. These are the authoritative in-repo references.
-- If your checkout has the maintainer's local `CLAUDE.md` aids (repo root and per-subdirectory; these are kept out of git by design), read the relevant ones too - they restate the same architecture with extra implementation notes.
 
 ## Build and test
 
@@ -74,15 +73,15 @@ Open the PNGs and check the rendered result. This is how the redraw, clock, and 
 ## Documentation
 
 - If you change behaviour described in `docs/<section>/README.md` or `implementation.md`, update both in the same change.
-- If you add a `.c` file to a subsystem, add it to the table in that subsystem's `CLAUDE.md`.
-- If you change the boot order in `kernel_main`, mirror that in `src/kernel/CLAUDE.md`.
+- If you add a `.c` file to a subsystem, list it in that subsystem's `docs/` section.
+- If you change the boot order in `kernel_main`, mirror that in the Boot order section of `ARCHITECTURE.md`.
 
 ## Pull request checklist
 
 - [ ] `make` succeeds clean.
 - [ ] `make test` reports `39 PASSED, 0 FAILED` (or however many scenarios exist when you read this).
 - [ ] No new `TODO`/`FIXME`/`XXX`/`HACK` markers.
-- [ ] Subsystem `CLAUDE.md` and matching `docs/` section reflect the change.
+- [ ] The matching `docs/` section (and `ARCHITECTURE.md`, if boot order or data flow changed) reflects the change.
 - [ ] Commit history is one-file-per-commit, lowercase imperative messages.
 - [ ] Any UI change verified visually: `scripts/screenshot.py` capture (or a manual `make run-ramfb` run) with the screenshot in the PR description.
 
