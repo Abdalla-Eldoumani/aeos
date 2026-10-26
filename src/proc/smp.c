@@ -76,7 +76,7 @@ static process_t sec_stress_pcb[SMP_MAX_CPUS];
 /* The stress loop, run by each stress secondary AFTER vmm_enable_secondary and
  * AFTER smp_stress_go is observed. Hammers the self-locking runqueue mutators on
  * THIS core's dummy PCB and bumps the shared counter. The mutators take
- * scheduler_lock internally (Task 1) - do NOT take it here, or this self-
+ * scheduler_lock internally - do NOT take it here, or this self-
  * deadlocks. The counter bump takes its own stress_counter_lock. */
 static void smp_stress_loop(uint32_t id)
 {
