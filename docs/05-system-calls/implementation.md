@@ -47,7 +47,7 @@ uint64_t syscall_handler(uint64_t syscall_num,
 }
 ```
 
-**Called From**: Two places. (1) EL1 kernel code directly, with the syscall number as the first argument - a plain C call, no trap. (2) The EL0 svc path: `el0_aarch64_sync` (VBAR+0x400) decodes `svc` from EL0, pulls the number (x8) and arguments (x0-x5) from the saved register frame, and calls this same handler. The two paths share the dispatcher; the EL0 path was added in Phase 5 alongside the direct-call path.
+**Called From**: Two places. (1) EL1 kernel code directly, with the syscall number as the first argument - a plain C call, no trap. (2) The EL0 svc path: `el0_aarch64_sync` (VBAR+0x400) decodes `svc` from EL0, pulls the number (x8) and arguments (x0-x5) from the saved register frame, and calls this same handler. The two paths share the dispatcher; the EL0 path was added alongside the direct-call path.
 
 **Arguments**: On the EL1 direct-call path they are passed straight through as C function arguments. On the EL0 path the vector reads them from the saved register frame before the call. Either way a bad number (out of range or an unimplemented slot whose table entry is NULL) returns -1.
 
@@ -200,7 +200,7 @@ svc #0                  /* Trigger SVC exception */
 
 ### Exception Vector Handling (the EL0 svc path)
 
-The EL0 svc path is live as of Phase 5. `el0_aarch64_sync` in `vectors.asm` recognizes the SVC class in ESR_EL1, pulls the syscall number (x8) and arguments (x0-x5) from the saved register frame, calls `syscall_handler`, and stores the return value back into the saved x0 before `eret`. The `eret` returns to EL0 because the saved SPSR is EL0t. The EL1 direct-call path still reaches `syscall_handler` without a trap; the two coexist.
+The EL0 svc path is live. `el0_aarch64_sync` in `vectors.asm` recognizes the SVC class in ESR_EL1, pulls the syscall number (x8) and arguments (x0-x5) from the saved register frame, calls `syscall_handler`, and stores the return value back into the saved x0 before `eret`. The `eret` returns to EL0 because the saved SPSR is EL0t. The EL1 direct-call path still reaches `syscall_handler` without a trap; the two coexist.
 
 ## Error Handling
 
