@@ -50,11 +50,11 @@ static bool     net_initialized = false;
 static net_virtqueue_t rxq;
 static net_virtqueue_t txq;
 
-/* The Phase 7 spinlock_t over the shared net-path state: the RX/TX queue
- * indices (avail->idx, last_used) updated by net_tx and net_rx_poll. 08-04
- * updates the pending-ping state under this SAME lock so the queue cursors and
- * the ping result move atomically. This is the FEAT-05 criterion-4 discharge -
- * the real Phase 7 lock on the shared state, NOT an ad hoc disable-IRQ scheme.
+/* The spinlock_t over the shared net-path state: the RX/TX queue
+ * indices (avail->idx, last_used) updated by net_tx and net_rx_poll. The net
+ * stack updates the pending-ping state under this SAME lock so the queue cursors and
+ * the ping result move atomically. This is the FEAT-05 lock requirement - the
+ * real SMP spinlock on the shared state, NOT an ad hoc disable-IRQ scheme.
  * Uncontended in production (only the primary drives the net path), but the
  * lock is present and correct on the weak memory model. */
 static spinlock_t net_lock = SPINLOCK_INIT;
@@ -62,7 +62,7 @@ static spinlock_t net_lock = SPINLOCK_INIT;
 /* Format one byte as exactly two lowercase hex digits. kprintf's print_uint
  * ignores the width modifier, so "%02x" does NOT zero-pad here (a 0x00 byte
  * would print as a single "0"); build the MAC string by hand to keep it
- * unambiguous on serial (criterion 1). */
+ * unambiguous on serial. */
 static void byte_to_hex2(uint8_t b, char *out)
 {
     static const char digits[] = "0123456789abcdef";
@@ -272,7 +272,7 @@ int virtio_net_init(void)
  * completion wait is kept INSIDE the lock for simplicity - the single reused TX
  * buffer means a second net_tx must not start before this one drains, and the
  * wait is bounded so the held region is finite. A wrong queue setup times out
- * (returns -1) rather than hanging (T-08-05). */
+ * (returns -1) rather than hanging. */
 int net_tx(const uint8_t *frame, uint32_t len)
 {
     if (!net_initialized) {
@@ -304,7 +304,7 @@ int net_tx(const uint8_t *frame, uint32_t len)
 
     virtio_mmio_write32(net_mmio, VIRTIO_MMIO_QUEUE_NOTIFY, 1);  /* queue 1 = TX */
 
-    /* Bounded wait for completion - never an unbounded loop (T-08-05). */
+    /* Bounded wait for completion - never an unbounded loop. */
     uint32_t to = 1000000;
     while (txq.used->idx == txq.last_used && --to) {
         __asm__ volatile("dmb ish" ::: "memory");
@@ -325,7 +325,7 @@ int net_tx(const uint8_t *frame, uint32_t len)
 /* Poll for one received frame. net_lock guards the short queue work (read the
  * used ring, pop one element, copy the frame, re-post the descriptor). Never
  * blocks - returns 0 when nothing is ready. The wlen >= NET_HDR_LEN guard and
- * the copy cap are the T-08-03 mitigation: a malformed/short inbound frame must
+ * the copy cap are the oversized-frame mitigation: a malformed/short inbound frame must
  * not be read past or overrun the caller buffer - reaching the WM loop
  * dominates, a dropped frame is fine, a fault is not. The device cannot split a
  * frame across descriptors because MRG_RXBUF was not negotiated. */
@@ -406,9 +406,9 @@ void virtio_net_get_mac(uint8_t out_mac[6])
     }
 }
 
-/* The net_lock seam for src/net/ (08-03). The stack updates its pending-ping
+/* The net_lock seam for src/net/. The stack updates its pending-ping
  * state (the awaited id+seq, got_reply, the cached gateway MAC) under this SAME
- * lock so that state and the queue cursors move atomically (criterion 4). The
+ * lock so that state and the queue cursors move atomically. The
  * lock is non-recursive: a holder must release before any net_tx/net_rx_poll
  * (those re-take it) or it self-deadlocks. */
 void net_lock_acquire(void)
