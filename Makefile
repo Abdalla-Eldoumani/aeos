@@ -114,8 +114,8 @@ ALL_OBJECTS = $(ASM_OBJECTS) $(C_OBJECTS)
 # single-PT_LOAD ET_EXEC ELF at VA 0x80000000, then wrapped by objcopy into a
 # linkable object exporting _binary_hello_elf_start/_end/_size. The object is
 # appended to ALL_OBJECTS so both kernel link passes resolve those symbols; the
-# Phase 6 loader parses these embedded ELF bytes. See the rules below the
-# compile rules and tests/user/CLAUDE.md for the build-id/flat-binary pitfalls.
+# ELF loader parses these embedded ELF bytes. See the rules below the
+# compile rules for the build-id/flat-binary pitfalls.
 USER_TEST_SRC = tests/user/hello.S
 USER_TEST_LD  = tests/user/user.ld
 USER_TEST_ELF = $(BUILD_DIR)/hello.elf
@@ -302,9 +302,9 @@ run-nopersist: all
 		-netdev user,id=net0 -device virtio-net-device,netdev=net0 \
 		-nographic -kernel $(KERNEL_ELF)
 
-# virtio-net device (the FEAT-05 target). RESEARCH Q1: slirp gives the guest
+# virtio-net device (the FEAT-05 target). slirp gives the guest
 # 10.0.2.15 and a gateway 10.0.2.2 that answers ARP and ICMP echo. The same flags
-# go on the test: line so the criterion-3 ICMP round-trip scenario has a NIC.
+# go on the test: line so the ICMP round-trip scenario has a NIC.
 
 # Run with graphics (using VirtIO GPU MMIO device)
 run-ramfb: all
@@ -451,7 +451,7 @@ test:
 # ----------------------------------------------------------------------------
 # Security audit gate
 #
-# `make audit` is the phase gate for the 13.B security work. It runs the full
+# `make audit` is the gate for the security hardening work. It runs the full
 # test suite (which now includes the security smoke scenarios in test_runner.c)
 # and then asserts that every expected sec_* scenario reported PASS in
 # build/test.log. The second check is what makes audit distinct from test: if a
