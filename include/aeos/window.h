@@ -17,7 +17,7 @@
 /* Window title maximum length */
 #define WINDOW_TITLE_MAX 64
 
-/* Window decoration sizes (Phase 3 design tokens) */
+/* Window decoration sizes (design tokens) */
 #define WINDOW_TITLE_HEIGHT     24
 #define WINDOW_BORDER_WIDTH     1
 #define WINDOW_CLOSE_BTN_SIZE   18
