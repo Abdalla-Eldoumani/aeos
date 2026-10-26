@@ -253,7 +253,7 @@ void window_draw_shadow(window_t *win)
         return;
     }
     /* 2-px-tall dark band offset 1 px below the window. Cheap stand-in for
-     * the three-rect alpha shadow described in DESIGN_SYSTEM.md, which needs
+     * the intended three-rect alpha shadow, which needs
      * per-pixel alpha blending we don't yet have. */
     fb_fill_rect(win->x + 2,
                  win->y + (int32_t)win->height + 1,
