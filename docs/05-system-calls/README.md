@@ -2,7 +2,7 @@
 
 ## Overview
 
-This section implements the system call interface for AEOS. There are two entry paths into one dispatcher. Kernel code at EL1 makes a syscall as a direct C call (no privilege boundary to cross). An EL0 program makes a syscall the architected way, with an `svc` trap into the EL1 vector table; that path was added in Phase 5 (FEAT-02) and is exercised by both a one-shot in-kernel payload and, since Phase 6, a static ELF loaded from a file and run at EL0 (see Section 04).
+This section implements the system call interface for AEOS. There are two entry paths into one dispatcher. Kernel code at EL1 makes a syscall as a direct C call (no privilege boundary to cross). An EL0 program makes a syscall the architected way, with an `svc` trap into the EL1 vector table; that path was added with the EL0 boundary (FEAT-02) and is exercised by both a one-shot in-kernel payload and, since the ELF loader (FEAT-03), a static ELF loaded from a file and run at EL0 (see Section 04).
 
 ## Implementation Approach
 
@@ -24,7 +24,7 @@ The instruction traps to `el0_aarch64_sync` (`src/interrupts/vectors.asm`, VBAR+
 
 The privilege boundary is real. The EL0 code page is mapped EL0-accessible while kernel pages stay EL0-no-access, so EL0 faults on any kernel address; a privileged instruction from EL0 (`msr daifset`) traps to EL1 with ESR EC=0x18 rather than executing. `make test` proves both directions: `test_el0_roundtrip` (the getpid+exit round trip returns control to the kernel and the getpid svc is observed) and `test_el0_priv_trap` (the privileged-instruction trap is EC=0x18).
 
-Phase 6 carried this from a one-shot payload to a loaded program: a static ELF loaded from a file and run at EL0, with per-segment W^X for the loaded code (executable segments are mapped read-only at EL0, see Section 02) and a user-pointer bound check in `sys_write`. The remaining gap is that a loaded program runs synchronously, one at a time, not as a process the scheduler time-shares.
+The ELF loader carried this from a one-shot payload to a loaded program: a static ELF loaded from a file and run at EL0, with per-segment W^X for the loaded code (executable segments are mapped read-only at EL0, see Section 02) and a user-pointer bound check in `sys_write`. The remaining gap is that a loaded program runs synchronously, one at a time, not as a process the scheduler time-shares.
 
 ## Components
 
