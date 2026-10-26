@@ -1,10 +1,10 @@
 # Changelog
 
-All notable changes to AEOS, in reverse chronological order. The project predates this changelog; the entries below cover work tracked under the `.agent/TASKS.md` phase plan.
+All notable changes to AEOS, in reverse chronological order. The project predates this changelog; the entries below cover the work since it was started.
 
-## [Phase 13] - 2026-05
+## [Kernel foundations] - 2026-05
 
-The Phase 13 milestone added the kernel foundations AEOS previously did without: an MMU, an EL0/EL1 boundary running a loaded ELF, an SMP bringup, a network stack, and a wall clock. Each shipped in a bounded form documented in `ARCHITECTURE.md` and the subsystem `CLAUDE.md` files, and each is proven headlessly by the in-kernel test suite (now 39 scenarios, gated by `make audit`).
+This release added the kernel foundations AEOS previously did without: an MMU, an EL0/EL1 boundary running a loaded ELF, an SMP bringup, a network stack, and a wall clock. Each shipped in a bounded form documented in `ARCHITECTURE.md` and the `docs/` walkthroughs, and each is proven headlessly by the in-kernel test suite (now 39 scenarios, gated by `make audit`).
 
 ### Added
 - **FEAT-01 MMU.** `src/mm/vmm.c` builds an identity map (RAM as a Normal-WB cacheable 1 GB block, the low MMIO window as a Device-nGnRnE block) plus a TTBR1 high-half alias of RAM, and enables the MMU and caches from `kernel_main`. The kernel runs identity-mapped; writing the framebuffer still lights pixels. There is no kernel-wide W^X (one RWX block); per-segment W^X exists only for loaded EL0 code.
@@ -15,10 +15,10 @@ The Phase 13 milestone added the kernel foundations AEOS previously did without:
 - **FEAT-06 PL031 clock, DWARF backtrace, persistent history, `ps` accounting.** A PL031 RTC driver reads the host wall-clock seconds and drives the taskbar clock (replacing the uptime counter) and the boot log. The backtrace resolves `file:line` from a build-time DWARF line table. Shell history persists across reboots through semihosting (`aeos_hist.img`, validated on load). `ps` shows real per-tick `TICKS` and per-PCB `HEAP_B` columns.
 
 ### Changed
-- `README.md`, `SECURITY.md`, and the `docs/` walkthroughs updated to describe the shipped kernel: the Scope, Known Limitations, Core OS Features, and Shell Commands (now 30) blocks in `README.md`; the threat posture and the invariant sign-off table (extended with the Phase 6-9 invariants) in `SECURITY.md`.
-- `ARCHITECTURE.md` added during the milestone as the one-page boot-order and data-flow model.
+- `README.md`, `SECURITY.md`, and the `docs/` walkthroughs updated to describe the shipped kernel: the Scope, Known Limitations, Core OS Features, and Shell Commands (now 30) blocks in `README.md`; the threat posture and the invariant sign-off table (extended with the loader, SMP, net, clock, and history invariants) in `SECURITY.md`.
+- `ARCHITECTURE.md` added in this release as the one-page boot-order and data-flow model.
 
-### Fixed (post-milestone GUI polish, 2026-05-26)
+### Fixed (GUI polish after the release, 2026-05-26)
 - **30 FPS compositor (BUG-20).** `wm_run` now re-renders the desktop on every 33 ms frame tick, not only on input events. Previously content re-rendered only when an event set `needs_redraw`, so between events the loop re-pushed a stale framebuffer: the taskbar clock froze and a freshly opened window stayed on the first frame of its slide-in (a blank rectangle) until a drag. The clock, animations, and live widgets now advance without input.
 - **Absolute pointer.** `run-ramfb` attaches `virtio-tablet-device` instead of the relative `virtio-mouse-device`, so the guest cursor tracks the host pointer and a click lands on the row aimed at (the driver already had the scaled `EV_ABS` path).
 - **Local-time clock.** `run-ramfb` runs QEMU with `-rtc base=localtime`, so the taskbar shows the host's local time (with DST) rather than UTC; the kernel labels read "local". A bare-metal kernel has no IP/GPS geolocation, so the host timezone is the automatic source. `pl031_format_hms` stays timezone-agnostic.
@@ -37,7 +37,7 @@ The Phase 13 milestone added the kernel foundations AEOS previously did without:
 - README "Scope" section that states what AEOS deliberately is not (no MMU, no userspace, no SMP, no networking, no RTC).
 - Tetris GUI app: 10x20 board, seven tetrominoes with proper colors, gravity that scales with level, soft/hard drop, pause, R-to-restart, high score persisted to `/tetris_high.bin` (validated by magic, version, and checksum).
 - Shell pipes: `ls | grep foo` and friends, with a 256-byte ring buffer per stage and a `kprintf_output_hook` swap that keeps existing built-ins working unchanged.
-- In-kernel test runner under `make TEST=1`: 13 scenarios across PMM, heap, VFS, processes, shell parser, symbol lookup, and framebuffer (since grown to 39 across the Phase 13 subsystems; see the Phase 13 section above).
+- In-kernel test runner under `make TEST=1`: 13 scenarios across PMM, heap, VFS, processes, shell parser, symbol lookup, and framebuffer (since grown to 39 across the kernel-foundations subsystems; see the section above).
 - Symbol-aware kernel backtrace: two-pass build embeds a sorted address-to-name table; `handle_exception` resolves PC and walks the FP chain to print named frames.
 - Crash-log persistence: 4 KB ring buffer of recent kprintf output, dumped to `build/crash.log` via semihosting on panic.
 
