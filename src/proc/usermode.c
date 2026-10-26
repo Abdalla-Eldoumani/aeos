@@ -112,7 +112,7 @@ __asm__(
     ".size usermode_return, .-usermode_return\n");
 
 /* ============================================================================
- * EL0 payloads (RESEARCH Pattern 4 / Code Examples). Defined as module-level
+ * EL0 payloads. Defined as module-level
  * asm rather than naked C functions: AArch64 GCC ignores __attribute__((naked))
  * on a function with a body (-Werror=attributes), so the payloads live in their
  * own .text block with no compiler-generated prologue. usermode_run_payload
@@ -159,7 +159,7 @@ extern void el0_roundtrip(void);
 extern void el0_priv_trap(void);
 
 /* ============================================================================
- * Map + enter helper. One place owns the RESEARCH Pattern 4 mapping recipe so
+ * Map + enter helper. One place owns the payload mapping recipe so
  * both callers (test_runner, main.c) stay thin.
  * ============================================================================ */
 
