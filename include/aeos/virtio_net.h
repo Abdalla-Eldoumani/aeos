@@ -86,8 +86,8 @@ void virtio_net_get_mac(uint8_t out_mac[6]);
 /**
  * Acquire / release the driver's net_lock - the SAME file-static spinlock that
  * net_tx and net_rx_poll take internally over the queue cursors. The src/net/
- * stack (08-03) updates its pending-ping state through this pair so that state
- * and the queue cursors move under one lock (FEAT-05 criterion 4) - NOT a
+ * stack updates its pending-ping state through this pair so that state
+ * and the queue cursors move under one lock (FEAT-05) - NOT a
  * second ad hoc lock.
  *
  * The lock is NON-RECURSIVE (spin_lock blocks forever on a held lock). A caller
