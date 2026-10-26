@@ -21,7 +21,7 @@
 #define EDITOR_MAX_SEARCH   64
 #define EDITOR_MAX_EX_CMD   64
 
-/* Editor-internal key codes were here until Phase 7.3. They collided with
+/* Editor-internal key codes used to live here. They collided with
  * the GUI keycode_t enum in event.h, so they moved into editor.c as
  * file-local EDIT_KEY_* defines. The shared GUI keycodes in event.h are
  * what apps (Notes etc.) should use. */
