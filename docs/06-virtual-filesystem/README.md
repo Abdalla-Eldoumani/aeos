@@ -76,7 +76,7 @@ The `refcount` field tracks live references to an inode:
 
 This is the fix for the unlink-while-open use-after-free: deleting a name no longer frees data that an open descriptor still points at.
 
-`vfs_open` issues a `dmb ish` (inner-shareable release) barrier between the `refcount++` and handing the inode to `vfs_fd_alloc`, so the count store is ordered before the inode becomes reachable through the fd table. The barrier covers `-O2` reordering today; a full atomic refcount is deferred to the SMP phase and is not present yet.
+`vfs_open` issues a `dmb ish` (inner-shareable release) barrier between the `refcount++` and handing the inode to `vfs_fd_alloc`, so the count store is ordered before the inode becomes reachable through the fd table. The barrier covers `-O2` reordering today; a full atomic refcount is deferred to later SMP work and is not present yet.
 
 `vfs_fd_table_destroy` walks `table->fds` directly rather than going through `vfs_close`, so it can tear down any process's table, not only the current process's.
 
