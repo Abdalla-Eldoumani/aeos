@@ -86,7 +86,7 @@ process_t *process_create(process_entry_t entry_point, const char *name)
     proc->next = NULL;
     proc->reg_next = NULL;
     proc->kill_requested = false;
-    proc->killable = false;   /* idle and kernel threads cannot be killed (WR-03) */
+    proc->killable = false;   /* idle and kernel threads cannot be killed */
     proc->last_cpu = smp_cpu_id();   /* the creating core (the primary at boot) */
 
     /* Set up initial context. Stack grows downward, so SP points to top */
@@ -234,7 +234,7 @@ process_t *process_registry_head(void)
 /**
  * Mint a registry-only PCB for a synchronous EL0 run. It is NEVER enqueued in
  * the scheduler: no scheduler_add_process and no kernel stack, so ready_head
- * stays NULL and the dormant scheduler is not woken (Scope B). The synchronous
+ * stays NULL and the dormant scheduler is not woken. The synchronous
  * EL0 run uses the current SP_EL1, so no per-process kernel stack is needed.
  * The caller frees the PCB (process_unregister + kfree) after the run.
  */
@@ -254,7 +254,7 @@ process_t *user_proc_register(const char *name)
     proc->name[PROCESS_NAME_MAX - 1] = '\0';
     proc->state = PROCESS_RUNNING;
     proc->kill_requested = false;
-    proc->killable = true;   /* an EL0 run is the only thing process_kill may arm (WR-03) */
+    proc->killable = true;   /* an EL0 run is the only thing process_kill may arm */
     proc->next = NULL;
     proc->last_cpu = smp_cpu_id();   /* the registering core (the primary at boot) */
     /* Registry-only PCB: no stack, no fd table, so the attributable bytes are
@@ -271,7 +271,7 @@ process_t *user_proc_register(const char *name)
  * Mint a REGISTRY-ONLY system marker PCB. Mirrors user_proc_register (heap PCB,
  * fresh pid, name, state=PROCESS_RUNNING, prepended on the registry, NOT
  * enqueued so ready_head stays NULL) but sets killable=false so process_kill
- * refuses it - like idle and the kernel threads (WR-03). The per-core SMP idle
+ * refuses it - like idle and the kernel threads. The per-core SMP idle
  * markers ("idle/cpuN") use this so they show in ps without being arm-able by
  * `kill`. The caller (smp.c, on the primary) owns the lifetime; these markers
  * persist for the kernel's life. Returns the PCB, or NULL on allocation failure.
@@ -292,7 +292,7 @@ process_t *process_register_system(const char *name)
     proc->name[PROCESS_NAME_MAX - 1] = '\0';
     proc->state = PROCESS_RUNNING;
     proc->kill_requested = false;
-    proc->killable = false;   /* a system marker is not killable (WR-03) */
+    proc->killable = false;   /* a system marker is not killable */
     proc->next = NULL;
     /* The registering core (the primary). For the per-core idle markers
      * (idle/cpuN) the caller smp_register_core_idle OVERRIDES this to the
@@ -314,8 +314,7 @@ process_t *process_register_system(const char *name)
  * next EL0 syscall boundary via the loader's current_user_proc pointer. Refuses
  * a non-killable PCB (idle PID 1, kernel threads): only a user_proc_register'd
  * EL0 run sets killable, so `kill 1` cannot arm a stale flag on a long-lived
- * system PCB and the shell reports failure instead of a misleading success
- * (WR-03).
+ * system PCB and the shell reports failure instead of a misleading success.
  */
 int process_kill(uint64_t pid)
 {
