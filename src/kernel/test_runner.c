@@ -39,7 +39,7 @@
 #include <aeos/virtio_net.h>
 #include <aeos/pl031.h>
 
-/* The embedded EL0 test binary (tests/user/hello.elf, 06-02), linked into the
+/* The embedded EL0 test binary (tests/user/hello.elf), linked into the
  * TEST kernel via ALL_OBJECTS. The ELF-load scenario writes these bytes into the
  * test ramfs and execs them; the loaded binary writes "hello, EL0!\n\0\0" (14
  * bytes - mov x2, #14) then exits. */
@@ -47,7 +47,7 @@ extern const unsigned char _binary_hello_elf_start[];
 extern const unsigned char _binary_hello_elf_end[];
 
 /* The byte length the embedded binary passes to sys_write (mov x2, #14 in
- * tests/user/hello.S; confirmed by the 06-02 readelf/objdump). test_elf_load_run
+ * tests/user/hello.S; confirmed by readelf/objdump). test_elf_load_run
  * asserts the observed EL0 write length equals this exactly. */
 #define HELLO_WRITE_LEN 14
 
@@ -213,7 +213,7 @@ static void test_spinlock_uncontended(void)
     test_pass("spinlock_uncontended");
 }
 
-/* test_kprintf_ring_panic_bypass: the automated gate for the subtlest Phase 7
+/* test_kprintf_ring_panic_bypass: the automated gate for the subtlest SMP
  * safety claim - a panic never deadlocks on the kprintf ring lock under SMP.
  *
  * The TEST_BUILD seam kprintf_test_panic_bypass_returns (kprintf.c) takes
@@ -368,10 +368,10 @@ static void test_process_create_remove(void)
     }
 
     /* Capture the pid before freeing so the registry-clean check below does not
-     * read the freed PCB (a use-after-free, the same class of bug 06-04 fixed). */
+     * read the freed PCB (a use-after-free, a class of bug fixed before). */
     uint64_t freed_pid = p->pid;
 
-    /* Detach from BOTH lists. process_create (06-04) auto-registers the PCB on
+    /* Detach from BOTH lists. process_create auto-registers the PCB on
      * the enumeration registry in addition to the scheduler run queue, so
      * scheduler_remove_process alone would leave a DETACHED PCB on registry_head
      * (and a later scenario walking the registry would touch freed memory once
@@ -392,7 +392,7 @@ static void test_process_create_remove(void)
 }
 
 /* ============================================================================
- * ps accounting scenario (criterion 4): the two columns cmd_ps surfaces are
+ * ps accounting scenario: the two columns cmd_ps surfaces are
  * REAL, non-vacuous.
  *
  *   (a) TICKS: scheduler_tick increments scheduler.current->total_time
@@ -449,7 +449,7 @@ static void test_ps_accounting(void)
         return;
     }
 
-    /* Tear down the created PCB only (the 06-04/06-05 teardown). The test only
+    /* Tear down the created PCB only (the standard teardown). The test only
      * READ scheduler.current via the accessor - it ticked the idle PCB's counter
      * forward by N, which is benign (idle's total_time legitimately advances). */
     scheduler_remove_process(p);
@@ -561,7 +561,7 @@ static void test_symbol_lookup_below_first(void)
 }
 
 /* ============================================================================
- * line_lookup scenario (FEAT-06 criterion 2 part 2)
+ * line_lookup scenario (FEAT-06)
  *
  * Non-vacuous proof of the addr->file:line lookup over the embedded DWARF line
  * table: resolve a KNOWN text address (&backtrace, which lives in backtrace.c
@@ -598,7 +598,7 @@ static void test_backtrace_fileline(void)
 }
 
 /* ============================================================================
- * PL031 RTC formatter scenario (FEAT-06 criterion 1)
+ * PL031 RTC formatter scenario (FEAT-06)
  *
  * Pure-function proof of the seconds->H:M:S formatter: no device, no MMIO (it
  * calls pl031_format_hms directly with literals), so it runs in the TEST kernel
@@ -639,7 +639,7 @@ static void test_pl031_time_format(void)
 }
 
 /* ============================================================================
- * Shell history persistence scenario (FEAT-06 criterion 3)
+ * Shell history persistence scenario (FEAT-06)
  *
  * Non-vacuous single-boot proof that the history ring survives the semihosting
  * round trip: seed N known lines, history_save() to aeos_hist.img, CLEAR the
@@ -711,8 +711,8 @@ static void test_history_persist_roundtrip(void)
 
 /* ============================================================================
  * MMU scenarios — the in-suite proof that the TEST kernel_main enabled the MMU
- * (vmm_init runs before any scenario). test_mmu_enabled is FEAT-01 criterion 1
- * (SCTLR_EL1.M readable and set); test_mmu_ttbr1_alias is criterion 3 (the high-
+ * (vmm_init runs before any scenario). test_mmu_enabled is FEAT-01
+ * (SCTLR_EL1.M readable and set); test_mmu_ttbr1_alias proves the high-
  * half alias of the kernel image reads identically to the identity pointer).
  * ============================================================================ */
 
@@ -757,11 +757,11 @@ static void test_mmu_ttbr1_alias(void)
 
 static void test_el0_roundtrip(void)
 {
-    /* FEAT-02 criteria 2 + 3. The payload runs at EL0, issues svc #0 for
+    /* FEAT-02. The payload runs at EL0, issues svc #0 for
      * SYS_GETPID (the observable side effect) then svc #0 for SYS_EXIT, whose
      * one-shot branch calls usermode_return - restoring the kernel context and
      * ret'ing back HERE, into the line after usermode_run_payload. If the exit
-     * had instead eret'd back to EL0 (RESEARCH Pitfall 4), control would never
+     * had instead eret'd back to EL0, control would never
      * return and the runner would hang to the 30s timeout = a detected failure. */
     volatile int returned = 0;
     uint64_t expected_pid = process_current()->pid;
@@ -787,9 +787,9 @@ static void test_el0_roundtrip(void)
 
 static void test_el0_priv_trap(void)
 {
-    /* FEAT-02 criterion 1. The payload executes msr daifset, #2 at EL0. With
+    /* FEAT-02. The payload executes msr daifset, #2 at EL0. With
      * SCTLR_EL1.UMA=0 (the reset value the kernel never changes) that traps to
-     * EL1 with ESR EC=0x18 (RESEARCH Pitfall 3), landing in el0_aarch64_sync's
+     * EL1 with ESR EC=0x18, landing in el0_aarch64_sync's
      * non-SVC branch -> handle_el0_sync. With the capture armed, the seam records
      * the EC and usermode_returns instead of halting, so control comes back here. */
     usermode_arm_trap_capture();
@@ -814,7 +814,7 @@ static void test_el0_priv_trap(void)
 }
 
 /* ============================================================================
- * ELF loader scenarios (FEAT-03, criteria 1/2/3 headlessly). These run INSIDE
+ * ELF loader scenarios (FEAT-03 headlessly). These run INSIDE
  * the VFS suite block (a ramfs must be mounted): the load-run scenario writes
  * the embedded ELF into ramfs and execs it, the reject scenario feeds malformed
  * inputs to elf_validate + elf_exec_file. No GIC/timer in the runner, so the
@@ -832,7 +832,7 @@ static void test_elf_load_run(void)
      * here - a hang would trip the 30s timeout = a detected failure), and (c)
      * the TEST write observable shows the binary's write reached sys_write_impl
      * with length 14. A vacuous pass (e.g. the exec never ran) would leave the
-     * observable length at 0, so the equality is a tight criterion-3 proof. */
+     * observable length at 0, so the equality is a tight proof. */
     int fd = vfs_open("/hello", O_CREAT | O_WRONLY | O_TRUNC, 0755);
     if (fd < 0) {
         test_fail("elf_load_run", "could not create /hello");
@@ -935,7 +935,7 @@ static void le_store(unsigned char *buf, uint64_t off, uint64_t val, unsigned wi
 
 static void test_elf_reject_oversized_segment(void)
 {
-    /* CR-01/CR-03 regression: a header-valid ELF whose single PT_LOAD declares a
+    /* Regression test: a header-valid ELF whose single PT_LOAD declares a
      * p_memsz that spills past the mapped 2MB L3 ceiling (USER_L3_TOP =
      * 0x80200000) must be REJECTED with a negative return and NO fault, and must
      * leak no pmm pages. Before the fix, exec.c validated against the 1GB window
@@ -1022,15 +1022,16 @@ static void test_elf_reject_oversized_segment(void)
 }
 
 /* ============================================================================
- * Process kill-reap scenario (FEAT-03 criterion 4, headless, NON-VACUOUS).
+ * Process kill-reap scenario (FEAT-03, headless, NON-VACUOUS).
  *
- * Proves the kill mechanism the way Scope B can prove it without a display:
+ * Proves the kill mechanism the way a synchronous run can prove it without a
+ * display:
  * register a user process via user_proc_register, point the loader's
  * current_user_proc at it (the TEST hook), arm its kill flag via
  * process_kill(thatpid) - by PID, NOT process_current()->pid (idle's pid, a
  * tautology) - then enter EL0 with the getpid-first roundtrip payload. The kill
  * seam sits at the TOP of syscall_handler and reads current_user_proc->
- * kill_requested BEFORE the syscall dispatches (06-04), so the kill-armed run is
+ * kill_requested BEFORE the syscall dispatches, so the kill-armed run is
  * reaped via usermode_return at the first svc BEFORE sys_getpid_impl runs.
  *
  * The non-vacuous distinguisher: pre-set the getpid observable to a sentinel a
@@ -1055,7 +1056,7 @@ static void test_process_kill_reap(void)
     }
     uint64_t kpid = p->pid;
 
-    /* The ps-visibility half of criterion 4: the registered PCB is enumerable on
+    /* The ps-visibility half: the registered PCB is enumerable on
      * the registry by pid (what cmd_ps walks) before we reap it. */
     bool found = false;
     for (process_t *it = process_registry_head(); it != NULL; it = it->reg_next) {
@@ -1182,7 +1183,7 @@ static void test_fb_init_and_fill(void)
 /* ============================================================================
  * Security smoke scenarios
  *
- * One scenario per testable invariant the SECURITY_AUDIT closed in 13.B. Each
+ * One scenario per testable invariant the security hardening pass closed. Each
  * follows the guard-and-early-return shape above. `make audit` asserts these
  * PASS lines are present so a future change that drops one fails the gate.
  * The scenarios are non-destructive: the stack-guard one restores the sentinel
@@ -1246,7 +1247,7 @@ static void test_sec_double_free_after_merge(void)
      *
      * The genuine mid-block pointer is `b`: its header at A+104 is strictly
      * interior to `c`'s allocation. merge_free_blocks zeroed that absorbed
-     * header's magic during the fold (WR-02), so kfree(b) reads a cleared magic
+     * header's magic during the fold, so kfree(b) reads a cleared magic
      * and is refused via the bad-magic path deterministically -- no reliance on
      * uninitialized reuse bytes happening to differ from HEAP_MAGIC. */
     heap_stats_t before, after;
@@ -1335,17 +1336,17 @@ static void test_sec_editor_growth_overflow(void)
 }
 
 /* ============================================================================
- * SMP cross-core runqueue lock proof (criterion 2)
+ * SMP cross-core runqueue lock proof
  * ============================================================================ */
 
 /* Iterations each stress secondary runs. Matched to the validated probe shape
- * (the 07-RESEARCH 30000/30000 proof used 10000 per core). The proof is the
+ * (the earlier 30000/30000 probe used 10000 per core). The proof is the
  * EXACT equality counter == online * ITERS, not the magnitude. */
 #define SMP_STRESS_ITERS 10000
 
 static void test_smp_runqueue_lock(void)
 {
-    /* The GENUINELY cross-core proof of the runqueue lock (criterion 2). Brings
+    /* The GENUINELY cross-core proof of the runqueue lock. Brings
      * up REAL secondaries that concurrently hammer scheduler_add_process /
      * scheduler_remove_process (the self-locking mutators) on their own per-core
      * dummy PCBs AND bump a shared lock-protected counter. We assert:
@@ -1413,10 +1414,10 @@ static void test_smp_runqueue_lock(void)
 }
 
 /* ============================================================================
- * SMP last_cpu (criterion 3): the PCB records the core a process last ran on.
+ * SMP last_cpu: the PCB records the core a process last ran on.
  *
  * The NON-VACUOUS proof that last_cpu is actually WRITTEN at the run/touch
- * point (process_set_current), using the 06-05 sentinel technique. On the
+ * point (process_set_current), using a sentinel. On the
  * primary smp_cpu_id() is 0 and a field left uninitialized could also be 0, so
  * "last_cpu == 0" would be vacuous. Instead we pre-set last_cpu to a SENTINEL
  * (0xFFu) that smp_cpu_id() can never return (cpu ids are 0..3 on this flat
@@ -1481,7 +1482,7 @@ static void test_smp_last_cpu(void)
     }
 
     /* Restore the current process the one-shot started with, then tear down the
-     * test PCB (detach from both lists, free) - the 06-04/06-05 teardown. */
+     * test PCB (detach from both lists, free) - the standard teardown. */
     process_set_current(saved_current);
     scheduler_remove_process(p);
     process_unregister(p);
@@ -1493,12 +1494,12 @@ static void test_smp_last_cpu(void)
 /* ============================================================================
  * Network scenarios (FEAT-05). Three headless, non-vacuous scenarios:
  *
- *   test_net_arp_reply  - the criterion-2 builder unit. PURE: feeds the
- *     side-effect-free arp_build_reply (08-03) a synthetic inbound ARP request
+ *   test_net_arp_reply  - the ARP builder unit. PURE: feeds the
+ *     side-effect-free arp_build_reply a synthetic inbound ARP request
  *     for OUR_IP and asserts the exact 42-byte reply, plus asserts it returns
  *     WITHOUT writing for a wrong-target-IP and a too-short input (so a blind
  *     builder fails). No device needed.
- *   test_net_icmp_echo  - the criterion-3 live round trip to the slirp gateway
+ *   test_net_icmp_echo  - the live ICMP round trip to the slirp gateway
  *     10.0.2.2. Drives net_ping (which arp_resolves, sends one echo, and
  *     bounded-polls for the matching type-0 reply via a got_reply sentinel that
  *     flips only on a matched id+seq). test_fails on no device / no reply, so a
@@ -1509,7 +1510,7 @@ static void test_smp_last_cpu(void)
  *     net_rx_dispatch a battery of out-of-spec frames and asserts each call
  *     RETURNS (drops) without faulting - reaching test_pass after the whole
  *     battery is the proof the bounds guards hold (a missing guard faults
- *     first). Mirrors the Phase 6 oversized-segment regression scenario. No
+ *     first). Mirrors the ELF loader's oversized-segment regression scenario. No
  *     device needed (synthetic buffers).
  *
  * None is a sec_* scenario; the five sec_* lines stay the audit gate.
@@ -1554,7 +1555,7 @@ static void test_net_arp_reply(void)
         return;
     }
 
-    /* Assert the exact reply bytes (08-03 contract). Ethernet: dst = the
+    /* Assert the exact reply bytes (the builder contract). Ethernet: dst = the
      * requester's MAC, src = our MAC, type = ARP. */
     if (memcmp(out + ETH_OFF_DST, req_mac, MAC_ADDR_LEN) != 0) {
         test_fail("net_arp_reply", "reply Ethernet dst != requester MAC");
@@ -1625,8 +1626,8 @@ static void test_net_arp_reply(void)
 static void test_net_icmp_echo(void)
 {
     /* The device must be present - the -netdev flag on the test QEMU line
-     * (08-01) makes this real. A missing device is a REAL failure, not a skip:
-     * a silent skip would make criterion 3 vacuous. virtio_net_init is
+     * makes this real. A missing device is a REAL failure, not a skip:
+     * a silent skip would make the round trip vacuous. virtio_net_init is
      * idempotent if a prior scenario inited it; init here so the scenario is
      * self-contained. */
     if (virtio_net_init() < 0 || !virtio_net_available()) {
@@ -1634,8 +1635,8 @@ static void test_net_icmp_echo(void)
         return;
     }
 
-    /* Corroborate criterion 2 with the LIVE resolve (the builder unit is the
-     * primary c2 proof): the gateway ARP must resolve within the bound. */
+    /* Corroborate the ARP proof with the LIVE resolve (the builder unit is the
+     * primary proof): the gateway ARP must resolve within the bound. */
     uint8_t gw_ip[IP_ADDR_LEN] = { GW_IP_0, GW_IP_1, GW_IP_2, GW_IP_3 };
     uint8_t gw_mac[MAC_ADDR_LEN];
     if (arp_resolve(gw_ip, gw_mac) != 0) {
@@ -1645,7 +1646,7 @@ static void test_net_icmp_echo(void)
 
     /* The round trip. net_ping arms a pending-ping (id+seq) under net_lock,
      * sends one ICMP echo, and bounded-polls for a type-0 reply matching id+seq
-     * via a got_reply sentinel that flips ONLY on the match (08-03). It returns
+     * via a got_reply sentinel that flips ONLY on the match. It returns
      * 0 on the matched reply, -1 on the bounded-wait expiry. A silent no-op
      * (wrong queue setup, wrong header size, wrong checksum) leaves the sentinel
      * clear and net_ping returns -1 - so this assert is non-vacuous. */
@@ -1664,7 +1665,7 @@ static void test_net_rx_bounds(void)
      * RETURNS (drops) without faulting. A missing bounds guard would read past
      * the buffer and fault, so control would never reach the test_pass below -
      * reaching it after the whole battery IS the proof the guards hold. Frames
-     * 1-3 drop before any answer logic; frame 4 (CR-01) reaches the echo
+     * 1-3 drop before any answer logic; frame 4 reaches the echo
      * responder and is dropped there by the total_length-underflow guard before
      * the ~4 GB inet_csum over-read. (No device needed - synthetic buffers.) */
     volatile int returned = 0;
@@ -1701,7 +1702,7 @@ static void test_net_rx_bounds(void)
     ip[IP_OFF_PROTO]         = IP_PROTO_ICMP;
     net_rx_dispatch(f3, sizeof(f3));
 
-    /* 4. The UNDERSIZED-underflow case (CR-01): ver/IHL = 0x4F (IHL=15 ->
+    /* 4. The UNDERSIZED-underflow case: ver/IHL = 0x4F (IHL=15 ->
      * ihl_bytes=60) but total_length = 20 (< ihl_bytes), an ICMP type-8 echo
      * request at offset 14+60=74, frame length 82. Every upper-bound guard
      * passes (14+20 <= 82, 14+60 <= 82, 14+60+8 <= 82), so control reaches the
@@ -1709,7 +1710,7 @@ static void test_net_rx_bounds(void)
      * guard, icmp_len = 20 - 60 underflows to ~0xFFFFFFD8, reply_len wraps back
      * under the sizeof(reply) drop, and inet_csum walks ~4 GB off the stack and
      * FAULTS. With the guard the frame drops here. This is the non-vacuous gate
-     * for CR-01 (the oversized frame 3 never reaches the subtraction). */
+     * for the underflow (the oversized frame 3 never reaches the subtraction). */
     uint8_t f4[ETH_HDR_LEN + 60 + ICMP_HDR_LEN];   /* 14 + ihl_bytes(60) + 8 = 82 */
     memset(f4, 0, sizeof(f4));
     f4[ETH_OFF_ETHERTYPE]     = (uint8_t)(ETHERTYPE_IPV4 >> 8);
@@ -1823,14 +1824,14 @@ void kernel_main(void *dtb_addr)
 
     test_process_create_remove();
 
-    /* FEAT-06 criterion 4 (headless, non-vacuous). The two ps columns are real:
+    /* FEAT-06 (headless, non-vacuous). The two ps columns are real:
      * the ticks half asserts scheduler.current->total_time (via the TEST_BUILD
      * scheduler_test_current accessor) advances by N per N scheduler_tick calls;
      * the heap_bytes half asserts a created PCB's attributed bytes. NOT a sec_*
      * scenario. */
     test_ps_accounting();
 
-    /* FEAT-03 criterion 4 (headless, non-vacuous). Runs after the ELF scenarios:
+    /* FEAT-03 (headless, non-vacuous). Runs after the ELF scenarios:
      * register a user process, arm its kill flag by pid, enter EL0, and assert
      * the seam reaped the run at the first svc before getpid dispatched. */
     test_process_kill_reap();
@@ -1845,7 +1846,7 @@ void kernel_main(void *dtb_addr)
     test_net_icmp_echo();
     test_net_rx_bounds();
 
-    /* FEAT-04 criterion 2 (the headline). Brings up REAL secondaries that
+    /* FEAT-04 (the headline). Brings up REAL secondaries that
      * concurrently hammer the self-locking runqueue mutators + a shared counter,
      * and asserts the counter is exact (zero lost updates) AND the runqueue stays
      * well-formed - the genuinely cross-core proof of the runqueue lock. Runs
@@ -1853,7 +1854,7 @@ void kernel_main(void *dtb_addr)
      * the remaining scenarios run on the primary undisturbed. */
     test_smp_runqueue_lock();
 
-    /* FEAT-04 criterion 3 (the ps CPU column data half). Proves last_cpu is
+    /* FEAT-04 (the ps CPU column data half). Proves last_cpu is
      * WRITTEN at the run/touch point non-vacuously: a 0xFF sentinel (a value
      * smp_cpu_id() can never return) is overwritten by process_set_current. NOT
      * a sec_* scenario. */
@@ -1866,18 +1867,18 @@ void kernel_main(void *dtb_addr)
     test_symbol_lookup_known();
     test_symbol_lookup_below_first();
 
-    /* FEAT-06 criterion 2 part 2 (the addr->file:line backtrace lookup, headless
+    /* FEAT-06 (the addr->file:line backtrace lookup, headless
      * non-vacuous). Resolves &backtrace through line_lookup and asserts a real
      * .c:line form; an empty/wrong table fails. NOT a sec_* scenario. */
     test_backtrace_fileline();
 
-    /* FEAT-06 criterion 1 (the PL031 wall-clock formatter, headless non-vacuous).
+    /* FEAT-06 (the PL031 wall-clock formatter, headless non-vacuous).
      * Pure function over literals - asserts the seconds->H:M:S breakdown for
      * 0/3661/86399/86400. The live RTC read is proven on the production boot
      * serial. NOT a sec_* scenario. */
     test_pl031_time_format();
 
-    /* FEAT-06 criterion 3 (persistent shell history, headless non-vacuous). Seeds
+    /* FEAT-06 (persistent shell history, headless non-vacuous). Seeds
      * the ring, saves to aeos_hist.img over semihosting, clears the in-memory
      * ring, loads it back, and asserts the restored count + exact bytes match.
      * NOT a sec_* scenario. */
