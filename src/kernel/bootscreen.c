@@ -23,7 +23,7 @@
 #define BOOT_PROGRESS_FG    THEME_ACCENT
 #define BOOT_BORDER_COLOR   THEME_BORDER_SUBTLE
 
-/* Screen layout constants. Vertical positions follow DESIGN_SYSTEM.md
+/* Screen layout constants. Vertical positions follow the boot-screen design
  * (logo 25% from top, progress bar 55% from top, footer 8 px from bottom). */
 #define SCREEN_WIDTH        640
 #define SCREEN_HEIGHT       480
