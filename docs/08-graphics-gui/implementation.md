@@ -4,7 +4,7 @@
 > `src/kernel/{wm,window,desktop,notify,bootscreen}.c` is the source of
 > truth. Newer additions (deferred close animation, toast compositing,
 > Alt+Tab focus cycle, `wm_request_redraw` for live-content apps) are
-> documented in the in-tree `CLAUDE.md` files.
+> documented in the comments in those source files.
 
 ## Boot Screen Implementation
 
