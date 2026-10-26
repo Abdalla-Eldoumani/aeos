@@ -3,7 +3,7 @@
  * File: src/proc/smp.c
  * Description: PSCI CPU_ON secondary bringup - the HVC wrapper, the per-core
  *              stacks + online flags, and the bounded-handshake smp_init loop
- *              (built and linked, NOT yet called from any boot path; Phase 7)
+ *              (wired into kernel_main)
  * ============================================================================ */
 
 #include <aeos/smp.h>
@@ -18,7 +18,7 @@
 #include <aeos/interrupts.h> /* exception_vector_table - the shared vector base */
 
 /* ===========================================================================
- * TEST_BUILD cross-core runqueue stress (criterion 2 proof). Compiled in ONLY
+ * TEST_BUILD cross-core runqueue stress (the runqueue-lock proof). Compiled in ONLY
  * under TEST=1; production smp.c carries none of this. It brings up REAL
  * secondaries that concurrently hammer the self-locking runqueue mutators
  * (scheduler_add_process/scheduler_remove_process from scheduler.c) on their own
@@ -163,13 +163,13 @@ uint32_t smp_is_online(uint32_t cpu)
 }
 
 /* Register a per-core idle marker on the enumeration registry so ps lists a
- * process for each online core (criterion-3 visibility; the CPU column itself is
- * a later plan). The marker is a registry-only PCB ("idle/cpuN", killable=false)
+ * process for each online core (per-core visibility; the CPU column itself is
+ * filled from last_cpu). The marker is a registry-only PCB ("idle/cpuN", killable=false)
  * minted by process_register_system: NOT enqueued (no scheduler_add_process), so
  * ready_head stays NULL and the dormant scheduler is never woken.
  *
  * CALLED FROM THE PRIMARY ONLY. process_register_system calls kmalloc, and the
- * heap is not thread-safe (src/mm/CLAUDE.md); a secondary calling it would race
+ * heap is not thread-safe; a secondary calling it would race
  * the free list. So the primary registers each online core's idle marker on its
  * behalf - the secondary itself only parks in wfe and never allocates. This is
  * the bounded-scope simplification: the per-core idle is a registry marker the
@@ -205,11 +205,11 @@ void smp_register_core_idle(uint32_t cpu)
  * "core is up", never fatal). Then spin BOUNDEDLY on the core's online flag -
  * at most SMP_BRINGUP_TIMEOUT iterations, isb each pass - and on timeout log
  * and CONTINUE. The primary ALWAYS returns and reaches the WM loop; a stuck or
- * failed secondary must never hang it (the dominant non-negotiable). NOT called
- * from any boot path in this plan - a later plan wires it into kernel_main.
+ * failed secondary must never hang it (the dominant non-negotiable). Called
+ * from kernel_main.
  *
  * Note: rc and the cpu id are printed with %d/%u (cast to int/uint32_t). The
- * kernel's snprintf/klog have NO l/ll length modifier (src/lib/CLAUDE.md), so
+ * kernel's snprintf/klog have NO l/ll length modifier, so
  * %ld would print a literal "%ld" and consume no argument; the PSCI codes are
  * small negatives that fit an int, so %d renders them correctly with sign. */
 void smp_init(void)
@@ -246,7 +246,7 @@ void smp_init(void)
 }
 
 /* The real secondary_entry now lives in src/boot/secondary.asm (the per-core
- * EL2->EL1 drop + SP set + bl secondary_main); the 07-03 placeholder asm block
+ * EL2->EL1 drop + SP set + bl secondary_main); the earlier placeholder asm block
  * that defined it here was removed. smp_init takes &secondary_entry as the
  * CPU_ON entry PA; the symbol is resolved by secondary.asm at link time. */
 
@@ -261,9 +261,8 @@ void smp_init(void)
  * handler table rather than a stale/garbage vector. The SPSR set in the asm drop
  * keeps DAIF masked across the drop, so no IRQ arrives before VBAR is set.
  *
- * NOT reached on the production boot path in this plan: smp_init is not called
- * from kernel_main yet (a later plan wires it). So the per-core machinery here
- * links but does not run, and the -smp 4 boot is unchanged (no "smp:" markers). */
+ * Reached on the production boot path: kernel_main calls smp_init, so the
+ * -smp 4 boot prints one "smp:" online marker per secondary. */
 void secondary_main(void)
 {
     uint32_t id = smp_cpu_id();
@@ -318,7 +317,7 @@ void secondary_main(void)
     __asm__ volatile("msr vbar_el1, %0" :: "r"((uint64_t)&exception_vector_table));
     __asm__ volatile("isb");
 
-    /* Enable the MMU + caches against the SHARED Phase-4 tables (the primary
+    /* Enable the MMU + caches against the SHARED boot-time tables (the primary
      * built them once during its own MMU init; this does NOT rebuild them). */
     vmm_enable_secondary();
 
@@ -330,8 +329,7 @@ void secondary_main(void)
     /* One-shot online marker, one line per secondary (NOT looped). Under SMP
      * this kprintf races the primary's, and the race IS live now (smp_init is
      * wired into kernel_main and the secondaries do come up). It is correctly
-     * serialized one layer down: putchar takes kprintf_ring_lock (shipped in
-     * this phase) across the ring store, so concurrent secondary prints cannot
+     * serialized one layer down: putchar takes kprintf_ring_lock across the ring store, so concurrent secondary prints cannot
      * splice a torn line against the primary - which is why the markers are
      * coherent under -smp 4. No additional lock is needed at this call site;
      * kprintf owns the serialization. */
@@ -442,7 +440,7 @@ void smp_run_runqueue_stress(uint32_t iters, uint32_t *out_online, uint64_t *out
      * writers' release (the last unlocker's stlr) via this acquire. Snapshot
      * once into a local and use it for both the log and the out-param so they
      * agree and the cross-core read is soundly serialized, not just ordered by
-     * the WR-01 dmb ish. */
+     * the dmb ish. */
     spin_lock(&stress_counter_lock);
     uint64_t counter_snapshot = smp_stress_counter;
     spin_unlock(&stress_counter_lock);
