@@ -48,7 +48,7 @@ extern char __stack_top;
 extern uint64_t exception_counters[16];
 
 /* The embedded static ELF (objcopy -I binary) - the EL0 test binary built and
- * embedded in 06-02. Written into ramfs at /hello in test_vfs, then run once on
+ * embedded by the Makefile. Written into ramfs at /hello in test_vfs, then run once on
  * the boot path via elf_exec_file to prove the loader on the production boot. */
 extern const unsigned char _binary_hello_elf_start[];
 extern const unsigned char _binary_hello_elf_end[];
@@ -435,8 +435,8 @@ void kernel_main(void *dtb_addr)
      * markers smp_init registers), and BEFORE the EL0 block / shell / GUI branch.
      * Each online core gets a registry-only "idle/cpuN" PCB so ps lists cores
      * 0..3; the secondaries then park in wfe (no scheduled work). The "smp: core
-     * N online" prints race the primary's kprintf - the ring lock that orders
-     * them is a later plan; the markers are still present. */
+     * N online" prints race the primary's kprintf; the kprintf ring lock
+     * serializes them, so each marker line stays whole. */
     kprintf("\n");
     klog_info("Bringing up secondary cores...");
     smp_init();
@@ -446,21 +446,21 @@ void kernel_main(void *dtb_addr)
     klog_info("Initializing System Calls...");
     syscall_init();
 
-    /* Probe the virtio-net device (FEAT-05 criterion 1: MAC on serial). It is
-     * POLL-DRIVEN (no IRQ): the criterion-3 TEST kernel_main has no GIC/timer,
+    /* Probe the virtio-net device (FEAT-05: MAC on serial). It is
+     * POLL-DRIVEN (no IRQ): the ICMP-scenario TEST kernel_main has no GIC/timer,
      * so an IRQ path could never fire there, and the same poll path runs in
      * both builds. Placed after the heap + scheduler are up so its DMA ring
      * buffers can be kmalloc'd; ordering vs gic/timer is irrelevant because no
      * IRQ is registered. A -1 (no device) is logged and IGNORED so a boot
      * WITHOUT -device virtio-net-device (e.g. text-mode make run) still reaches
-     * the WM loop - the dominant non-negotiable (RESEARCH Q2 + Pitfall 6). */
+     * the WM loop - the dominant non-negotiable. */
     kprintf("\n");
     klog_info("Probing virtio-net (FEAT-05)...");
     if (virtio_net_init() < 0) {
         klog_warn("virtio-net absent - continuing boot");
     }
 
-    /* Probe the PL031 RTC (FEAT-06 criterion 1) and log the wall-clock time on
+    /* Probe the PL031 RTC (FEAT-06) and log the wall-clock time on
      * serial. A single stateless read of an already-mapped register: no failure
      * path hangs, so this log-and-continues like the other device probes and the
      * kernel always reaches the WM loop. The taskbar reads the same RTC each
@@ -483,7 +483,7 @@ void kernel_main(void *dtb_addr)
      * the loader reads /hello from ramfs, maps its PT_LOAD segments into the EL0
      * window, and enters EL0 at e_entry; the binary writes "hello, EL0!" via
      * sys_write and exits, control returns here, and boot continues. This is the
-     * criterion-3 production proof. A negative return is logged and IGNORED -
+     * loader's production proof. A negative return is logged and IGNORED -
      * never halt - because reaching the WM loop is the dominant non-negotiable.
      * One-shot only, never looped. The embedded ELF is written into ramfs here
      * (not in test_vfs) because vfs_open needs the idle process's fd table,
@@ -496,14 +496,14 @@ void kernel_main(void *dtb_addr)
         klog_warn("exec /hello failed (%d) - continuing boot", hello_rc);
     }
 
-    /* One-shot boot-path ICMP echo to the slirp gateway 10.0.2.2 (FEAT-05
-     * criterion 3, the production serial proof). Mirrors the /hello EL0 demo
+    /* One-shot boot-path ICMP echo to the slirp gateway 10.0.2.2 (FEAT-05,
+     * the production serial proof). Mirrors the /hello EL0 demo
      * above: it runs ONCE, never looped, and is gated on the device being
      * present so a normal boot is not spammy (the MAC line from the probe + this
      * one result line, no per-frame trace). net_ping is bounded internally, so
      * this cannot block; a timeout or an absent device is klog_warn'd and
-     * IGNORED so boot ALWAYS reaches the WM loop (T-08-12, the dominant
-     * non-negotiable - BOOT-GATE 2 proves the absent path). */
+     * IGNORED so boot ALWAYS reaches the WM loop (the dominant
+     * non-negotiable; a boot without the device proves the absent path). */
     kprintf("\n");
     if (virtio_net_available()) {
         uint8_t gw_ip[IP_ADDR_LEN] = { GW_IP_0, GW_IP_1, GW_IP_2, GW_IP_3 };
