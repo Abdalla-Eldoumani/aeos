@@ -44,7 +44,7 @@ This section implements the complete graphical desktop environment for AEOS. It 
 ### Window manager behavior
 
 The behavior below is the current compositor. The snippet sections under
-`docs/08-graphics-gui/implementation.md` and the in-tree `src/kernel/CLAUDE.md`
+`docs/08-graphics-gui/implementation.md` and the sources in `src/kernel/`
 carry the function-level detail.
 
 - **Redraw cadence.** `wm_run` sets `wm.needs_redraw` on every 33 ms frame tick,
