@@ -26,7 +26,7 @@ static struct {
     bool initialized;
 } scheduler;
 
-/* The runqueue lock (criterion 2). Guards the three mutators that touch the
+/* The runqueue lock. Guards the three mutators that touch the
  * shared ready_head/ready_tail - scheduler_add_process, scheduler_remove_process,
  * schedule - so two cores cannot interleave a list operation and corrupt the
  * queue. The discipline is UNLOCKED-INNER / LOCKED-PUBLIC: the actual list work
