@@ -15,7 +15,7 @@
 
 /* ============================================================================
  * Editor-internal key codes (file-local; collide with event.h's keycode_t
- * if exposed publicly, see Phase 7.3 commit history).
+ * if exposed publicly, see the commit history).
  * ============================================================================ */
 
 #define KEY_ESCAPE      27
