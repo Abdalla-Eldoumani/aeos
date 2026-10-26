@@ -1,8 +1,8 @@
 /* ============================================================================
  * AEOS - Abdalla's Educational Operating System
  * File: src/proc/elf.c
- * Description: elf_validate - the reject-never-fault static ELF64 header gate
- *              (criterion 1). It runs eight ordered checks over the in-kernel
+ * Description: elf_validate - the reject-never-fault static ELF64 header gate.
+ *              It runs eight ordered checks over the in-kernel
  *              file copy in [buf, buf+size) and returns a distinct negative code
  *              on the first failure, 0 on success. It reads only the fixed
  *              Elf64_Ehdr fields, all behind the size>=sizeof(Elf64_Ehdr) gate,
@@ -19,7 +19,7 @@
 /**
  * Validate the ELF64 header in [buf, buf+size) as a loadable static AArch64
  * ET_EXEC. Returns 0 on success, a distinct negative code on the first failed
- * check (the codes aid debugging and feed the criterion-1 reject diagnostics).
+ * check (the codes aid debugging and feed the reject diagnostics).
  * Never dereferences outside [buf, buf+size): the size gate precedes every
  * field read and there is no program-header access in this function at all.
  */
@@ -58,7 +58,7 @@ int elf_validate(const unsigned char *buf, uint64_t size)
     }
 
     /* 5. Type: ET_EXEC only. This is where ET_DYN/PIE is refused - no
-     *    relocation handling exists (locked PROJECT decision), so only an
+     *    relocation handling exists (a deliberate scope limit), so only an
      *    absolute-addressed executable is loadable. */
     if (e->e_type != ET_EXEC) {
         klog_error("elf_validate: not ET_EXEC (e_type=%u)", (unsigned)e->e_type);
